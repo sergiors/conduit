@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	"github.com/relay-mongodb/internal/streams"
+	"github.com/sergiors/relay/internal/streams"
 )
 
 // Destination defines the interface for event destinations

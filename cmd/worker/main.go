@@ -8,12 +8,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/relay-mongodb/internal/dispatch"
-	"github.com/relay-mongodb/internal/mongo"
-	"github.com/relay-mongodb/internal/redis"
-	"github.com/relay-mongodb/internal/retry"
-	"github.com/relay-mongodb/internal/tables"
-	"github.com/relay-mongodb/internal/watcher"
+	"github.com/sergiors/relay/internal/dispatch"
+	"github.com/sergiors/relay/internal/mongo"
+	"github.com/sergiors/relay/internal/redis"
+	"github.com/sergiors/relay/internal/retry"
+	"github.com/sergiors/relay/internal/tables"
+	"github.com/sergiors/relay/internal/watcher"
 )
 
 type Worker struct {

@@ -6,9 +6,9 @@ import (
 	"math"
 	"time"
 
-	"github.com/relay-mongodb/internal/dispatch"
-	"github.com/relay-mongodb/internal/redis"
-	"github.com/relay-mongodb/internal/streams"
+	"github.com/sergiors/relay/internal/dispatch"
+	"github.com/sergiors/relay/internal/redis"
+	"github.com/sergiors/relay/internal/streams"
 )
 
 // Processor handles retry queue processing with exponential backoff

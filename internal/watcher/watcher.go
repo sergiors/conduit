@@ -8,8 +8,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/relay-mongodb/internal/redis"
-	"github.com/relay-mongodb/internal/streams"
+	"github.com/sergiors/relay/internal/redis"
+	"github.com/sergiors/relay/internal/streams"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"

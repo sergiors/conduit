@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/relay-mongodb/internal/streams"
+	"github.com/sergiors/relay/internal/streams"
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/bson"
 )

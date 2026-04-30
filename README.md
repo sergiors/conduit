@@ -74,7 +74,7 @@ cdc:events:<tableName>           # Redis Streams output
 
 ```bash
 git clone <repository>
-cd relay-mongodb
+cd relay
 make init
 ```
 
@@ -380,7 +380,7 @@ make test-coverage     # Run tests with coverage report
 ## 📁 Project Structure
 
 ```
-relay-mongodb/
+relay/
 ├── cmd/
 │   ├── api/              # Control plane API (Gin)
 │   └── worker/           # Data plane CDC worker

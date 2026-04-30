@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/relay-mongodb/internal/redis"
-	"github.com/relay-mongodb/internal/streams"
-	"github.com/relay-mongodb/internal/tables"
+	"github.com/sergiors/relay/internal/redis"
+	"github.com/sergiors/relay/internal/streams"
+	"github.com/sergiors/relay/internal/tables"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 )

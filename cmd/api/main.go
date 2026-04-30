@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/relay-mongodb/internal/mongo"
-	"github.com/relay-mongodb/internal/tables"
+	"github.com/sergiors/relay/internal/mongo"
+	"github.com/sergiors/relay/internal/tables"
 )
 
 type Server struct {
