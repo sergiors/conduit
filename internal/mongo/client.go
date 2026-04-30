@@ -97,3 +97,45 @@ func (c *Client) EnableTableStreams(ctx context.Context, collection string, oldI
 	}
 	return cursor.Close(ctx)
 }
+
+// EnsureReplicaSet initializes a replica set if not already configured
+// This is required for change streams to work
+func (c *Client) EnsureReplicaSet(ctx context.Context) error {
+	// Check if already a replica set member
+	rsStatus, err := c.Client.Database("admin").RunCommand(ctx, bson.D{{Key: "replSetGetStatus", Value: 1}}).DecodeBytes()
+	if err == nil {
+		// Already initialized, check state
+		ok, _ := rsStatus.Lookup("ok").AsInt64OK()
+		if ok == 1 {
+			return nil // Replica set already running
+		}
+	}
+
+	// Not initialized, try to initiate
+	// Single-node replica set for development
+	config := bson.D{
+		{Key: "_id", Value: "rs0"},
+		{Key: "members", Value: bson.A{
+			bson.D{
+				{Key: "_id", Value: 0},
+				{Key: "host", Value: "localhost:27017"},
+			},
+		}},
+	}
+
+	cmd := bson.D{{Key: "replSetInitiate", Value: config}}
+	result := c.Client.Database("admin").RunCommand(ctx, cmd)
+
+	// Check result - "already initialized" is ok
+	var res bson.M
+	if err := result.Decode(&res); err != nil {
+		// Check if it's "already initialized" error
+		if err.Error() == "AlreadyInitialized" || err.Error() == "replSetInitiate already initiated" {
+			return nil
+		}
+		// For other errors, log but don't fail - might be running in replica set already
+		return fmt.Errorf("initiate replica set: %w", err)
+	}
+
+	return nil
+}

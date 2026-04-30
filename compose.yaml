@@ -9,16 +9,12 @@ services:
       - 27017:27017
     volumes:
       - ./.mongodb_data:/data/db
-      - ./scripts/init-replica-set.sh:/docker-entrypoint-initdb.d/init-replica-set.sh:ro
-    environment:
-      - MONGO_INITDB_ROOT_USERNAME=admin
-      - MONGO_INITDB_ROOT_PASSWORD=admin
     healthcheck:
       test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
       interval: 5s
       timeout: 5s
       retries: 5
-      start_period: 15s
+      start_period: 10s
 
   mongo-express:
     image: mongo-express

@@ -80,14 +80,32 @@ make init
 
 ### 2. Start Dependencies
 
-```bash
-# Using Docker Compose
-make docker-up
+**Option A: Full Stack (Recommended)**
 
-# Or manually:
-# MongoDB: mongodb://localhost:27017
-# Redis:   redis://localhost:6379
+Starts MongoDB, Redis, API, and Worker with a single command:
+
+```bash
+make docker-up-full
 ```
+
+**Option B: Dependencies Only**
+
+Starts only MongoDB and Redis (run API/Worker locally):
+
+```bash
+make docker-up
+```
+
+**Services:**
+| Service | URL | Description |
+|---------|-----|-------------|
+| API | http://localhost:8080 | REST control plane |
+| Worker | - | CDC data plane (background) |
+| MongoDB | mongodb://localhost:27017 | Database |
+| Redis | redis://localhost:6379 | State store |
+| Mongo Express | http://localhost:8081 | MongoDB UI (admin/admin) |
+
+**Note:** The API automatically initializes the MongoDB replica set on startup (required for change streams).
 
 ### 3. Configure Environment
 
@@ -134,7 +152,9 @@ REDIS_URI=redis://:password@localhost:6379/1
 REDIS_URI=rediss://:password@localhost:6380
 ```
 
-### 4. Run Services
+### 4. Run Services (Local Development)
+
+If you started only dependencies with `make docker-up`, run API and Worker locally:
 
 ```bash
 # Terminal 1: Start API server
@@ -143,6 +163,8 @@ make run-api
 # Terminal 2: Start Worker
 make run-worker
 ```
+
+The API will automatically initialize the MongoDB replica set on first start.
 
 ### 5. Create Your First Table
 
@@ -325,17 +347,34 @@ All critical paths covered:
 
 ## 🛠 Makefile Commands
 
+**Development:**
 ```bash
-make help          # Show all commands
-make init          # Initialize project
-make build         # Build all packages
-make run-api       # Run API server
-make run-worker    # Run Worker
-make test          # Run unit tests
-make docker-up     # Start MongoDB + Redis
-make fmt           # Format code
-make lint          # Run linter
-make clean         # Clean build artifacts
+make help              # Show all commands
+make init              # Initialize project
+make build             # Build all packages
+make run-api           # Run API server (local)
+make run-worker        # Run Worker (local)
+make fmt               # Format code
+make lint              # Run linter
+make clean             # Clean build artifacts
+```
+
+**Docker:**
+```bash
+make docker-up         # Start MongoDB + Redis only
+make docker-up-full    # Start full stack (API + Worker + MongoDB + Redis)
+make docker-build      # Build Docker images
+make docker-down       # Stop all containers
+make docker-logs       # View logs in real-time
+make docker-status     # Show container status
+make docker-clean      # Clean containers and volumes
+```
+
+**Testing:**
+```bash
+make test              # Run unit tests
+make test-integration  # Run integration tests
+make test-coverage     # Run tests with coverage report
 ```
 
 ## 📁 Project Structure
@@ -427,15 +466,14 @@ REDIS_URI=localhost:6379
 
 ### Change Streams Not Working
 
-Ensure MongoDB is running as a **replica set**:
+The API automatically initializes the replica set on startup. If you're running MongoDB locally:
 
 ```bash
 # Check replica set status
 mongosh --eval "rs.status()"
-
-# Initialize replica set (development only)
-mongosh --eval "rs.initiate()"
 ```
+
+If using Docker, the replica set is initialized automatically by the API on first start.
 
 ### Redis Connection Failed
 

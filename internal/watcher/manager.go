@@ -10,6 +10,7 @@ import (
 	"github.com/relay-mongodb/internal/redis"
 	"github.com/relay-mongodb/internal/streams"
 	"github.com/relay-mongodb/internal/tables"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
@@ -66,6 +67,11 @@ func NewManager(
 // Start initializes and starts all watchers
 func (m *Manager) Start(ctx context.Context) error {
 	log.Println("Watcher manager starting...")
+
+	// Wait for replica set to be ready (required for change streams)
+	if err := m.waitForReplicaSet(ctx); err != nil {
+		return fmt.Errorf("wait for replica set: %w", err)
+	}
 
 	// Initial load of stream-enabled tables
 	tables, err := m.tableStore.ListStreamEnabled(ctx)
@@ -304,4 +310,69 @@ type WatcherStats struct {
 	EventsProcessed int64
 	LastError       error
 	LastErrorTime   time.Time
+}
+
+// waitForReplicaSet waits until the replica set is ready
+func (m *Manager) waitForReplicaSet(ctx context.Context) error {
+	log.Println("Waiting for replica set to be ready...")
+
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	timeout := time.After(60 * time.Second)
+	attempts := 0
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timeout:
+			return fmt.Errorf("timeout waiting for replica set")
+		case <-ticker.C:
+			attempts++
+			err := m.checkReplicaSet(ctx)
+			if err == nil {
+				log.Printf("Replica set is ready (attempt %d)", attempts)
+				return nil
+			}
+			log.Printf("Replica set not ready yet (attempt %d): %v", attempts, err)
+		}
+	}
+}
+
+// checkReplicaSet checks if the replica set is initialized and ready
+func (m *Manager) checkReplicaSet(ctx context.Context) error {
+	cmd := bson.D{{Key: "replSetGetStatus", Value: 1}}
+	result := m.mongoClient.Database("admin").RunCommand(ctx, cmd)
+
+	var status struct {
+		Ok     int `bson:"ok"`
+		Set    string `bson:"set"`
+		Members []struct {
+			Name   string `bson:"name"`
+			State  int    `bson:"state"`
+			StateStr string `bson:"stateStr"`
+		} `bson:"members"`
+	}
+
+	if err := result.Decode(&status); err != nil {
+		return err
+	}
+
+	if status.Ok != 1 {
+		return fmt.Errorf("replica set status not ok")
+	}
+
+	if len(status.Members) == 0 {
+		return fmt.Errorf("no replica set members")
+	}
+
+	// Check if at least one member is PRIMARY (state 1)
+	for _, member := range status.Members {
+		if member.State == 1 { // PRIMARY
+			return nil
+		}
+	}
+
+	return fmt.Errorf("no primary member found")
 }

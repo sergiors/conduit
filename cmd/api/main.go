@@ -34,6 +34,11 @@ func NewServer() (*Server, error) {
 		return nil, err
 	}
 
+	// Ensure replica set is initialized (required for change streams)
+	if err := client.EnsureReplicaSet(ctx); err != nil {
+		log.Printf("Warning: Could not initialize replica set: %v (change streams may not work)", err)
+	}
+
 	store := tables.NewStore(client.Client, database)
 	if err := store.CreateIndex(ctx); err != nil {
 		return nil, err
