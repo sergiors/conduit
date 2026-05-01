@@ -136,7 +136,9 @@ func (w *Watcher) watchOnce(handler func(streams.StreamRecord) error) error {
 	opts.SetFullDocument(options.UpdateLookup)
 
 	if w.oldImage {
-		opts.SetFullDocumentBeforeChange(options.Required)
+		// Use WhenAvailable instead of Required to allow delete events
+		// Required would fail if pre-image is not found (e.g., for deletes)
+		opts.SetFullDocumentBeforeChange(options.WhenAvailable)
 	}
 
 	// Set resume token if available
