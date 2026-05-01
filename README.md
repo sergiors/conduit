@@ -53,13 +53,17 @@ Relay manages MongoDB collections ("tables") and enables CDC (Change Data Captur
 ### Redis Key Structure
 
 ```
-cdc:resume_token:<tableName>     # Resume token per table
-cdc:retry:<tableName>            # Retry queue (sorted set)
-cdc:dlq:<tableName>              # Dead letter queue (list)
-cdc:processed:<tableName>:<id>   # Idempotency key (TTL: 24h)
-cdc:event:<id>                   # Event payload storage
-cdc:config-change                # Pub/Sub channel for table changes
+cdc:resume:<tableName>                 # Resume token per table
+cdc:retry:<tableName>                  # Retry queue (sorted set)
+cdc:dlq:<tableName>                    # Dead letter queue (list)
+cdc:processed:<table>:<type>:<ts>      # Idempotency key (TTL: 24h)
+cdc:config-change                      # Pub/Sub channel for table changes
 ```
+
+**Pattern examples:**
+- `cdc:processed:users:*` - all events for users table
+- `cdc:processed:users:INSERT:*` - only INSERT events for users
+- `cdc:processed:*:REMOVE:*` - all REMOVE events across tables
 
 **Note:** Redis is used for state management (resume tokens, idempotency, retry, pub/sub). Events are sent to HTTP endpoints configured per table.
 
