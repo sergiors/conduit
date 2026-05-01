@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -117,8 +118,18 @@ func (c *Client) InitializeReplicaSet(ctx context.Context) error {
 	// If not initialized, proceed with initialization
 	log.Println("Initializing replica set...")
 
-	// Get hostname from URI - use localhost for Docker
-	host := "127.0.0.1:27017"
+	// Get hostname from stored URI
+	host := c.uri
+	// Remove mongodb:// prefix if present
+	host = strings.TrimPrefix(host, "mongodb://")
+	// Remove credentials if present (user:pass@)
+	if idx := strings.Index(host, "@"); idx != -1 {
+		host = host[idx+1:]
+	}
+	// Extract host:port (remove database and query params)
+	if idx := strings.Index(host, "/"); idx != -1 {
+		host = host[:idx]
+	}
 
 	// Initialize replica set
 	initCmd := bson.D{
