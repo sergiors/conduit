@@ -75,27 +75,27 @@ func (c *Client) Close() error {
 
 // Key helpers
 func (c *Client) resumeTokenKey(tableName string) string {
-	return "cdc:resume_token:" + tableName
+	return fmt.Sprintf("cdc:resume:%s", tableName)
 }
 
 func (c *Client) retryQueueKey(tableName string) string {
-	return "cdc:retry:" + tableName
+	return fmt.Sprintf("cdc:retry:%s", tableName)
 }
 
 func (c *Client) dlqKey(tableName string) string {
-	return "cdc:dlq:" + tableName
+	return fmt.Sprintf("cdc:dlq:%s", tableName)
 }
 
 func (c *Client) processedKey(tableName, id string) string {
-	return "cdc:processed:" + tableName + ":" + id
+	return fmt.Sprintf("cdc:done:%s:%s", tableName, id)
 }
 
 func (c *Client) eventKey(id string) string {
-	return "cdc:event:" + id
+	return fmt.Sprintf("cdc:evt:%s", id)
 }
 
 func (c *Client) streamKey(tableName string) string {
-	return "cdc:events:" + tableName
+	return fmt.Sprintf("cdc:stream:%s", tableName)
 }
 
 // ResumeToken operations
@@ -167,7 +167,7 @@ func (c *Client) EnqueueRetry(ctx context.Context, event RetryEvent) error {
 
 // StoreRetryEventData stores the retry event data separately
 func (c *Client) StoreRetryEventData(ctx context.Context, tableName, id string, event RetryEvent) error {
-	key := c.retryQueueKey(tableName) + ":data:" + id
+	key := fmt.Sprintf("cdc:retrydata:%s:%s", tableName, id)
 	data, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("marshal retry event: %w", err)
@@ -177,7 +177,7 @@ func (c *Client) StoreRetryEventData(ctx context.Context, tableName, id string, 
 
 // GetRetryEventData retrieves the retry event data
 func (c *Client) GetRetryEventData(ctx context.Context, tableName, id string) (*RetryEvent, error) {
-	key := c.retryQueueKey(tableName) + ":data:" + id
+	key := fmt.Sprintf("cdc:retrydata:%s:%s", tableName, id)
 	data, err := c.client.Get(ctx, key).Result()
 	if err != nil {
 		return nil, fmt.Errorf("get retry event data: %w", err)
@@ -191,7 +191,7 @@ func (c *Client) GetRetryEventData(ctx context.Context, tableName, id string) (*
 
 // RemoveRetryEventData removes the retry event data
 func (c *Client) RemoveRetryEventData(ctx context.Context, tableName, id string) error {
-	key := c.retryQueueKey(tableName) + ":data:" + id
+	key := fmt.Sprintf("cdc:retrydata:%s:%s", tableName, id)
 	return c.client.Del(ctx, key).Err()
 }
 
