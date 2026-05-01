@@ -75,27 +75,27 @@ func (c *Client) Close() error {
 
 // Key helpers
 func (c *Client) resumeTokenKey(tableName string) string {
-	return fmt.Sprintf("cdc:resume:%s", tableName)
+	return "cdc:resume_token:" + tableName
 }
 
 func (c *Client) retryQueueKey(tableName string) string {
-	return fmt.Sprintf("cdc:retry:%s", tableName)
+	return "cdc:retry:" + tableName
 }
 
 func (c *Client) dlqKey(tableName string) string {
-	return fmt.Sprintf("cdc:dlq:%s", tableName)
+	return "cdc:dlq:" + tableName
 }
 
 func (c *Client) processedKey(tableName, id string) string {
-	return fmt.Sprintf("cdc:done:%s:%s", tableName, id)
+	return "cdc:processed:" + tableName + ":" + id
 }
 
 func (c *Client) eventKey(id string) string {
-	return fmt.Sprintf("cdc:evt:%s", id)
+	return "cdc:event:" + id
 }
 
 func (c *Client) streamKey(tableName string) string {
-	return fmt.Sprintf("cdc:stream:%s", tableName)
+	return "cdc:events:" + tableName
 }
 
 // ResumeToken operations
