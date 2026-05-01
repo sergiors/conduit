@@ -65,6 +65,13 @@ func NewWorker() (*Worker, error) {
 	// Initialize dispatcher
 	dispatcher := dispatch.NewDispatcher()
 
+	// Initialize retry processor
+	retryProcessor := retry.NewProcessor(
+		redisClient,
+		dispatcher,
+		retry.DefaultConfig(),
+	)
+
 	// Initialize watcher manager
 	watcherManager := watcher.NewManager(
 		mongoClient.Client,
@@ -72,16 +79,10 @@ func NewWorker() (*Worker, error) {
 		store,
 		redisClient,
 		dispatcher,
+		retryProcessor,
 		watcher.Config{
 			SyncInterval: 30 * time.Second,
 		},
-	)
-
-	// Initialize retry processor
-	retryProcessor := retry.NewProcessor(
-		redisClient,
-		dispatcher,
-		retry.DefaultConfig(),
 	)
 
 	return &Worker{

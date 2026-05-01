@@ -2,6 +2,7 @@ package streams
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -158,6 +159,44 @@ func (w *Watcher) parseChange(change bson.M) (StreamRecord, error) {
 		}
 	default:
 		return StreamRecord{}, fmt.Errorf("unknown operation type: %s", opType)
+	}
+
+	return record, nil
+}
+
+// ParseStreamRecord parses raw JSON data into a StreamRecord
+// This is needed when deserializing from Redis where types are lost
+func ParseStreamRecord(data []byte) (*StreamRecord, error) {
+	// First parse into a generic map to handle the JSON
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("unmarshal stream record: %w", err)
+	}
+
+	record := &StreamRecord{
+		TableName: raw["tableName"].(string),
+	}
+
+	// Parse record type
+	if rt, ok := raw["recordType"].(string); ok {
+		record.RecordType = RecordType(rt)
+	}
+
+	// Parse timestamp
+	if ts, ok := raw["timestamp"].(string); ok {
+		if t, err := time.Parse(time.RFC3339, ts); err == nil {
+			record.Timestamp = t
+		}
+	}
+
+	// Parse new image (keep as interface{})
+	if ni, ok := raw["newImage"]; ok && ni != nil {
+		record.NewImage = ni
+	}
+
+	// Parse old image (keep as interface{})
+	if oi, ok := raw["oldImage"]; ok && oi != nil {
+		record.OldImage = oi
 	}
 
 	return record, nil

@@ -100,7 +100,7 @@ Streaming (CDC) MUST be explicitly enabled per table.
 The worker MUST implement a centralized Watcher Manager responsible for:
 
 - Managing active watchers
-- Synchronizing with `system.tables`
+- Synchronizing with `config.tables`
 - Starting/stopping watchers dynamically
 
 ### Watcher Registry
@@ -269,6 +269,6 @@ go run ./cmd/worker
 
 ## Notes
 
-- Always read `system.tables`
+- Always read `config.tables`
 - Watcher Manager is the source of truth
 - System MUST never lose events

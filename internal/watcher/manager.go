@@ -2,6 +2,7 @@ package watcher
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"sync"
@@ -10,6 +11,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/sergiors/relay/internal/dispatch"
 	redisclient "github.com/sergiors/relay/internal/redis"
+	"github.com/sergiors/relay/internal/retry"
 	"github.com/sergiors/relay/internal/streams"
 	"github.com/sergiors/relay/internal/tables"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -17,16 +19,17 @@ import (
 
 // Manager manages CDC watchers for all enabled tables
 type Manager struct {
-	mongoClient  *mongo.Client
-	database     string
-	tableStore   *tables.Store
-	redisClient  *redisclient.Client
-	dispatcher   Dispatcher
-	watchers     map[string]*Watcher
-	mu           sync.RWMutex
-	syncInterval time.Duration
-	pubsub       *redis.PubSub
-	configChan   <-chan *redis.Message
+	mongoClient    *mongo.Client
+	database       string
+	tableStore     *tables.Store
+	redisClient    *redisclient.Client
+	dispatcher     Dispatcher
+	retryProcessor *retry.Processor
+	watchers       map[string]*Watcher
+	mu             sync.RWMutex
+	syncInterval   time.Duration
+	pubsub         *redis.PubSub
+	configChan     <-chan *redis.Message
 }
 
 // Dispatcher interface for decoupling
@@ -54,6 +57,7 @@ func NewManager(
 	tableStore *tables.Store,
 	redisClient *redisclient.Client,
 	dispatcher Dispatcher,
+	retryProcessor *retry.Processor,
 	cfg Config,
 ) *Manager {
 	return &Manager{
@@ -62,6 +66,7 @@ func NewManager(
 		tableStore:   tableStore,
 		redisClient:  redisClient,
 		dispatcher:   dispatcher,
+		retryProcessor: retryProcessor,
 		watchers:     make(map[string]*Watcher),
 		syncInterval: cfg.SyncInterval,
 	}
@@ -171,6 +176,12 @@ func (m *Manager) startWatcher(ctx context.Context, table tables.Table) error {
 	}
 
 	m.watchers[table.TableName] = watcher
+
+	// Register table with retry processor
+	if m.retryProcessor != nil {
+		m.retryProcessor.RegisterTable(table.TableName)
+	}
+
 	return nil
 }
 
@@ -191,6 +202,12 @@ func (m *Manager) stopWatcher(ctx context.Context, tableName string) error {
 	}
 
 	delete(m.watchers, tableName)
+
+	// Unregister table from retry processor
+	if m.retryProcessor != nil {
+		m.retryProcessor.UnregisterTable(tableName)
+	}
+
 	return nil
 }
 
@@ -228,12 +245,26 @@ func (m *Manager) handleEvent(ctx context.Context, tableName string, record stre
 
 // queueRetry adds failed event to retry queue with exponential backoff
 func (m *Manager) queueRetry(ctx context.Context, tableName string, record streams.StreamRecord, eventID string) error {
+	retryID := fmt.Sprintf("%s:%s", tableName, eventID)
+
+	// Marshal the stream record to JSON
+	eventData, err := json.Marshal(record)
+	if err != nil {
+		return fmt.Errorf("marshal stream record: %w", err)
+	}
+
 	retryEvent := redisclient.RetryEvent{
+		ID:          retryID,
 		TableName:   tableName,
-		Event:       record,
+		EventData:   eventData,
 		RetryCount:  0,
 		MaxRetries:  5,
 		NextRetryAt: time.Now().Add(time.Second), // First retry after 1s
+	}
+
+	// Store event data
+	if err := m.redisClient.StoreRetryEventData(ctx, tableName, retryID, retryEvent); err != nil {
+		log.Printf("Failed to store retry event data: %v", err)
 	}
 
 	return m.redisClient.EnqueueRetry(ctx, retryEvent)
@@ -256,7 +287,7 @@ func (m *Manager) configChangeLoop(ctx context.Context) {
 	}
 }
 
-// syncLoop periodically syncs watchers with system.tables
+// syncLoop periodically syncs watchers with config.tables
 func (m *Manager) syncLoop(ctx context.Context) {
 	ticker := time.NewTicker(m.syncInterval)
 	defer ticker.Stop()
@@ -271,9 +302,9 @@ func (m *Manager) syncLoop(ctx context.Context) {
 	}
 }
 
-// syncWithTables diffs current watchers with system.tables
+// syncWithTables diffs current watchers with config.tables
 func (m *Manager) syncWithTables(ctx context.Context) {
-	log.Println("Syncing watchers with system.tables...")
+	log.Println("Syncing watchers with config.tables...")
 
 	// Fetch current stream-enabled tables
 	tableList, err := m.tableStore.ListStreamEnabled(ctx)

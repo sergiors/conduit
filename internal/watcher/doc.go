@@ -8,7 +8,7 @@
 //   - One watcher per table (no duplicates)
 //   - Resume token management per table (stored in Redis)
 //   - Graceful start/stop with no goroutine leaks
-//   - Automatic sync with system.tables configuration
+//   - Automatic sync with config.tables configuration
 //
 // Usage:
 //
@@ -20,6 +20,6 @@
 //
 // Stream Activation:
 //
-// Watchers are only created for tables with stream_enabled=true in system.tables.
+// Watchers are only created for tables with stream_enabled=true in config.tables.
 // The manager periodically syncs (every 30s by default) to detect changes.
 package watcher
