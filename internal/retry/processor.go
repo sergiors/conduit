@@ -125,27 +125,20 @@ func (p *Processor) ProcessTableQueue(ctx context.Context, tableName string) {
 }
 
 func (p *Processor) processTableQueue(ctx context.Context, tableName string) {
-	// Get event IDs ready for retry
-	eventIDs, err := p.redisClient.DequeueRetry(ctx, tableName, 10)
+	// Get events ready for retry
+	events, err := p.redisClient.DequeueRetry(ctx, tableName, 10)
 	if err != nil {
 		log.Printf("Failed to dequeue retry events for %s: %v", tableName, err)
 		return
 	}
 
-	for _, eventID := range eventIDs {
-		p.processRetryEvent(ctx, tableName, eventID)
+	for _, event := range events {
+		p.processRetryEvent(ctx, tableName, event)
 	}
 }
 
-// processRetryEvent processes a single retry event by ID
-func (p *Processor) processRetryEvent(ctx context.Context, tableName string, eventID string) {
-	// Get full event data
-	event, err := p.redisClient.GetRetryEvent(ctx, tableName, eventID)
-	if err != nil {
-		log.Printf("Failed to get retry event data for %s: %v", eventID, err)
-		return
-	}
-
+// processRetryEvent processes a single retry event
+func (p *Processor) processRetryEvent(ctx context.Context, tableName string, event redis.RetryEvent) {
 	// Check if max retries exceeded
 	if event.RetryCount >= event.MaxRetries {
 		log.Printf("Event exceeded max retries (%d), sending to DLQ: %s", event.MaxRetries, tableName)
@@ -154,12 +147,8 @@ func (p *Processor) processRetryEvent(ctx context.Context, tableName string, eve
 				log.Printf("Failed to send to DLQ: %v", err)
 			}
 			// Remove from retry queue after sending to DLQ
-			if err := p.redisClient.RemoveRetryEvent(ctx, tableName, eventID); err != nil {
+			if err := p.redisClient.RemoveRetryEvent(ctx, tableName, event); err != nil {
 				log.Printf("Failed to remove event from retry queue: %v", err)
-			}
-			// Remove event data
-			if err := p.redisClient.RemoveRetryEventData(ctx, tableName, eventID); err != nil {
-				log.Printf("Failed to remove retry event data: %v", err)
 			}
 		} else {
 			log.Printf("DLQ not available (nil redis client), event lost: %s", tableName)
@@ -171,24 +160,26 @@ func (p *Processor) processRetryEvent(ctx context.Context, tableName string, eve
 	record, err := streams.ParseStreamRecord(event.EventData)
 	if err != nil {
 		log.Printf("Failed to parse stream record from retry queue: %v", err)
+		// Remove invalid event from queue
+		if p.redisClient != nil {
+			if err := p.redisClient.RemoveRetryEvent(ctx, tableName, event); err != nil {
+				log.Printf("Failed to remove invalid event from retry queue: %v", err)
+			}
+		}
 		return
 	}
 
 	if err := p.dispatcher.Dispatch(ctx, tableName, *record); err != nil {
 		log.Printf("Retry %d/%d failed for %s: %v", event.RetryCount+1, event.MaxRetries, tableName, err)
 
-		// Re-queue with exponential backoff - first remove old entry, then add new one
+		// Re-queue with exponential backoff - remove old, add new
 		if p.redisClient != nil {
-			if err := p.redisClient.RemoveRetryEvent(ctx, tableName, eventID); err != nil {
+			if err := p.redisClient.RemoveRetryEvent(ctx, tableName, event); err != nil {
 				log.Printf("Failed to remove old retry event: %v", err)
 			}
 			event.RetryCount++
 			event.NextRetryAt = p.calculateNextRetry(event.RetryCount)
-			// Update event data
-			if err := p.redisClient.StoreRetryEventData(ctx, tableName, eventID, *event); err != nil {
-				log.Printf("Failed to update retry event data: %v", err)
-			}
-			if err := p.redisClient.EnqueueRetry(ctx, *event); err != nil {
+			if err := p.redisClient.EnqueueRetry(ctx, event); err != nil {
 				log.Printf("Failed to re-queue retry event: %v", err)
 			}
 		}
@@ -198,12 +189,8 @@ func (p *Processor) processRetryEvent(ctx context.Context, tableName string, eve
 	// Success - event processed, remove from retry queue
 	log.Printf("Retry succeeded for %s after %d attempts", tableName, event.RetryCount+1)
 	if p.redisClient != nil {
-		if err := p.redisClient.RemoveRetryEvent(ctx, tableName, eventID); err != nil {
+		if err := p.redisClient.RemoveRetryEvent(ctx, tableName, event); err != nil {
 			log.Printf("Failed to remove event from retry queue: %v", err)
-		}
-		// Remove event data
-		if err := p.redisClient.RemoveRetryEventData(ctx, tableName, eventID); err != nil {
-			log.Printf("Failed to remove retry event data: %v", err)
 		}
 	}
 }

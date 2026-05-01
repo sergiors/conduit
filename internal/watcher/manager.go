@@ -262,11 +262,6 @@ func (m *Manager) queueRetry(ctx context.Context, tableName string, record strea
 		NextRetryAt: time.Now().Add(time.Second), // First retry after 1s
 	}
 
-	// Store event data
-	if err := m.redisClient.StoreRetryEventData(ctx, tableName, retryID, retryEvent); err != nil {
-		log.Printf("Failed to store retry event data: %v", err)
-	}
-
 	return m.redisClient.EnqueueRetry(ctx, retryEvent)
 }
 

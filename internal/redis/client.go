@@ -75,7 +75,7 @@ func (c *Client) Close() error {
 
 // Key helpers
 func (c *Client) resumeTokenKey(tableName string) string {
-	return "cdc:resume_token:" + tableName
+	return "cdc:resume:" + tableName
 }
 
 func (c *Client) retryQueueKey(tableName string) string {
@@ -154,55 +154,31 @@ type RetryEvent struct {
 }
 
 // EnqueueRetry adds an event to the retry queue with exponential backoff
+// The event JSON is stored directly as the member in the sorted set
 func (c *Client) EnqueueRetry(ctx context.Context, event RetryEvent) error {
 	key := c.retryQueueKey(event.TableName)
 
-	// Use sorted set with nextRetryAt as score and event ID as member
-	score := float64(event.NextRetryAt.UnixNano())
-	return c.client.ZAdd(ctx, key, redis.Z{
-		Score:  score,
-		Member: event.ID,
-	}).Err()
-}
-
-// StoreRetryEventData stores the retry event data separately
-func (c *Client) StoreRetryEventData(ctx context.Context, tableName, id string, event RetryEvent) error {
-	key := fmt.Sprintf("cdc:retrydata:%s:%s", tableName, id)
 	data, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("marshal retry event: %w", err)
 	}
-	return c.client.Set(ctx, key, data, 1*time.Hour).Err()
+
+	// Use sorted set with nextRetryAt as score and JSON as member
+	score := float64(event.NextRetryAt.UnixNano())
+	return c.client.ZAdd(ctx, key, redis.Z{
+		Score:  score,
+		Member: data,
+	}).Err()
 }
 
-// GetRetryEventData retrieves the retry event data
-func (c *Client) GetRetryEventData(ctx context.Context, tableName, id string) (*RetryEvent, error) {
-	key := fmt.Sprintf("cdc:retrydata:%s:%s", tableName, id)
-	data, err := c.client.Get(ctx, key).Result()
-	if err != nil {
-		return nil, fmt.Errorf("get retry event data: %w", err)
-	}
-	var event RetryEvent
-	if err := json.Unmarshal([]byte(data), &event); err != nil {
-		return nil, fmt.Errorf("unmarshal retry event: %w", err)
-	}
-	return &event, nil
-}
-
-// RemoveRetryEventData removes the retry event data
-func (c *Client) RemoveRetryEventData(ctx context.Context, tableName, id string) error {
-	key := fmt.Sprintf("cdc:retrydata:%s:%s", tableName, id)
-	return c.client.Del(ctx, key).Err()
-}
-
-// DequeueRetry gets IDs of events ready for retry (nextRetryAt <= now)
-// Events are removed from queue only after successful processing
-func (c *Client) DequeueRetry(ctx context.Context, tableName string, limit int64) ([]string, error) {
+// DequeueRetry gets events ready for retry (nextRetryAt <= now)
+// Events are NOT removed from queue - caller must remove after processing
+func (c *Client) DequeueRetry(ctx context.Context, tableName string, limit int64) ([]RetryEvent, error) {
 	key := c.retryQueueKey(tableName)
 	now := time.Now().UnixNano()
 
-	// Get event IDs with score <= now
-	ids, err := c.client.ZRangeByScore(ctx, key, &redis.ZRangeBy{
+	// Get events with score <= now
+	members, err := c.client.ZRangeByScore(ctx, key, &redis.ZRangeBy{
 		Min:   "0",
 		Max:   fmt.Sprintf("%d", now),
 		Count: limit,
@@ -211,18 +187,26 @@ func (c *Client) DequeueRetry(ctx context.Context, tableName string, limit int64
 		return nil, fmt.Errorf("dequeue retry: %w", err)
 	}
 
-	return ids, nil
+	events := make([]RetryEvent, 0, len(members))
+	for _, member := range members {
+		var event RetryEvent
+		if err := json.Unmarshal([]byte(member), &event); err != nil {
+			return nil, fmt.Errorf("unmarshal retry event: %w", err)
+		}
+		events = append(events, event)
+	}
+
+	return events, nil
 }
 
-// RemoveRetryEvent removes a processed event from the retry queue by ID
-func (c *Client) RemoveRetryEvent(ctx context.Context, tableName, eventID string) error {
+// RemoveRetryEvent removes a processed event from the retry queue
+func (c *Client) RemoveRetryEvent(ctx context.Context, tableName string, event RetryEvent) error {
 	key := c.retryQueueKey(tableName)
-	return c.client.ZRem(ctx, key, eventID).Err()
-}
-
-// GetRetryEvent retrieves a full retry event by ID
-func (c *Client) GetRetryEvent(ctx context.Context, tableName, eventID string) (*RetryEvent, error) {
-	return c.GetRetryEventData(ctx, tableName, eventID)
+	data, err := json.Marshal(event)
+	if err != nil {
+		return fmt.Errorf("marshal retry event: %w", err)
+	}
+	return c.client.ZRem(ctx, key, string(data)).Err()
 }
 
 // DLQ operations
