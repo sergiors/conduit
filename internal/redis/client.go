@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -87,6 +88,11 @@ func (c *Client) dlqKey(tableName string) string {
 }
 
 func (c *Client) processedKey(id string) string {
+	// id format: {table}-{type}-{ts}, convert to {table}:{type}-{ts}
+	parts := strings.SplitN(id, "-", 2)
+	if len(parts) == 2 {
+		return "cdc:processed:" + parts[0] + ":" + parts[1]
+	}
 	return "cdc:processed:" + id
 }
 
