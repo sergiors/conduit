@@ -3,6 +3,7 @@ package mongo
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -14,6 +15,7 @@ import (
 type Client struct {
 	*mongo.Client
 	database string
+	uri      string
 }
 
 // Config holds MongoDB connection configuration
@@ -23,17 +25,15 @@ type Config struct {
 	Timeout  time.Duration
 }
 
-// DefaultConfig returns a configuration with sensible defaults
-func DefaultConfig() Config {
-	return Config{
-		URI:      "mongodb://localhost:27017",
-		Database: "relay",
-		Timeout:  10 * time.Second,
-	}
-}
-
 // NewClient creates a new MongoDB client
 func NewClient(ctx context.Context, cfg Config) (*Client, error) {
+	if cfg.URI == "" {
+		return nil, fmt.Errorf("MONGODB_URI is required")
+	}
+	if cfg.Database == "" {
+		return nil, fmt.Errorf("MONGODB_DATABASE is required")
+	}
+
 	clientOpts := options.Client().ApplyURI(cfg.URI)
 
 	client, err := mongo.Connect(ctx, clientOpts)
@@ -49,6 +49,7 @@ func NewClient(ctx context.Context, cfg Config) (*Client, error) {
 	return &Client{
 		Client:   client,
 		database: cfg.Database,
+		uri:      cfg.URI,
 	}, nil
 }
 
@@ -98,44 +99,47 @@ func (c *Client) EnableTableStreams(ctx context.Context, collection string, oldI
 	return cursor.Close(ctx)
 }
 
-// EnsureReplicaSet initializes a replica set if not already configured
+// InitializeReplicaSet initializes a MongoDB replica set if not already initialized
 // This is required for change streams to work
-func (c *Client) EnsureReplicaSet(ctx context.Context) error {
-	// Check if already a replica set member
-	rsStatus, err := c.Client.Database("admin").RunCommand(ctx, bson.D{{Key: "replSetGetStatus", Value: 1}}).DecodeBytes()
-	if err == nil {
-		// Already initialized, check state
-		ok, _ := rsStatus.Lookup("ok").AsInt64OK()
-		if ok == 1 {
-			return nil // Replica set already running
-		}
+func (c *Client) InitializeReplicaSet(ctx context.Context) error {
+	// Check if replica set is already initialized
+	rsStatusCmd := bson.D{{Key: "replSetGetStatus", Value: 1}}
+	result := c.Client.Database("admin").RunCommand(ctx, rsStatusCmd)
+
+	var rsStatus bson.M
+	if err := result.Decode(&rsStatus); err == nil {
+		// Replica set already initialized
+		log.Println("Replica set already initialized")
+		return nil
 	}
 
-	// Not initialized, try to initiate
-	// Single-node replica set for development
-	config := bson.D{
-		{Key: "_id", Value: "rs0"},
-		{Key: "members", Value: bson.A{
-			bson.D{
-				{Key: "_id", Value: 0},
-				{Key: "host", Value: "localhost:27017"},
-			},
+	// Check if error is "not initialized" vs other errors
+	// If not initialized, proceed with initialization
+	log.Println("Initializing replica set...")
+
+	// Get hostname from URI - use localhost for Docker
+	host := "127.0.0.1:27017"
+
+	// Initialize replica set
+	initCmd := bson.D{
+		{Key: "replSetInitiate", Value: 1},
+		{Key: "conf", Value: bson.D{
+			{Key: "_id", Value: "rs0"},
+			{Key: "members", Value: bson.A{
+				bson.D{
+					{Key: "_id", Value: 0},
+					{Key: "host", Value: host},
+				},
+			}},
 		}},
 	}
 
-	cmd := bson.D{{Key: "replSetInitiate", Value: config}}
-	result := c.Client.Database("admin").RunCommand(ctx, cmd)
-
-	// Check result - "already initialized" is ok
-	var res bson.M
-	if err := result.Decode(&res); err != nil {
-		// Check if it's "already initialized" error
-		if err.Error() == "AlreadyInitialized" || err.Error() == "replSetInitiate already initiated" {
-			return nil
-		}
-		// For other errors, log but don't fail - might be running in replica set already
+	res := c.Client.Database("admin").RunCommand(ctx, initCmd)
+	var initResult bson.M
+	if err := res.Decode(&initResult); err != nil {
 		return fmt.Errorf("initiate replica set: %w", err)
 	}
 
+	log.Println("Replica set initialized successfully")
 	return nil
 }

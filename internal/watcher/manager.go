@@ -7,10 +7,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sergiors/relay/internal/redis"
+	"github.com/redis/go-redis/v9"
+	"github.com/sergiors/relay/internal/dispatch"
+	redisclient "github.com/sergiors/relay/internal/redis"
 	"github.com/sergiors/relay/internal/streams"
 	"github.com/sergiors/relay/internal/tables"
-	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
@@ -19,12 +20,15 @@ type Manager struct {
 	mongoClient  *mongo.Client
 	database     string
 	tableStore   *tables.Store
-	redisClient  *redis.Client
+	redisClient  *redisclient.Client
 	dispatcher   Dispatcher
 	watchers     map[string]*Watcher
 	mu           sync.RWMutex
 	syncInterval time.Duration
 	eventHandler func(tableName string, record streams.StreamRecord) error
+	redisURI     string
+	pubsub       *redis.PubSub
+	configChan   <-chan *redis.Message
 }
 
 // Dispatcher interface for decoupling
@@ -35,6 +39,7 @@ type Dispatcher interface {
 // Config holds watcher manager configuration
 type Config struct {
 	SyncInterval time.Duration // How often to sync with system.tables
+	RedisURI     string        // Redis URI for creating destinations
 }
 
 // DefaultConfig returns sensible defaults
@@ -49,7 +54,7 @@ func NewManager(
 	mongoClient *mongo.Client,
 	database string,
 	tableStore *tables.Store,
-	redisClient *redis.Client,
+	redisClient *redisclient.Client,
 	dispatcher Dispatcher,
 	cfg Config,
 ) *Manager {
@@ -61,17 +66,13 @@ func NewManager(
 		dispatcher:   dispatcher,
 		watchers:     make(map[string]*Watcher),
 		syncInterval: cfg.SyncInterval,
+		redisURI:     cfg.RedisURI,
 	}
 }
 
 // Start initializes and starts all watchers
 func (m *Manager) Start(ctx context.Context) error {
 	log.Println("Watcher manager starting...")
-
-	// Wait for replica set to be ready (required for change streams)
-	if err := m.waitForReplicaSet(ctx); err != nil {
-		return fmt.Errorf("wait for replica set: %w", err)
-	}
 
 	// Initial load of stream-enabled tables
 	tables, err := m.tableStore.ListStreamEnabled(ctx)
@@ -86,6 +87,16 @@ func (m *Manager) Start(ctx context.Context) error {
 		if err := m.startWatcher(ctx, table); err != nil {
 			log.Printf("Failed to start watcher for %s: %v", table.TableName, err)
 		}
+	}
+
+	// Subscribe to config change notifications
+	pubsub, err := m.redisClient.SubscribeConfigChanges(ctx)
+	if err != nil {
+		log.Printf("Failed to subscribe to config changes: %v", err)
+	} else {
+		m.pubsub = pubsub
+		m.configChan = pubsub.Channel()
+		go m.configChangeLoop(ctx)
 	}
 
 	// Start sync loop
@@ -108,6 +119,14 @@ func (m *Manager) Stop(ctx context.Context) error {
 			lastErr = err
 		}
 		delete(m.watchers, tableName)
+	}
+
+	// Close Pub/Sub subscription
+	if m.pubsub != nil {
+		if err := m.pubsub.Close(); err != nil {
+			log.Printf("Failed to close Pub/Sub: %v", err)
+			lastErr = err
+		}
 	}
 
 	return lastErr
@@ -207,7 +226,7 @@ func (m *Manager) handleEvent(ctx context.Context, tableName string, record stre
 
 // queueRetry adds failed event to retry queue with exponential backoff
 func (m *Manager) queueRetry(ctx context.Context, tableName string, record streams.StreamRecord, eventID string) error {
-	retryEvent := redis.RetryEvent{
+	retryEvent := redisclient.RetryEvent{
 		TableName:   tableName,
 		Event:       record,
 		RetryCount:  0,
@@ -216,6 +235,23 @@ func (m *Manager) queueRetry(ctx context.Context, tableName string, record strea
 	}
 
 	return m.redisClient.EnqueueRetry(ctx, retryEvent)
+}
+
+// configChangeLoop listens for config change notifications and triggers immediate sync
+func (m *Manager) configChangeLoop(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case msg, ok := <-m.configChan:
+			if !ok {
+				return
+			}
+			tableName := msg.Payload
+			log.Printf("Config change detected for table: %s", tableName)
+			m.syncWithTables(ctx)
+		}
+	}
 }
 
 // syncLoop periodically syncs watchers with system.tables
@@ -238,16 +274,16 @@ func (m *Manager) syncWithTables(ctx context.Context) {
 	log.Println("Syncing watchers with system.tables...")
 
 	// Fetch current stream-enabled tables
-	tables, err := m.tableStore.ListStreamEnabled(ctx)
+	tableList, err := m.tableStore.ListStreamEnabled(ctx)
 	if err != nil {
 		log.Printf("Failed to list tables: %v", err)
 		return
 	}
 
 	// Build set of enabled table names
-	enabledSet := make(map[string]bool)
-	for _, table := range tables {
-		enabledSet[table.TableName] = true
+	enabledSet := make(map[string]tables.Table)
+	for _, table := range tableList {
+		enabledSet[table.TableName] = table
 	}
 
 	// Get current watchers
@@ -258,15 +294,15 @@ func (m *Manager) syncWithTables(ctx context.Context) {
 	}
 	m.mu.RUnlock()
 
-	// Start watchers for new tables
-	for tableName := range enabledSet {
+	// Start watchers for new tables and register destinations
+	for tableName, table := range enabledSet {
 		if !currentWatchers[tableName] {
-			table, err := m.tableStore.Get(ctx, tableName)
-			if err != nil {
-				log.Printf("Failed to get table %s: %v", tableName, err)
-				continue
+			// Register destinations for this table
+			if err := m.registerDestinations(ctx, tableName, table.Destinations); err != nil {
+				log.Printf("Failed to register destinations for %s: %v", tableName, err)
 			}
-			if err := m.startWatcher(ctx, *table); err != nil {
+
+			if err := m.startWatcher(ctx, table); err != nil {
 				log.Printf("Failed to start watcher for %s: %v", tableName, err)
 			}
 		}
@@ -274,7 +310,7 @@ func (m *Manager) syncWithTables(ctx context.Context) {
 
 	// Stop watchers for disabled tables
 	for tableName := range currentWatchers {
-		if !enabledSet[tableName] {
+		if _, exists := enabledSet[tableName]; !exists {
 			if err := m.stopWatcher(ctx, tableName); err != nil {
 				log.Printf("Failed to stop watcher for %s: %v", tableName, err)
 			}
@@ -282,6 +318,35 @@ func (m *Manager) syncWithTables(ctx context.Context) {
 	}
 
 	log.Printf("Sync complete: %d active watchers", len(enabledSet))
+}
+
+// registerDestinations registers event destinations for a table
+func (m *Manager) registerDestinations(ctx context.Context, tableName string, destinations []string) error {
+	for _, dest := range destinations {
+		switch dest {
+		case "redis":
+			if m.redisURI == "" {
+				log.Printf("Redis destination requested but REDIS_URI not set")
+				continue
+			}
+			redisDest, err := dispatch.NewRedisDestination(m.redisURI)
+			if err != nil {
+				log.Printf("Failed to create Redis destination for %s: %v", tableName, err)
+				continue
+			}
+			// Cast to Dispatcher interface to access Register method
+			if d, ok := m.dispatcher.(*dispatch.Dispatcher); ok {
+				d.Register(tableName, redisDest)
+				log.Printf("Registered Redis destination for table %s", tableName)
+			}
+		case "eventbridge":
+			// TODO: Add EventBridge destination when configured
+			log.Printf("EventBridge destination not yet implemented")
+		default:
+			log.Printf("Unknown destination type: %s", dest)
+		}
+	}
+	return nil
 }
 
 // GetActiveWatchers returns the count of active watchers
@@ -310,69 +375,4 @@ type WatcherStats struct {
 	EventsProcessed int64
 	LastError       error
 	LastErrorTime   time.Time
-}
-
-// waitForReplicaSet waits until the replica set is ready
-func (m *Manager) waitForReplicaSet(ctx context.Context) error {
-	log.Println("Waiting for replica set to be ready...")
-
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-
-	timeout := time.After(60 * time.Second)
-	attempts := 0
-
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-timeout:
-			return fmt.Errorf("timeout waiting for replica set")
-		case <-ticker.C:
-			attempts++
-			err := m.checkReplicaSet(ctx)
-			if err == nil {
-				log.Printf("Replica set is ready (attempt %d)", attempts)
-				return nil
-			}
-			log.Printf("Replica set not ready yet (attempt %d): %v", attempts, err)
-		}
-	}
-}
-
-// checkReplicaSet checks if the replica set is initialized and ready
-func (m *Manager) checkReplicaSet(ctx context.Context) error {
-	cmd := bson.D{{Key: "replSetGetStatus", Value: 1}}
-	result := m.mongoClient.Database("admin").RunCommand(ctx, cmd)
-
-	var status struct {
-		Ok     int `bson:"ok"`
-		Set    string `bson:"set"`
-		Members []struct {
-			Name   string `bson:"name"`
-			State  int    `bson:"state"`
-			StateStr string `bson:"stateStr"`
-		} `bson:"members"`
-	}
-
-	if err := result.Decode(&status); err != nil {
-		return err
-	}
-
-	if status.Ok != 1 {
-		return fmt.Errorf("replica set status not ok")
-	}
-
-	if len(status.Members) == 0 {
-		return fmt.Errorf("no replica set members")
-	}
-
-	// Check if at least one member is PRIMARY (state 1)
-	for _, member := range status.Members {
-		if member.State == 1 { // PRIMARY
-			return nil
-		}
-	}
-
-	return fmt.Errorf("no primary member found")
 }

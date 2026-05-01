@@ -253,3 +253,25 @@ func (c *Client) GetRetryQueueLength(ctx context.Context, tableName string) (int
 func (c *Client) Ping(ctx context.Context) error {
 	return c.client.Ping(ctx).Err()
 }
+
+// Pub/Sub operations
+// PublishConfigChange publishes a table change notification
+func (c *Client) PublishConfigChange(ctx context.Context, tableName string) error {
+	channel := "cdc:config-change"
+	return c.client.Publish(ctx, channel, tableName).Err()
+}
+
+// SubscribeConfigChanges subscribes to table change notifications
+func (c *Client) SubscribeConfigChanges(ctx context.Context) (*redis.PubSub, error) {
+	channel := "cdc:config-change"
+	pubsub := c.client.Subscribe(ctx, channel)
+
+	// Wait for subscription confirmation
+	_, err := pubsub.Receive(ctx)
+	if err != nil {
+		pubsub.Close()
+		return nil, fmt.Errorf("subscribe to config changes: %w", err)
+	}
+
+	return pubsub, nil
+}

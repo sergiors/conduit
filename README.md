@@ -1,4 +1,4 @@
-# Relay MongoDB CDC
+# Relay
 
 [![Go Version](https://img.shields.io/badge/go-1.25+-blue.svg)](https://golang.org)
 [![License](https://img.shields.io/badge/license-GPL v3.0-green.svg)](LICENSE)
@@ -7,7 +7,7 @@ MongoDB Change Data Capture (CDC) control plane + data plane system built in Go.
 
 ## 📋 Overview
 
-Relay MongoDB CDC manages MongoDB collections ("tables") and enables CDC (Change Data Capture) to external systems like Redis Streams or AWS EventBridge. The design follows **DynamoDB concepts** and naming conventions.
+Relay manages MongoDB collections ("tables") and enables CDC (Change Data Capture) to external systems like Redis Streams or AWS EventBridge. The design follows **DynamoDB concepts** and naming conventions.
 
 ```
 ┌─────────────────┐     ┌──────────────┐     ┌─────────────────┐
@@ -39,16 +39,16 @@ Relay MongoDB CDC manages MongoDB collections ("tables") and enables CDC (Change
 
 ### Core Components
 
-| Component | Package | Description |
-|-----------|---------|-------------|
-| **API** | `cmd/api` | REST control plane for table management |
-| **Worker** | `cmd/worker` | CDC data plane with watchers |
-| **Watcher Manager** | `internal/watcher` | Centralized watcher lifecycle |
-| **Dispatcher** | `internal/dispatch` | Event routing to destinations |
-| **Retry Processor** | `internal/retry` | Backoff and DLQ handling |
-| **Redis Client** | `internal/redis` | State store operations |
-| **Mongo Client** | `internal/mongo` | Database + change streams |
-| **Tables Store** | `internal/tables` | Configuration management |
+| Component           | Package             | Description                             |
+| ------------------- | ------------------- | --------------------------------------- |
+| **API**             | `cmd/api`           | REST control plane for table management |
+| **Worker**          | `cmd/worker`        | CDC data plane with watchers            |
+| **Watcher Manager** | `internal/watcher`  | Centralized watcher lifecycle + Pub/Sub |
+| **Dispatcher**      | `internal/dispatch` | Event routing to destinations           |
+| **Retry Processor** | `internal/retry`    | Backoff and DLQ handling                |
+| **Redis Client**    | `internal/redis`    | State store + Pub/Sub operations        |
+| **Mongo Client**    | `internal/mongo`    | Database + change streams + replica set |
+| **Tables Store**    | `internal/tables`   | Configuration management (`config.tables`) |
 
 ### Redis Key Structure
 
@@ -59,6 +59,7 @@ cdc:dlq:<tableName>              # Dead letter queue (list)
 cdc:processed:<tableName>:<id>   # Idempotency key (TTL: 24h)
 cdc:event:<id>                   # Event payload storage
 cdc:events:<tableName>           # Redis Streams output
+cdc:config-change                # Pub/Sub channel for table changes
 ```
 
 ## 🚀 Quick Start
@@ -183,13 +184,13 @@ curl -X POST http://localhost:8080/tables \
 
 ### Tables
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/tables` | List all tables |
-| `POST` | `/tables` | Create table |
-| `PUT` | `/tables` | Update table |
-| `DELETE` | `/tables?name=<name>` | Delete table |
-| `GET` | `/health` | Health check |
+| Method   | Endpoint              | Description     |
+| -------- | --------------------- | --------------- |
+| `GET`    | `/tables`             | List all tables |
+| `POST`   | `/tables`             | Create table    |
+| `PUT`    | `/tables`             | Update table    |
+| `DELETE` | `/tables?name=<name>` | Delete table    |
+| `GET`    | `/health`             | Health check    |
 
 ### Table Schema
 
@@ -206,6 +207,7 @@ curl -X POST http://localhost:8080/tables \
 ### Example Requests
 
 **Create table with streaming:**
+
 ```bash
 curl -X POST http://localhost:8080/tables \
   -H "Content-Type: application/json" \
@@ -218,6 +220,7 @@ curl -X POST http://localhost:8080/tables \
 ```
 
 **Disable streaming:**
+
 ```bash
 curl -X PUT http://localhost:8080/tables \
   -H "Content-Type: application/json" \
@@ -228,6 +231,7 @@ curl -X PUT http://localhost:8080/tables \
 ```
 
 **List tables:**
+
 ```bash
 curl http://localhost:8080/tables | jq .
 ```
@@ -236,12 +240,12 @@ curl http://localhost:8080/tables | jq .
 
 ### Environment Variables
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `MONGODB_URI` | **Yes** | - | MongoDB connection string |
-| `MONGODB_DATABASE` | **Yes** | - | Database name |
-| `REDIS_URI` | **Yes** | - | Redis URI/DSN (see examples below) |
-| `PORT` | No | `8080` | API server port |
+| Variable           | Required | Default | Description                        |
+| ------------------ | -------- | ------- | ---------------------------------- |
+| `MONGODB_URI`      | **Yes**  | -       | MongoDB connection string          |
+| `MONGODB_DATABASE` | **Yes**  | -       | Database name                      |
+| `REDIS_URI`        | **Yes**  | -       | Redis URI/DSN (see examples below) |
+| `PORT`             | No       | `8080`  | API server port                    |
 
 ### Redis URI Format
 
@@ -249,13 +253,13 @@ curl http://localhost:8080/tables | jq .
 redis://[username[:password]@]host[:port][/db_number]
 ```
 
-| Example | Description |
-|---------|-------------|
-| `redis://localhost:6379` | No authentication |
-| `redis://:password@localhost:6379` | Password only |
-| `redis://user:pass@localhost:6379` | Username + password |
-| `redis://:pass@localhost:6379/1` | With database number |
-| `rediss://:pass@localhost:6380` | TLS connection |
+| Example                            | Description          |
+| ---------------------------------- | -------------------- |
+| `redis://localhost:6379`           | No authentication    |
+| `redis://:password@localhost:6379` | Password only        |
+| `redis://user:pass@localhost:6379` | Username + password  |
+| `redis://:pass@localhost:6379/1`   | With database number |
+| `rediss://:pass@localhost:6380`    | TLS connection       |
 
 ### Missing Variables
 
@@ -267,16 +271,16 @@ FATAL: Required environment variable MONGODB_URI is not set
 
 ### DynamoDB Naming Conventions
 
-| Concept | Field Name |
-|---------|------------|
-| Primary Key | `pk` |
-| Sort Key | `sk` |
-| Table | `table` |
-| Item | `item` |
-| Stream | `stream` |
-| TTL Field | `expiresAt` |
-| New Image | `newImage` |
-| Old Image | `oldImage` |
+| Concept     | Field Name  |
+| ----------- | ----------- |
+| Primary Key | `pk`        |
+| Sort Key    | `sk`        |
+| Table       | `table`     |
+| Item        | `item`      |
+| Stream      | `stream`    |
+| TTL Field   | `expiresAt` |
+| New Image   | `newImage`  |
+| Old Image   | `oldImage`  |
 
 ### Key Format Example
 
@@ -291,29 +295,31 @@ FATAL: Required environment variable MONGODB_URI is not set
 
 Streaming is **explicitly enabled per table**:
 
-| `stream_enabled` | Worker Behavior |
-|------------------|-----------------|
-| `false` | ❌ No watcher created, table ignored |
-| `true` | ✅ Watcher created, events processed |
+| `stream_enabled` | Worker Behavior                      |
+| ---------------- | ------------------------------------ |
+| `false`          | ❌ No watcher created, table ignored |
+| `true`           | ✅ Watcher created, events processed |
 
 ### Watcher Lifecycle
 
-1. **Initial Load**: Fetch all `stream_enabled=true` tables
+1. **Initial Load**: Fetch all `stream_enabled=true` tables from `config.tables`
 2. **Start Watchers**: One watcher per enabled table
-3. **Sync Loop**: Diff with `system.tables` every 30s
+3. **Sync Loop**: 
+   - Polling: Diff with `config.tables` every 30s (fallback)
+   - **Push notifications**: Immediate sync via Redis Pub/Sub when tables change
 4. **Resume Tokens**: Updated after each successful batch
 5. **Graceful Stop**: Context cancellation, no data loss
 
 ## 🔁 Retry Behavior
 
-| Attempt | Delay | Action |
-|---------|-------|--------|
-| 1 | 1s | First retry |
-| 2 | 2s | Exponential backoff |
-| 3 | 4s | Exponential backoff |
-| 4 | 8s | Exponential backoff |
-| 5 | 16s | Final retry |
-| 6+ | — | → DLQ |
+| Attempt | Delay | Action              |
+| ------- | ----- | ------------------- |
+| 1       | 1s    | First retry         |
+| 2       | 2s    | Exponential backoff |
+| 3       | 4s    | Exponential backoff |
+| 4       | 8s    | Exponential backoff |
+| 5       | 16s   | Final retry         |
+| 6+      | —     | → DLQ               |
 
 **Max Retries:** 5  
 **Backoff:** Exponential (capped at 5 minutes)  
@@ -338,6 +344,7 @@ make test-watch
 ### Test Coverage
 
 All critical paths covered:
+
 - ✅ CDC event processing
 - ✅ Retry with exponential backoff
 - ✅ Idempotency checks
@@ -348,6 +355,7 @@ All critical paths covered:
 ## 🛠 Makefile Commands
 
 **Development:**
+
 ```bash
 make help              # Show all commands
 make init              # Initialize project
@@ -360,6 +368,7 @@ make clean             # Clean build artifacts
 ```
 
 **Docker:**
+
 ```bash
 make docker-up         # Start MongoDB + Redis only
 make docker-up-full    # Start full stack (API + Worker + MongoDB + Redis)
@@ -371,6 +380,7 @@ make docker-clean      # Clean containers and volumes
 ```
 
 **Testing:**
+
 ```bash
 make test              # Run unit tests
 make test-integration  # Run integration tests
@@ -426,13 +436,13 @@ redis-cli KEYS "cdc:dlq:*"
 
 ## 🔒 Critical Guarantees
 
-| Guarantee | Implementation |
-|-----------|----------------|
-| **No event loss** | Retry queue + DLQ |
-| **No duplicates** | Idempotency keys (24h TTL) |
-| **No goroutine leaks** | Proper watcher lifecycle |
-| **Per-table resume** | Individual tokens in Redis |
-| **Graceful shutdown** | Context cancellation + timeout |
+| Guarantee              | Implementation                 |
+| ---------------------- | ------------------------------ |
+| **No event loss**      | Retry queue + DLQ              |
+| **No duplicates**      | Idempotency keys (24h TTL)     |
+| **No goroutine leaks** | Proper watcher lifecycle       |
+| **Per-table resume**   | Individual tokens in Redis     |
+| **Graceful shutdown**  | Context cancellation + timeout |
 
 ## 🚨 Troubleshooting
 
@@ -443,11 +453,21 @@ FATAL: Required environment variable MONGODB_URI is not set
 ```
 
 **Solution:** Set all required variables before running:
+
 ```bash
 export MONGODB_URI=mongodb://localhost:27017
 export MONGODB_DATABASE=relay
 export REDIS_URI=redis://localhost:6379
 ```
+
+### Worker Not Detecting New Tables Immediately
+
+New tables should be detected within ~1 second via Redis Pub/Sub. If not:
+
+1. Check Redis is running: `redis-cli ping` → should return `PONG`
+2. Check worker logs for Pub/Sub subscription: `docker logs relay-mongodb-worker-1 | grep "config-change"`
+3. Verify API is publishing: `docker logs relay-mongodb-api-1 | grep "config change"`
+4. Fallback: Sync runs every 30s if Pub/Sub fails
 
 ### Invalid Redis URI
 
@@ -456,6 +476,7 @@ FATAL: Failed to create worker: parse redis URI: invalid redis URL scheme:
 ```
 
 **Solution:** Ensure URI starts with `redis://` or `rediss://`:
+
 ```bash
 # Correct:
 REDIS_URI=redis://localhost:6379

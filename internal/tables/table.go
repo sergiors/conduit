@@ -2,6 +2,7 @@ package tables
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -11,25 +12,29 @@ import (
 
 // Table represents a DynamoDB-style table configuration
 type Table struct {
-	ID            string    `bson:"_id,omitempty"`
-	TableName     string    `bson:"table_name"`
-	StreamEnabled bool      `bson:"stream_enabled"`
-	OldImage      bool      `bson:"old_image"`
-	TTLField      string    `bson:"ttl_field,omitempty"`
-	Destinations  []string  `bson:"destinations"`
-	CreatedAt     time.Time `bson:"created_at"`
-	UpdatedAt     time.Time `bson:"updated_at"`
+	ID            string    `bson:"_id,omitempty" json:"_id,omitempty"`
+	TableName     string    `bson:"table_name" json:"table_name"`
+	StreamEnabled bool      `bson:"stream_enabled" json:"stream_enabled"`
+	OldImage      bool      `bson:"old_image" json:"old_image"`
+	TTLField      string    `bson:"ttl_field,omitempty" json:"ttl_field,omitempty"`
+	Destinations  []string  `bson:"destinations" json:"destinations"`
+	CreatedAt     time.Time `bson:"created_at" json:"created_at"`
+	UpdatedAt     time.Time `bson:"updated_at" json:"updated_at"`
 }
 
 // Store manages table configurations in MongoDB
 type Store struct {
+	client     *mongo.Client
+	database   string
 	collection *mongo.Collection
 }
 
 // NewStore creates a new table store
 func NewStore(client *mongo.Client, database string) *Store {
 	return &Store{
-		collection: client.Database(database).Collection("system.tables"),
+		client:     client,
+		database:   database,
+		collection: client.Database(database).Collection("config.tables"),
 	}
 }
 
@@ -43,11 +48,55 @@ func (s *Store) CreateIndex(ctx context.Context) error {
 	return err
 }
 
-// Create inserts a new table configuration
+// createCollection creates the actual MongoDB collection for CDC monitoring
+func (s *Store) createCollection(ctx context.Context, tableName string) error {
+	db := s.client.Database(s.database)
+
+	// Check if collection already exists
+	collections, err := db.ListCollectionNames(ctx, bson.M{"name": tableName})
+	if err != nil {
+		return fmt.Errorf("list collections: %w", err)
+	}
+
+	if len(collections) > 0 {
+		return nil // Collection already exists
+	}
+
+	// Create the collection
+	if err := db.CreateCollection(ctx, tableName); err != nil {
+		return fmt.Errorf("create collection: %w", err)
+	}
+
+	// Insert a dummy document to ensure the collection is not empty
+	// (empty collections can cause issues with change streams)
+	_, err = db.Collection(tableName).InsertOne(ctx, bson.M{
+		"_id":            "init",
+		"_placeholder":   true,
+		"_created_at":    time.Now(),
+	})
+	if err != nil {
+		return fmt.Errorf("insert placeholder: %w", err)
+	}
+
+	// Remove the placeholder document
+	_, err = db.Collection(tableName).DeleteOne(ctx, bson.M{"_id": "init"})
+	if err != nil {
+		return fmt.Errorf("delete placeholder: %w", err)
+	}
+
+	return nil
+}
+
+// Create inserts a new table configuration and creates the MongoDB collection
 func (s *Store) Create(ctx context.Context, table *Table) error {
 	now := time.Now()
 	table.CreatedAt = now
 	table.UpdatedAt = now
+
+	// Create the actual MongoDB collection for CDC monitoring
+	if err := s.createCollection(ctx, table.TableName); err != nil {
+		return fmt.Errorf("create collection: %w", err)
+	}
 
 	_, err := s.collection.InsertOne(ctx, table)
 	return err

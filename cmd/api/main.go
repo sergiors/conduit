@@ -9,18 +9,21 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/sergiors/relay/internal/mongo"
+	"github.com/sergiors/relay/internal/redis"
 	"github.com/sergiors/relay/internal/tables"
 )
 
 type Server struct {
-	tableStore  *tables.Store
-	mongoClient *mongo.Client
+	tableStore   *tables.Store
+	mongoClient  *mongo.Client
+	redisClient  *redis.Client
 }
 
 func NewServer() (*Server, error) {
 	// Get config from environment (REQUIRED - no defaults)
 	uri := getRequiredEnv("MONGODB_URI")
 	database := getRequiredEnv("MONGODB_DATABASE")
+	redisURI := getRequiredEnv("REDIS_URI")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -34,23 +37,31 @@ func NewServer() (*Server, error) {
 		return nil, err
 	}
 
-	// Ensure replica set is initialized (required for change streams)
-	if err := client.EnsureReplicaSet(ctx); err != nil {
-		log.Printf("Warning: Could not initialize replica set: %v (change streams may not work)", err)
-	}
-
 	store := tables.NewStore(client.Client, database)
 	if err := store.CreateIndex(ctx); err != nil {
+		return nil, err
+	}
+
+	redisClient, err := redis.NewClient(ctx, redis.Config{
+		URI:    redisURI,
+		Prefix: "cdc:",
+	})
+	if err != nil {
+		client.Close(ctx)
 		return nil, err
 	}
 
 	return &Server{
 		tableStore:  store,
 		mongoClient: client,
+		redisClient: redisClient,
 	}, nil
 }
 
 func (s *Server) Close(ctx context.Context) error {
+	if err := s.redisClient.Close(); err != nil {
+		return err
+	}
 	return s.mongoClient.Close(ctx)
 }
 
@@ -113,6 +124,11 @@ func (s *Server) createTable(c *gin.Context) {
 		return
 	}
 
+	// Notify worker of config change
+	if err := s.redisClient.PublishConfigChange(ctx, table.TableName); err != nil {
+		log.Printf("Failed to publish config change: %v", err)
+	}
+
 	c.JSON(http.StatusCreated, table)
 }
 
@@ -133,6 +149,11 @@ func (s *Server) updateTable(c *gin.Context) {
 	if err := s.tableStore.Update(ctx, &table); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+
+	// Notify worker of config change
+	if err := s.redisClient.PublishConfigChange(ctx, table.TableName); err != nil {
+		log.Printf("Failed to publish config change: %v", err)
 	}
 
 	c.JSON(http.StatusOK, table)

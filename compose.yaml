@@ -14,7 +14,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-      start_period: 10s
+      start_period: 30s
 
   mongo-express:
     image: mongo-express
@@ -46,7 +46,7 @@ services:
     ports:
       - 8080:8080
     environment:
-      - MONGODB_URI=mongodb://mongo:27017
+      - MONGODB_URI=mongodb://mongo:27017/?directConnection=true
       - MONGODB_DATABASE=relay
       - REDIS_URI=redis://redis:6379
       - PORT=8080
@@ -63,7 +63,7 @@ services:
       dockerfile: Dockerfile
     command: ["./bin/worker"]
     environment:
-      - MONGODB_URI=mongodb://mongo:27017
+      - MONGODB_URI=mongodb://mongo:27017/?directConnection=true
       - MONGODB_DATABASE=relay
       - REDIS_URI=redis://redis:6379
     depends_on:

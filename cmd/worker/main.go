@@ -44,6 +44,11 @@ func NewWorker() (*Worker, error) {
 		return nil, err
 	}
 
+	// Initialize replica set (required for change streams)
+	if err := mongoClient.InitializeReplicaSet(ctx); err != nil {
+		log.Printf("Warning: Failed to initialize replica set: %v", err)
+	}
+
 	// Initialize Redis client with URI/DSN
 	redisClient, err := redis.NewClient(ctx, redis.Config{
 		URI:      redisURI,
@@ -67,7 +72,10 @@ func NewWorker() (*Worker, error) {
 		store,
 		redisClient,
 		dispatcher,
-		watcher.DefaultConfig(),
+		watcher.Config{
+			SyncInterval: 30 * time.Second,
+			RedisURI:     redisURI,
+		},
 	)
 
 	// Initialize retry processor
