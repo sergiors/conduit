@@ -3,6 +3,7 @@ package tables
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -68,11 +69,20 @@ func (s *Store) createCollection(ctx context.Context, tableName string) error {
 	}
 
 	if len(collections) > 0 {
-		return nil // Collection already exists
+		// Collection exists, enable changeStreamPreAndPostImages
+		err = db.RunCommand(ctx, bson.M{
+			"collMod": tableName,
+			"changeStreamPreAndPostImages": bson.M{"enabled": true},
+		}).Err()
+		if err != nil {
+			log.Printf("Warning: Failed to enable changeStreamPreAndPostImages for %s: %v", tableName, err)
+		}
+		return nil
 	}
 
-	// Create the collection
-	if err := db.CreateCollection(ctx, tableName); err != nil {
+	// Create the collection with changeStreamPreAndPostImages enabled
+	err = db.CreateCollection(ctx, tableName, options.CreateCollection().SetChangeStreamPreAndPostImages(bson.M{"enabled": true}))
+	if err != nil {
 		return fmt.Errorf("create collection: %w", err)
 	}
 

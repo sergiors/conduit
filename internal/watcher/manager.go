@@ -142,6 +142,11 @@ func (m *Manager) startWatcher(ctx context.Context, table tables.Table) error {
 
 	log.Printf("Starting watcher for table: %s", table.TableName)
 
+	// Register destinations for this table
+	if err := m.registerDestinations(ctx, table.TableName, table.Destinations); err != nil {
+		log.Printf("Failed to register destinations for %s: %v", table.TableName, err)
+	}
+
 	// Get resume token from Redis
 	resumeToken, err := m.redisClient.GetResumeToken(ctx, table.TableName)
 	if err != nil {

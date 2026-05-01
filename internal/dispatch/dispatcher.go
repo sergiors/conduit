@@ -51,7 +51,6 @@ func (d *Dispatcher) Dispatch(ctx context.Context, table string, record streams.
 	d.mu.RUnlock()
 
 	if !ok {
-		// No destinations configured for this table
 		return nil
 	}
 
