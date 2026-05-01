@@ -35,14 +35,16 @@ func TestKeyHelpers(t *testing.T) {
 func TestRetryEvent(t *testing.T) {
 	t.Run("retry event structure", func(t *testing.T) {
 		event := RetryEvent{
+			ID:          "users-123",
 			TableName:   "users",
-			Event:       map[string]interface{}{"id": "123"},
+			EventData:   []byte(`{"id": "123"}`),
 			RetryCount:  0,
 			MaxRetries:  5,
 			NextRetryAt: time.Now().Add(time.Second),
 		}
 
 		assert.Equal(t, "users", event.TableName)
+		assert.Equal(t, "users-123", event.ID)
 		assert.Equal(t, 0, event.RetryCount)
 		assert.Equal(t, 5, event.MaxRetries)
 		assert.True(t, !event.NextRetryAt.IsZero())
@@ -50,7 +52,9 @@ func TestRetryEvent(t *testing.T) {
 
 	t.Run("retry event with max retries exceeded", func(t *testing.T) {
 		event := RetryEvent{
+			ID:          "orders-456",
 			TableName:   "orders",
+			EventData:   []byte(`{"id": "456"}`),
 			RetryCount:  5,
 			MaxRetries:  5,
 			NextRetryAt: time.Now(),
@@ -109,20 +113,19 @@ func TestClientIntegration(t *testing.T) {
 	})
 
 	t.Run("idempotency operations", func(t *testing.T) {
-		tableName := "test_table_" + time.Now().Format("20060102150405")
-		eventID := "test-event-123"
+		eventID := "test_table_" + time.Now().Format("20060102150405") + "-test-event-123"
 
 		// Check non-existent
-		processed, err := client.IsProcessed(ctx, tableName, eventID)
+		processed, err := client.IsProcessed(ctx, eventID)
 		require.NoError(t, err)
 		assert.False(t, processed)
 
 		// Mark as processed
-		err = client.MarkProcessed(ctx, tableName, eventID, 1*time.Hour)
+		err = client.MarkProcessed(ctx, eventID, 1*time.Hour)
 		require.NoError(t, err)
 
 		// Check exists
-		processed, err = client.IsProcessed(ctx, tableName, eventID)
+		processed, err = client.IsProcessed(ctx, eventID)
 		require.NoError(t, err)
 		assert.True(t, processed)
 	})
@@ -137,8 +140,9 @@ func TestClientIntegration(t *testing.T) {
 
 		// Enqueue retry event
 		event := RetryEvent{
+			ID:          tableName + "-123",
 			TableName:   tableName,
-			Event:       map[string]interface{}{"id": "123"},
+			EventData:   []byte(`{"id": "123"}`),
 			RetryCount:  0,
 			MaxRetries:  5,
 			NextRetryAt: time.Now().Add(-1 * time.Second), // Ready for retry

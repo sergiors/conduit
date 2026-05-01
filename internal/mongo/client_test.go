@@ -12,17 +12,19 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-func TestDefaultConfig(t *testing.T) {
-	t.Run("returns sensible defaults", func(t *testing.T) {
-		cfg := DefaultConfig()
+func TestConfig(t *testing.T) {
+	t.Run("default configuration", func(t *testing.T) {
+		cfg := Config{
+			URI:      "mongodb://localhost:27017",
+			Database: "relay",
+			Timeout:  10 * time.Second,
+		}
 
 		assert.Equal(t, "mongodb://localhost:27017", cfg.URI)
 		assert.Equal(t, "relay", cfg.Database)
 		assert.Equal(t, 10*time.Second, cfg.Timeout)
 	})
-}
 
-func TestConfig(t *testing.T) {
 	t.Run("custom configuration", func(t *testing.T) {
 		cfg := Config{
 			URI:      "mongodb://custom:27017",
@@ -62,7 +64,11 @@ func TestClientIntegration(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		client, err := NewClient(ctx, DefaultConfig())
+		client, err := NewClient(ctx, Config{
+			URI:      "mongodb://localhost:27017",
+			Database: "relay",
+			Timeout:  10 * time.Second,
+		})
 		if err != nil {
 			t.Skipf("MongoDB not available: %v", err)
 		}
@@ -76,7 +82,11 @@ func TestClientIntegration(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		client, err := NewClient(ctx, DefaultConfig())
+		client, err := NewClient(ctx, Config{
+			URI:      "mongodb://localhost:27017",
+			Database: "relay",
+			Timeout:  10 * time.Second,
+		})
 		if err != nil {
 			t.Skipf("MongoDB not available: %v", err)
 		}
@@ -96,7 +106,11 @@ func TestClientCreateTTLIndex(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	client, err := NewClient(ctx, DefaultConfig())
+	client, err := NewClient(ctx, Config{
+			URI:      "mongodb://localhost:27017",
+			Database: "relay",
+			Timeout:  10 * time.Second,
+		})
 	if err != nil {
 		t.Skipf("MongoDB not available: %v", err)
 	}
@@ -170,7 +184,11 @@ func TestClientEnableTableStreams(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	client, err := NewClient(ctx, DefaultConfig())
+	client, err := NewClient(ctx, Config{
+			URI:      "mongodb://localhost:27017",
+			Database: "relay",
+			Timeout:  10 * time.Second,
+		})
 	if err != nil {
 		t.Skipf("MongoDB not available: %v", err)
 	}

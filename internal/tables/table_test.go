@@ -23,7 +23,7 @@ func TestTableValidation(t *testing.T) {
 			TableName:     "users",
 			StreamEnabled: true,
 			OldImage:      false,
-			Destinations:  []DestinationConfig{{Type: "redis"}},
+			Destinations:  []DestinationConfig{{Type: "http", Endpoint: "http://localhost:3000/events"}},
 		}
 
 		assert.Equal(t, "users", table.TableName)
@@ -37,7 +37,7 @@ func TestTableValidation(t *testing.T) {
 			TableName:     "orders",
 			StreamEnabled: true,
 			OldImage:      true,
-			Destinations:  []DestinationConfig{{Type: "redis"}, {Type: "eventbridge"}},
+			Destinations:  []DestinationConfig{{Type: "http", Endpoint: "http://localhost:3000/events"}, {Type: "eventbridge"}},
 		}
 
 		assert.True(t, table.OldImage, "OldImage should be true for tracking changes")
@@ -51,7 +51,7 @@ func TestTableValidation(t *testing.T) {
 			TTLAttribute:      "expiresAt",
 		}
 
-		assert.Equal(t, "expiresAt", table.TTLField)
+		assert.Equal(t, "expiresAt", table.TTLAttribute)
 		assert.False(t, table.StreamEnabled)
 	})
 
@@ -140,7 +140,7 @@ func TestStoreCRUD(t *testing.T) {
 			TableName:     "test_table",
 			StreamEnabled: true,
 			OldImage:      true,
-			Destinations:  []DestinationConfig{{Type: "redis"}},
+			Destinations:  []DestinationConfig{{Type: "http", Endpoint: "http://localhost:3000/events"}},
 		}
 
 		err := store.Create(ctx, table)
@@ -166,14 +166,14 @@ func TestStoreCRUD(t *testing.T) {
 	t.Run("update table", func(t *testing.T) {
 		table, _ := store.Get(ctx, "test_table")
 		table.StreamEnabled = false
-		table.Destinations = []DestinationConfig{{Type: "eventbridge"}}
+		table.Destinations = []DestinationConfig{{Type: "http", Endpoint: "http://localhost:3001/audit"}}
 
 		err := store.Update(ctx, table)
 		require.NoError(t, err)
 
 		updated, _ := store.Get(ctx, "test_table")
 		assert.False(t, updated.StreamEnabled)
-		assert.Equal(t, []DestinationConfig{{Type: "eventbridge"}}, updated.Destinations)
+		assert.Equal(t, []DestinationConfig{{Type: "http", Endpoint: "http://localhost:3001/audit"}}, updated.Destinations)
 		assert.True(t, updated.UpdatedAt.After(table.UpdatedAt))
 	})
 
@@ -309,8 +309,8 @@ func TestTableBSONTags(t *testing.T) {
 			TableName:     "test",
 			StreamEnabled: true,
 			OldImage:      true,
-			TTLAttribute:      "expiresAt",
-			Destinations:  []DestinationConfig{{Type: "redis"}},
+			TTLAttribute:  "expiresAt",
+			Destinations:  []DestinationConfig{{Type: "http", Endpoint: "http://localhost:3000/events"}},
 		}
 
 		data, err := bson.Marshal(table)

@@ -86,8 +86,8 @@ func (c *Client) dlqKey(tableName string) string {
 	return "cdc:dlq:" + tableName
 }
 
-func (c *Client) processedKey(tableName, id string) string {
-	return "cdc:processed:" + tableName + ":" + id
+func (c *Client) processedKey(id string) string {
+	return "cdc:processed:" + id
 }
 
 func (c *Client) eventKey(id string) string {
@@ -127,8 +127,8 @@ func (c *Client) DeleteResumeToken(ctx context.Context, tableName string) error 
 
 // Idempotency operations
 // IsProcessed checks if an event has already been processed
-func (c *Client) IsProcessed(ctx context.Context, tableName, id string) (bool, error) {
-	key := c.processedKey(tableName, id)
+func (c *Client) IsProcessed(ctx context.Context, id string) (bool, error) {
+	key := c.processedKey(id)
 	exists, err := c.client.Exists(ctx, key).Result()
 	if err != nil {
 		return false, fmt.Errorf("check processed: %w", err)
@@ -137,8 +137,8 @@ func (c *Client) IsProcessed(ctx context.Context, tableName, id string) (bool, e
 }
 
 // MarkProcessed marks an event as processed with TTL
-func (c *Client) MarkProcessed(ctx context.Context, tableName, id string, ttl time.Duration) error {
-	key := c.processedKey(tableName, id)
+func (c *Client) MarkProcessed(ctx context.Context, id string, ttl time.Duration) error {
+	key := c.processedKey(id)
 	return c.client.Set(ctx, key, "1", ttl).Err()
 }
 

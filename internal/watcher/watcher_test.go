@@ -132,7 +132,7 @@ func TestParseChange(t *testing.T) {
 func TestManagerCreation(t *testing.T) {
 	t.Run("new manager with correct configuration", func(t *testing.T) {
 		cfg := DefaultConfig()
-		manager := NewManager(nil, "relay", nil, nil, nil, cfg)
+		manager := NewManager(nil, "relay", nil, nil, nil, nil, cfg)
 
 		assert.NotNil(t, manager)
 		assert.Equal(t, "relay", manager.database)

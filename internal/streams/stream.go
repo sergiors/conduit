@@ -173,8 +173,11 @@ func ParseStreamRecord(data []byte) (*StreamRecord, error) {
 		return nil, fmt.Errorf("unmarshal stream record: %w", err)
 	}
 
-	record := &StreamRecord{
-		TableName: raw["tableName"].(string),
+	record := &StreamRecord{}
+
+	// Parse table name
+	if tn, ok := raw["tableName"].(string); ok {
+		record.TableName = tn
 	}
 
 	// Parse record type

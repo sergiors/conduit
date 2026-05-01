@@ -79,15 +79,18 @@ func TestProcessRetryEvent(t *testing.T) {
 		processor := NewProcessor(nil, dispatcher, DefaultConfig())
 
 		ctx := context.Background()
+		eventData, _ := bson.MarshalExtJSON(streams.StreamRecord{
+			TableName:  "users",
+			RecordType: streams.InsertRecord,
+			NewImage:   bson.M{"_id": "123"},
+		}, false, false)
+
 		event := redis.RetryEvent{
-			TableName: "users",
-			Event: streams.StreamRecord{
-				TableName:  "users",
-				RecordType: streams.InsertRecord,
-				NewImage:   bson.M{"_id": "123"},
-			},
-			RetryCount: 0,
-			MaxRetries: 5,
+			ID:          "users-123",
+			TableName:   "users",
+			EventData:   eventData,
+			RetryCount:  0,
+			MaxRetries:  5,
 		}
 
 		// Should succeed without panic
@@ -99,14 +102,17 @@ func TestProcessRetryEvent(t *testing.T) {
 		processor := NewProcessor(nil, dispatcher, DefaultConfig())
 
 		ctx := context.Background()
+		eventData, _ := bson.MarshalExtJSON(streams.StreamRecord{
+			TableName:  "users",
+			RecordType: streams.InsertRecord,
+		}, false, false)
+
 		event := redis.RetryEvent{
-			TableName: "users",
-			Event: streams.StreamRecord{
-				TableName:  "users",
-				RecordType: streams.InsertRecord,
-			},
-			RetryCount: 5, // Already at max
-			MaxRetries: 5,
+			ID:          "users-456",
+			TableName:   "users",
+			EventData:   eventData,
+			RetryCount:  5, // Already at max
+			MaxRetries:  5,
 		}
 
 		// Should not panic with nil redis client
@@ -118,14 +124,16 @@ func TestProcessRetryEvent(t *testing.T) {
 func TestRetryEventStructure(t *testing.T) {
 	t.Run("retry event has all required fields", func(t *testing.T) {
 		event := redis.RetryEvent{
+			ID:          "orders-789",
 			TableName:   "orders",
-			Event:       streams.StreamRecord{},
+			EventData:   []byte(`{}`),
 			RetryCount:  2,
 			MaxRetries:  5,
 			NextRetryAt: time.Now(),
 		}
 
 		assert.Equal(t, "orders", event.TableName)
+		assert.Equal(t, "orders-789", event.ID)
 		assert.Equal(t, 2, event.RetryCount)
 		assert.Equal(t, 5, event.MaxRetries)
 		assert.True(t, !event.NextRetryAt.IsZero())

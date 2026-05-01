@@ -150,7 +150,7 @@ func TestHTTPDestination(t *testing.T) {
 		assert.NotNil(t, dest)
 		assert.True(t, dest.eventTypes["INSERT"])
 		assert.True(t, dest.eventTypes["MODIFY"])
-		assert.True(t, dest.eventTypes["DELETE"])
+		assert.True(t, dest.eventTypes["REMOVE"])
 	})
 
 	t.Run("send filters by event type", func(t *testing.T) {
