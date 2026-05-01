@@ -33,7 +33,7 @@ Relay manages MongoDB collections ("tables") and enables CDC (Change Data Captur
 - **Idempotency**: Duplicate event prevention with TTL-based keys
 - **Retry with Backoff**: Exponential backoff (1s → 5m), max 5 retries
 - **Dead Letter Queue**: Failed events after max retries
-- **Pluggable Destinations**: Redis Streams, EventBridge, custom sinks
+- **Pluggable Destinations**: HTTP endpoints, EventBridge, custom sinks
 
 ## 🏗 Architecture
 
@@ -58,9 +58,10 @@ cdc:retry:<tableName>            # Retry queue (sorted set)
 cdc:dlq:<tableName>              # Dead letter queue (list)
 cdc:processed:<tableName>:<id>   # Idempotency key (TTL: 24h)
 cdc:event:<id>                   # Event payload storage
-cdc:events:<tableName>           # Redis Streams output
 cdc:config-change                # Pub/Sub channel for table changes
 ```
+
+**Note:** Redis is used for state management (resume tokens, idempotency, retry, pub/sub). Events are sent to HTTP endpoints configured per table.
 
 ## 🚀 Quick Start
 
@@ -176,7 +177,13 @@ curl -X POST http://localhost:8080/tables \
     "table_name": "users",
     "stream_enabled": true,
     "old_image": true,
-    "destinations": ["redis"]
+    "destinations": [
+      {
+        "type": "http",
+        "endpoint": "http://localhost:3000/events",
+        "event_types": ["INSERT", "MODIFY", "DELETE"]
+      }
+    ]
   }'
 ```
 
@@ -200,13 +207,35 @@ curl -X POST http://localhost:8080/tables \
   "stream_enabled": true,
   "old_image": true,
   "ttl_field": "expiresAt",
-  "destinations": ["redis", "eventbridge"]
+  "destinations": [
+    {
+      "type": "http",
+      "endpoint": "http://localhost:3000/events",
+      "event_types": ["INSERT", "MODIFY", "DELETE"]
+    }
+  ]
 }
 ```
 
+**Destination Configuration:**
+
+| Field         | Type     | Description                                      |
+| ------------- | -------- | ------------------------------------------------ |
+| `type`        | string   | Destination type: `http`, `eventbridge`          |
+| `endpoint`    | string   | HTTP endpoint URL (required for `http` type)     |
+| `bearer_token`| string   | Optional bearer token for authentication         |
+| `event_types` | []string | Events to send: `INSERT`, `MODIFY`, `DELETE`     |
+
+If `event_types` is not specified, all event types are sent by default.
+
+**HTTP Request:**
+- Method: `POST`
+- Headers: `Content-Type: application/json`, `Authorization: Bearer <token>` (if configured)
+- Body: `StreamRecord` JSON (contains `tableName`, `recordType`, `newImage`, `oldImage`, `timestamp`)
+
 ### Example Requests
 
-**Create table with streaming:**
+**Create table with streaming (HTTP destination):**
 
 ```bash
 curl -X POST http://localhost:8080/tables \
@@ -215,7 +244,57 @@ curl -X POST http://localhost:8080/tables \
     "table_name": "orders",
     "stream_enabled": true,
     "old_image": true,
-    "destinations": ["redis"]
+    "destinations": [
+      {
+        "type": "http",
+        "endpoint": "http://localhost:3000/events",
+        "event_types": ["INSERT", "MODIFY", "DELETE"]
+      }
+    ]
+  }'
+```
+
+**Create table with bearer token authentication:**
+
+```bash
+curl -X POST http://localhost:8080/tables \
+  -H "Content-Type: application/json" \
+  -d '{
+    "table_name": "orders",
+    "stream_enabled": true,
+    "old_image": true,
+    "destinations": [
+      {
+        "type": "http",
+        "endpoint": "http://localhost:3000/events",
+        "bearer_token": "my-secret-token",
+        "event_types": ["INSERT", "MODIFY", "DELETE"]
+      }
+    ]
+  }'
+```
+
+**Create table with multiple destinations:**
+
+```bash
+curl -X POST http://localhost:8080/tables \
+  -H "Content-Type: application/json" \
+  -d '{
+    "table_name": "orders",
+    "stream_enabled": true,
+    "old_image": true,
+    "destinations": [
+      {
+        "type": "http",
+        "endpoint": "http://localhost:3000/events",
+        "event_types": ["INSERT", "DELETE"]
+      },
+      {
+        "type": "http",
+        "endpoint": "http://localhost:3001/audit",
+        "event_types": ["MODIFY"]
+      }
+    ]
   }'
 ```
 
@@ -244,8 +323,10 @@ curl http://localhost:8080/tables | jq .
 | ------------------ | -------- | ------- | ---------------------------------- |
 | `MONGODB_URI`      | **Yes**  | -       | MongoDB connection string          |
 | `MONGODB_DATABASE` | **Yes**  | -       | Database name                      |
-| `REDIS_URI`        | **Yes**  | -       | Redis URI/DSN (see examples below) |
+| `REDIS_URI`        | **Yes**  | -       | Redis URI/DSN for state management |
 | `PORT`             | No       | `8080`  | API server port                    |
+
+**Note:** HTTP endpoints are configured per-table via the API, not via environment variables.
 
 ### Redis URI Format
 
@@ -429,10 +510,12 @@ relay/
 # Using the example script
 ./examples/monitor_queues.sh
 
-# Or manually with Redis CLI
+# Or manually with Redis CLI (for retry and DLQ queues)
 redis-cli KEYS "cdc:retry:*"
 redis-cli KEYS "cdc:dlq:*"
 ```
+
+**Note:** Events are sent to HTTP endpoints configured per table. Monitor your HTTP service logs for incoming events.
 
 ## 🔒 Critical Guarantees
 

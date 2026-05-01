@@ -1,14 +1,15 @@
 package dispatch
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"sync"
 	"time"
 
-	"github.com/redis/go-redis/v9"
 	"github.com/sergiors/relay/internal/streams"
 )
 
@@ -81,74 +82,86 @@ func (d *Dispatcher) Close() error {
 	return lastErr
 }
 
-// RedisDestination sends records to Redis Streams
-type RedisDestination struct {
-	name   string
-	client *redis.Client
-	stream string
+// HTTPDestination sends records to an HTTP endpoint via POST
+type HTTPDestination struct {
+	name        string
+	client      *http.Client
+	endpoint    string
+	eventTypes  map[string]bool
+	bearerToken string
 }
 
-// NewRedisDestination creates a Redis destination using URI
-func NewRedisDestination(redisURI string) (*RedisDestination, error) {
-	opts, err := redis.ParseURL(redisURI)
-	if err != nil {
-		return nil, fmt.Errorf("parse redis URI: %w", err)
+// NewHTTPDestination creates an HTTP destination
+func NewHTTPDestination(endpoint string, bearerToken string, eventTypes []string) (*HTTPDestination, error) {
+	if endpoint == "" {
+		return nil, fmt.Errorf("endpoint is required")
 	}
 
-	client := redis.NewClient(opts)
-
-	// Verify connection
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	if err := client.Ping(ctx).Err(); err != nil {
-		return nil, fmt.Errorf("ping redis: %w", err)
+	// Build event type filter
+	eventTypeFilter := make(map[string]bool)
+	for _, et := range eventTypes {
+		eventTypeFilter[et] = true
 	}
 
-	return &RedisDestination{
-		name:   "redis:" + opts.Addr,
-		client: client,
-		stream: "cdc:events",
+	// Default to all types if none specified
+	if len(eventTypeFilter) == 0 {
+		eventTypeFilter["INSERT"] = true
+		eventTypeFilter["MODIFY"] = true
+		eventTypeFilter["DELETE"] = true
+	}
+
+	return &HTTPDestination{
+		name:        "http:" + endpoint,
+		client:      &http.Client{Timeout: 30 * time.Second},
+		endpoint:    endpoint,
+		bearerToken: bearerToken,
+		eventTypes:  eventTypeFilter,
 	}, nil
 }
 
-func (r *RedisDestination) Name() string {
-	return r.name
+func (h *HTTPDestination) Name() string {
+	return h.name
 }
 
-func (r *RedisDestination) Send(ctx context.Context, record streams.StreamRecord) error {
+func (h *HTTPDestination) Send(ctx context.Context, record streams.StreamRecord) error {
+	// Filter by event type
+	if !h.eventTypes[string(record.RecordType)] {
+		log.Printf("Skipping event type %s for HTTP destination", record.RecordType)
+		return nil
+	}
+
 	data, err := json.Marshal(record)
 	if err != nil {
 		return fmt.Errorf("marshal record: %w", err)
 	}
 
-	// XADD to Redis Streams
-	// Stream key: cdc:events:<table>
-	// Format: * (auto-generated ID) with fields
-	streamKey := fmt.Sprintf("cdc:events:%s", record.TableName)
-
-	id, err := r.client.XAdd(ctx, &redis.XAddArgs{
-		Stream: streamKey,
-		ID:     "*", // Auto-generate ID
-		Values: map[string]interface{}{
-			"data":      string(data),
-			"timestamp": record.Timestamp.UnixNano(),
-			"type":      string(record.RecordType),
-		},
-	}).Result()
-
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, h.endpoint, bytes.NewReader(data))
 	if err != nil {
-		return fmt.Errorf("xadd to redis: %w", err)
+		return fmt.Errorf("create request: %w", err)
 	}
 
-	log.Printf("Sent event to Redis Streams %s with ID %s", streamKey, id)
+	req.Header.Set("Content-Type", "application/json")
+
+	// Add bearer token if configured
+	if h.bearerToken != "" {
+		req.Header.Set("Authorization", "Bearer "+h.bearerToken)
+	}
+
+	resp, err := h.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	log.Printf("Sent event to HTTP endpoint %s (status: %d)", h.endpoint, resp.StatusCode)
 	return nil
 }
 
-func (r *RedisDestination) Close() error {
-	if r.client != nil {
-		return r.client.Close()
-	}
+func (h *HTTPDestination) Close() error {
 	return nil
 }
 

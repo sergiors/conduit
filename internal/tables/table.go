@@ -10,16 +10,24 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
+// DestinationConfig represents a destination configuration
+type DestinationConfig struct {
+	Type        string   `bson:"type" json:"type"`
+	Endpoint    string   `bson:"endpoint,omitempty" json:"endpoint"`
+	BearerToken string   `bson:"bearer_token,omitempty" json:"bearer_token,omitempty"`
+	EventTypes  []string `bson:"event_types,omitempty" json:"event_types"` // INSERT, MODIFY, DELETE
+}
+
 // Table represents a DynamoDB-style table configuration
 type Table struct {
-	ID            string    `bson:"_id,omitempty" json:"_id,omitempty"`
-	TableName     string    `bson:"table_name" json:"table_name"`
-	StreamEnabled bool      `bson:"stream_enabled" json:"stream_enabled"`
-	OldImage      bool      `bson:"old_image" json:"old_image"`
-	TTLField      string    `bson:"ttl_field,omitempty" json:"ttl_field,omitempty"`
-	Destinations  []string  `bson:"destinations" json:"destinations"`
-	CreatedAt     time.Time `bson:"created_at" json:"created_at"`
-	UpdatedAt     time.Time `bson:"updated_at" json:"updated_at"`
+	ID            string            `bson:"_id,omitempty" json:"_id,omitempty"`
+	TableName     string            `bson:"table_name" json:"table_name"`
+	StreamEnabled bool              `bson:"stream_enabled" json:"stream_enabled"`
+	OldImage      bool              `bson:"old_image" json:"old_image"`
+	TTLField      string            `bson:"ttl_field,omitempty" json:"ttl_field,omitempty"`
+	Destinations  []DestinationConfig `bson:"destinations" json:"destinations"`
+	CreatedAt     time.Time         `bson:"created_at" json:"created_at"`
+	UpdatedAt     time.Time         `bson:"updated_at" json:"updated_at"`
 }
 
 // Store manages table configurations in MongoDB

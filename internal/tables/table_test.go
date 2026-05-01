@@ -23,7 +23,7 @@ func TestTableValidation(t *testing.T) {
 			TableName:     "users",
 			StreamEnabled: true,
 			OldImage:      false,
-			Destinations:  []string{"redis"},
+			Destinations:  []DestinationConfig{{Type: "redis"}},
 		}
 
 		assert.Equal(t, "users", table.TableName)
@@ -37,7 +37,7 @@ func TestTableValidation(t *testing.T) {
 			TableName:     "orders",
 			StreamEnabled: true,
 			OldImage:      true,
-			Destinations:  []string{"redis", "eventbridge"},
+			Destinations:  []DestinationConfig{{Type: "redis"}, {Type: "eventbridge"}},
 		}
 
 		assert.True(t, table.OldImage, "OldImage should be true for tracking changes")
@@ -121,7 +121,7 @@ func TestStoreCRUD(t *testing.T) {
 			TableName:     "test_table",
 			StreamEnabled: true,
 			OldImage:      true,
-			Destinations:  []string{"redis"},
+			Destinations:  []DestinationConfig{{Type: "redis"}},
 		}
 
 		err := store.Create(ctx, table)
@@ -147,14 +147,14 @@ func TestStoreCRUD(t *testing.T) {
 	t.Run("update table", func(t *testing.T) {
 		table, _ := store.Get(ctx, "test_table")
 		table.StreamEnabled = false
-		table.Destinations = []string{"eventbridge"}
+		table.Destinations = []DestinationConfig{{Type: "eventbridge"}}
 
 		err := store.Update(ctx, table)
 		require.NoError(t, err)
 
 		updated, _ := store.Get(ctx, "test_table")
 		assert.False(t, updated.StreamEnabled)
-		assert.Equal(t, []string{"eventbridge"}, updated.Destinations)
+		assert.Equal(t, []DestinationConfig{{Type: "eventbridge"}}, updated.Destinations)
 		assert.True(t, updated.UpdatedAt.After(table.UpdatedAt))
 	})
 
@@ -227,7 +227,7 @@ func TestTableBSONTags(t *testing.T) {
 			StreamEnabled: true,
 			OldImage:      true,
 			TTLField:      "expiresAt",
-			Destinations:  []string{"redis"},
+			Destinations:  []DestinationConfig{{Type: "redis"}},
 		}
 
 		data, err := bson.Marshal(table)

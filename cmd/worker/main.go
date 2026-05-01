@@ -29,7 +29,7 @@ func NewWorker() (*Worker, error) {
 	// Get config from environment (REQUIRED - no defaults)
 	mongoURI := getRequiredEnv("MONGODB_URI")
 	mongoDatabase := getRequiredEnv("MONGODB_DATABASE")
-	redisURI := getRequiredEnv("REDIS_URI") // Full Redis URI (DSN)
+	redisURI := getRequiredEnv("REDIS_URI") // Redis URI for client (used for resume tokens, idempotency, pub/sub)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -74,7 +74,6 @@ func NewWorker() (*Worker, error) {
 		dispatcher,
 		watcher.Config{
 			SyncInterval: 30 * time.Second,
-			RedisURI:     redisURI,
 		},
 	)
 

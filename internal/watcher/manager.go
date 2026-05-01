@@ -25,8 +25,6 @@ type Manager struct {
 	watchers     map[string]*Watcher
 	mu           sync.RWMutex
 	syncInterval time.Duration
-	eventHandler func(tableName string, record streams.StreamRecord) error
-	redisURI     string
 	pubsub       *redis.PubSub
 	configChan   <-chan *redis.Message
 }
@@ -39,7 +37,7 @@ type Dispatcher interface {
 // Config holds watcher manager configuration
 type Config struct {
 	SyncInterval time.Duration // How often to sync with system.tables
-	RedisURI     string        // Redis URI for creating destinations
+	HTTPEndpoint string        // HTTP endpoint for creating destinations
 }
 
 // DefaultConfig returns sensible defaults
@@ -66,7 +64,6 @@ func NewManager(
 		dispatcher:   dispatcher,
 		watchers:     make(map[string]*Watcher),
 		syncInterval: cfg.SyncInterval,
-		redisURI:     cfg.RedisURI,
 	}
 }
 
@@ -321,29 +318,34 @@ func (m *Manager) syncWithTables(ctx context.Context) {
 }
 
 // registerDestinations registers event destinations for a table
-func (m *Manager) registerDestinations(ctx context.Context, tableName string, destinations []string) error {
+func (m *Manager) registerDestinations(ctx context.Context, tableName string, destinations []tables.DestinationConfig) error {
 	for _, dest := range destinations {
-		switch dest {
-		case "redis":
-			if m.redisURI == "" {
-				log.Printf("Redis destination requested but REDIS_URI not set")
+		switch dest.Type {
+		case "http":
+			if dest.Endpoint == "" {
+				log.Printf("HTTP destination requested but endpoint not set for table %s", tableName)
 				continue
 			}
-			redisDest, err := dispatch.NewRedisDestination(m.redisURI)
+			// Default to all event types if not specified
+			eventTypes := dest.EventTypes
+			if len(eventTypes) == 0 {
+				eventTypes = []string{"INSERT", "MODIFY", "DELETE"}
+			}
+			httpDest, err := dispatch.NewHTTPDestination(dest.Endpoint, dest.BearerToken, eventTypes)
 			if err != nil {
-				log.Printf("Failed to create Redis destination for %s: %v", tableName, err)
+				log.Printf("Failed to create HTTP destination for %s: %v", tableName, err)
 				continue
 			}
 			// Cast to Dispatcher interface to access Register method
 			if d, ok := m.dispatcher.(*dispatch.Dispatcher); ok {
-				d.Register(tableName, redisDest)
-				log.Printf("Registered Redis destination for table %s", tableName)
+				d.Register(tableName, httpDest)
+				log.Printf("Registered HTTP destination for table %s -> %s", tableName, dest.Endpoint)
 			}
 		case "eventbridge":
 			// TODO: Add EventBridge destination when configured
-			log.Printf("EventBridge destination not yet implemented")
+			log.Printf("EventBridge destination not yet implemented for table %s", tableName)
 		default:
-			log.Printf("Unknown destination type: %s", dest)
+			log.Printf("Unknown destination type: %s for table %s", dest.Type, tableName)
 		}
 	}
 	return nil

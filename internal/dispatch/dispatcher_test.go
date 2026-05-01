@@ -122,12 +122,64 @@ func TestDispatcherClose(t *testing.T) {
 	})
 }
 
-func TestRedisDestination(t *testing.T) {
-	t.Run("creation with invalid URI fails", func(t *testing.T) {
-		// This will fail because Redis is not running, which is expected
-		dest, err := NewRedisDestination("redis://invalid:6379")
+func TestHTTPDestination(t *testing.T) {
+	t.Run("creation with valid endpoint succeeds", func(t *testing.T) {
+		dest, err := NewHTTPDestination("http://localhost:8080/events", "", []string{"INSERT", "MODIFY", "DELETE"})
+		assert.NoError(t, err)
+		assert.NotNil(t, dest)
+		assert.Equal(t, "http://localhost:8080/events", dest.endpoint)
+		assert.Equal(t, "", dest.bearerToken)
+	})
+
+	t.Run("creation with bearer token", func(t *testing.T) {
+		dest, err := NewHTTPDestination("http://localhost:8080/events", "my-secret-token", []string{"INSERT"})
+		assert.NoError(t, err)
+		assert.NotNil(t, dest)
+		assert.Equal(t, "my-secret-token", dest.bearerToken)
+	})
+
+	t.Run("creation with empty endpoint fails", func(t *testing.T) {
+		dest, err := NewHTTPDestination("", "", []string{"INSERT"})
 		assert.Error(t, err)
 		assert.Nil(t, dest)
+	})
+
+	t.Run("creation with empty event types defaults to all", func(t *testing.T) {
+		dest, err := NewHTTPDestination("http://localhost:8080/events", "", []string{})
+		assert.NoError(t, err)
+		assert.NotNil(t, dest)
+		assert.True(t, dest.eventTypes["INSERT"])
+		assert.True(t, dest.eventTypes["MODIFY"])
+		assert.True(t, dest.eventTypes["DELETE"])
+	})
+
+	t.Run("send filters by event type", func(t *testing.T) {
+		// Create destination that only accepts INSERT events
+		dest, _ := NewHTTPDestination("http://localhost:8080/events", "", []string{"INSERT"})
+
+		ctx := context.Background()
+
+		// INSERT should be sent (will fail to connect, but filter passes)
+		insertRecord := streams.StreamRecord{
+			TableName:  "orders",
+			RecordType: streams.InsertRecord,
+		}
+		err := dest.Send(ctx, insertRecord)
+		assert.Error(t, err) // Connection error expected
+
+		// DELETE should be filtered out (no error, just skipped)
+		deleteRecord := streams.StreamRecord{
+			TableName:  "orders",
+			RecordType: streams.RemoveRecord,
+		}
+		err = dest.Send(ctx, deleteRecord)
+		assert.NoError(t, err) // Filtered out silently
+	})
+
+	t.Run("close succeeds", func(t *testing.T) {
+		dest, _ := NewHTTPDestination("http://localhost:8080/events", "", []string{"INSERT"})
+		err := dest.Close()
+		assert.NoError(t, err)
 	})
 }
 
