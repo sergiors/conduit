@@ -39,15 +39,15 @@ Relay manages MongoDB collections ("tables") and enables CDC (Change Data Captur
 
 ### Core Components
 
-| Component           | Package             | Description                             |
-| ------------------- | ------------------- | --------------------------------------- |
-| **API**             | `cmd/api`           | REST control plane for table management |
-| **Worker**          | `cmd/worker`        | CDC data plane with watchers            |
-| **Watcher Manager** | `internal/watcher`  | Centralized watcher lifecycle + Pub/Sub |
-| **Dispatcher**      | `internal/dispatch` | Event routing to destinations           |
-| **Retry Processor** | `internal/retry`    | Backoff and DLQ handling                |
-| **Redis Client**    | `internal/redis`    | State store + Pub/Sub operations        |
-| **Mongo Client**    | `internal/mongo`    | Database + change streams + replica set |
+| Component           | Package             | Description                                |
+| ------------------- | ------------------- | ------------------------------------------ |
+| **API**             | `cmd/api`           | REST control plane for table management    |
+| **Worker**          | `cmd/worker`        | CDC data plane with watchers               |
+| **Watcher Manager** | `internal/watcher`  | Centralized watcher lifecycle + Pub/Sub    |
+| **Dispatcher**      | `internal/dispatch` | Event routing to destinations              |
+| **Retry Processor** | `internal/retry`    | Backoff and DLQ handling                   |
+| **Redis Client**    | `internal/redis`    | State store + Pub/Sub operations           |
+| **Mongo Client**    | `internal/mongo`    | Database + change streams + replica set    |
 | **Tables Store**    | `internal/tables`   | Configuration management (`config.tables`) |
 
 ### Redis Key Structure
@@ -206,7 +206,7 @@ curl -X POST http://localhost:8080/tables \
   "table_name": "users",
   "stream_enabled": true,
   "old_image": true,
-  "ttl_field": "expiresAt",
+  "ttl_attribute": "expiresAt",
   "deletion_protection": true,
   "destinations": [
     {
@@ -220,27 +220,28 @@ curl -X POST http://localhost:8080/tables \
 
 **Table Configuration:**
 
-| Field                | Type   | Default | Description                                      |
-| -------------------- | ------ | ------- | ------------------------------------------------ |
-| `table_name`         | string | -       | Name of the MongoDB collection                   |
-| `stream_enabled`     | bool   | false   | Enable CDC streaming for this table              |
-| `old_image`          | bool   | false   | Include old document state in change events      |
-| `ttl_field`          | string | -       | Field name for TTL expiration                    |
-| `deletion_protection`| bool   | true    | Prevent accidental deletion (default: true)      |
-| `destinations`       | array  | []      | List of event destinations                       |
+| Field                 | Type   | Default | Description                                 |
+| --------------------- | ------ | ------- | ------------------------------------------- |
+| `table_name`          | string | -       | Name of the MongoDB collection              |
+| `stream_enabled`      | bool   | false   | Enable CDC streaming for this table         |
+| `old_image`           | bool   | false   | Include old document state in change events |
+| `ttl_attribute`       | string | -       | Field name for TTL expiration               |
+| `deletion_protection` | bool   | true    | Prevent accidental deletion (default: true) |
+| `destinations`        | array  | []      | List of event destinations                  |
 
 **Destination Configuration:**
 
-| Field         | Type     | Description                                      |
-| ------------- | -------- | ------------------------------------------------ |
-| `type`        | string   | Destination type: `http`, `eventbridge`          |
-| `endpoint`    | string   | HTTP endpoint URL (required for `http` type)     |
-| `bearer_token`| string   | Optional bearer token for authentication         |
-| `event_types` | []string | Events to send: `INSERT`, `MODIFY`, `DELETE`     |
+| Field          | Type     | Description                                  |
+| -------------- | -------- | -------------------------------------------- |
+| `type`         | string   | Destination type: `http`, `eventbridge`      |
+| `endpoint`     | string   | HTTP endpoint URL (required for `http` type) |
+| `bearer_token` | string   | Optional bearer token for authentication     |
+| `event_types`  | []string | Events to send: `INSERT`, `MODIFY`, `REMOVE` |
 
 If `event_types` is not specified, all event types are sent by default.
 
 **HTTP Request:**
+
 - Method: `POST`
 - Headers: `Content-Type: application/json`, `Authorization: Bearer <token>` (if configured)
 - Body: `StreamRecord` JSON (contains `tableName`, `recordType`, `newImage`, `oldImage`, `timestamp`)
@@ -260,7 +261,7 @@ curl -X POST http://localhost:8080/tables \
       {
         "type": "http",
         "endpoint": "http://localhost:3000/events",
-        "event_types": ["INSERT", "MODIFY", "DELETE"]
+        "event_types": ["INSERT", "MODIFY", "REMOVE"]
       }
     ]
   }'
@@ -280,7 +281,7 @@ curl -X POST http://localhost:8080/tables \
         "type": "http",
         "endpoint": "http://localhost:3000/events",
         "bearer_token": "my-secret-token",
-        "event_types": ["INSERT", "MODIFY", "DELETE"]
+        "event_types": ["INSERT", "MODIFY", "REMOVE"]
       }
     ]
   }'
@@ -299,7 +300,7 @@ curl -X POST http://localhost:8080/tables \
       {
         "type": "http",
         "endpoint": "http://localhost:3000/events",
-        "event_types": ["INSERT", "DELETE"]
+        "event_types": ["INSERT", "REMOVE"]
       },
       {
         "type": "http",
@@ -419,7 +420,7 @@ Streaming is **explicitly enabled per table**:
 
 1. **Initial Load**: Fetch all `stream_enabled=true` tables from `config.tables`
 2. **Start Watchers**: One watcher per enabled table
-3. **Sync Loop**: 
+3. **Sync Loop**:
    - Polling: Diff with `config.tables` every 30s (fallback)
    - **Push notifications**: Immediate sync via Redis Pub/Sub when tables change
 4. **Resume Tokens**: Updated after each successful batch

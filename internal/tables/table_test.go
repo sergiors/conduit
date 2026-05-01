@@ -48,7 +48,7 @@ func TestTableValidation(t *testing.T) {
 		table := Table{
 			TableName:     "sessions",
 			StreamEnabled: false,
-			TTLField:      "expiresAt",
+			TTLAttribute:      "expiresAt",
 		}
 
 		assert.Equal(t, "expiresAt", table.TTLField)
@@ -309,7 +309,7 @@ func TestTableBSONTags(t *testing.T) {
 			TableName:     "test",
 			StreamEnabled: true,
 			OldImage:      true,
-			TTLField:      "expiresAt",
+			TTLAttribute:      "expiresAt",
 			Destinations:  []DestinationConfig{{Type: "redis"}},
 		}
 

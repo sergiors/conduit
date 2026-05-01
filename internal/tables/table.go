@@ -47,7 +47,7 @@ type Table struct {
 	TableName          string            `bson:"table_name" json:"table_name"`
 	StreamEnabled      bool              `bson:"stream_enabled" json:"stream_enabled"`
 	OldImage           bool              `bson:"old_image" json:"old_image"`
-	TTLField           string            `bson:"ttl_attribute,omitempty" json:"ttl_attribute,omitempty"`
+	TTLAttribute       string            `bson:"ttl_attribute,omitempty" json:"ttl_attribute,omitempty"`
 	Destinations       []DestinationConfig `bson:"destinations" json:"destinations"`
 	DeletionProtection bool              `bson:"deletion_protection" json:"deletion_protection"`
 	CreatedAt          time.Time         `bson:"created_at" json:"created_at"`
