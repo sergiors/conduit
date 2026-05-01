@@ -106,7 +106,7 @@ func NewHTTPDestination(endpoint string, bearerToken string, eventTypes []string
 	if len(eventTypeFilter) == 0 {
 		eventTypeFilter["INSERT"] = true
 		eventTypeFilter["MODIFY"] = true
-		eventTypeFilter["DELETE"] = true
+		eventTypeFilter["REMOVE"] = true
 	}
 
 	return &HTTPDestination{

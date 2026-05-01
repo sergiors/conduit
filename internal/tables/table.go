@@ -11,12 +11,34 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
+// ValidEventTypes are the allowed event types for destinations
+var ValidEventTypes = []string{"INSERT", "MODIFY", "REMOVE"}
+
 // DestinationConfig represents a destination configuration
 type DestinationConfig struct {
 	Type        string   `bson:"type" json:"type"`
 	Endpoint    string   `bson:"endpoint,omitempty" json:"endpoint"`
 	BearerToken string   `bson:"bearer_token,omitempty" json:"bearer_token,omitempty"`
-	EventTypes  []string `bson:"event_types,omitempty" json:"event_types"` // INSERT, MODIFY, DELETE
+	EventTypes  []string `bson:"event_types,omitempty" json:"event_types"` // INSERT, MODIFY, REMOVE
+}
+
+// ValidateEventTypes validates that all event types are valid
+func (d *DestinationConfig) ValidateEventTypes() error {
+	if len(d.EventTypes) == 0 {
+		return nil // Empty means all types, which is valid
+	}
+
+	validSet := make(map[string]bool)
+	for _, et := range ValidEventTypes {
+		validSet[et] = true
+	}
+
+	for _, et := range d.EventTypes {
+		if !validSet[et] {
+			return fmt.Errorf("invalid event type '%s': must be one of INSERT, MODIFY, REMOVE", et)
+		}
+	}
+	return nil
 }
 
 // Table represents a DynamoDB-style table configuration

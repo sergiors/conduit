@@ -120,6 +120,14 @@ func (s *Server) createTable(c *gin.Context) {
 		return
 	}
 
+	// Validate destination event types
+	for i, dest := range table.Destinations {
+		if err := dest.ValidateEventTypes(); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("destination[%d]: %v", i, err)})
+			return
+		}
+	}
+
 	// Set deletion protection to true by default
 	if !table.DeletionProtection {
 		table.DeletionProtection = true
@@ -150,6 +158,14 @@ func (s *Server) updateTable(c *gin.Context) {
 	if table.TableName == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Table name is required"})
 		return
+	}
+
+	// Validate destination event types
+	for i, dest := range table.Destinations {
+		if err := dest.ValidateEventTypes(); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("destination[%d]: %v", i, err)})
+			return
+		}
 	}
 
 	if err := s.tableStore.Update(ctx, &table); err != nil {

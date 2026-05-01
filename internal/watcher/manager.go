@@ -334,7 +334,7 @@ func (m *Manager) registerDestinations(ctx context.Context, tableName string, de
 			// Default to all event types if not specified
 			eventTypes := dest.EventTypes
 			if len(eventTypes) == 0 {
-				eventTypes = []string{"INSERT", "MODIFY", "DELETE"}
+				eventTypes = []string{"INSERT", "MODIFY", "REMOVE"}
 			}
 			httpDest, err := dispatch.NewHTTPDestination(dest.Endpoint, dest.BearerToken, eventTypes)
 			if err != nil {
