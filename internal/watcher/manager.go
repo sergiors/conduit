@@ -213,8 +213,8 @@ func (m *Manager) stopWatcher(ctx context.Context, tableName string) error {
 
 // handleEvent processes an event with idempotency and retry logic
 func (m *Manager) handleEvent(ctx context.Context, tableName string, record streams.StreamRecord) error {
-	// Generate event ID: {table}-{type}-{timestamp}
-	eventID := fmt.Sprintf("%s-%s-%d", tableName, record.RecordType, record.Timestamp.UnixNano())
+	// Generate event ID: {table}:{type}:{timestamp}
+	eventID := fmt.Sprintf("%s:%s:%d", tableName, record.RecordType, record.Timestamp.UnixNano())
 
 	// Check idempotency
 	processed, err := m.redisClient.IsProcessed(ctx, eventID)
