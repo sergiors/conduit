@@ -20,14 +20,15 @@ type DestinationConfig struct {
 
 // Table represents a DynamoDB-style table configuration
 type Table struct {
-	ID            string            `bson:"_id,omitempty" json:"_id,omitempty"`
-	TableName     string            `bson:"table_name" json:"table_name"`
-	StreamEnabled bool              `bson:"stream_enabled" json:"stream_enabled"`
-	OldImage      bool              `bson:"old_image" json:"old_image"`
-	TTLField      string            `bson:"ttl_field,omitempty" json:"ttl_field,omitempty"`
-	Destinations  []DestinationConfig `bson:"destinations" json:"destinations"`
-	CreatedAt     time.Time         `bson:"created_at" json:"created_at"`
-	UpdatedAt     time.Time         `bson:"updated_at" json:"updated_at"`
+	ID                 string            `bson:"_id,omitempty" json:"_id,omitempty"`
+	TableName          string            `bson:"table_name" json:"table_name"`
+	StreamEnabled      bool              `bson:"stream_enabled" json:"stream_enabled"`
+	OldImage           bool              `bson:"old_image" json:"old_image"`
+	TTLField           string            `bson:"ttl_field,omitempty" json:"ttl_field,omitempty"`
+	Destinations       []DestinationConfig `bson:"destinations" json:"destinations"`
+	DeletionProtection bool              `bson:"deletion_protection" json:"deletion_protection"`
+	CreatedAt          time.Time         `bson:"created_at" json:"created_at"`
+	UpdatedAt          time.Time         `bson:"updated_at" json:"updated_at"`
 }
 
 // Store manages table configurations in MongoDB
@@ -147,9 +148,27 @@ func (s *Store) Update(ctx context.Context, table *Table) error {
 	return err
 }
 
-// Delete removes a table configuration
+// Delete removes a table configuration and its MongoDB collection
 func (s *Store) Delete(ctx context.Context, name string) error {
-	_, err := s.collection.DeleteOne(ctx, bson.M{"table_name": name})
+	// Get table to check deletion protection
+	table, err := s.Get(ctx, name)
+	if err != nil {
+		return fmt.Errorf("get table: %w", err)
+	}
+
+	// Check deletion protection
+	if table.DeletionProtection {
+		return fmt.Errorf("deletion protection is enabled for table %s", name)
+	}
+
+	// Drop the MongoDB collection
+	db := s.client.Database(s.database)
+	if err := db.Collection(name).Drop(ctx); err != nil {
+		return fmt.Errorf("drop collection: %w", err)
+	}
+
+	// Delete the configuration
+	_, err = s.collection.DeleteOne(ctx, bson.M{"table_name": name})
 	return err
 }
 

@@ -54,6 +54,25 @@ func TestTableValidation(t *testing.T) {
 		assert.Equal(t, "expiresAt", table.TTLField)
 		assert.False(t, table.StreamEnabled)
 	})
+
+	t.Run("table with deletion protection enabled by default", func(t *testing.T) {
+		table := Table{
+			TableName:     "users",
+			StreamEnabled: true,
+		}
+
+		assert.False(t, table.DeletionProtection, "DeletionProtection should be false when not explicitly set")
+	})
+
+	t.Run("table with deletion protection explicitly enabled", func(t *testing.T) {
+		table := Table{
+			TableName:          "users",
+			StreamEnabled:      true,
+			DeletionProtection: true,
+		}
+
+		assert.True(t, table.DeletionProtection, "DeletionProtection should be true when explicitly set")
+	})
 }
 
 func TestTableTimestamps(t *testing.T) {
@@ -158,16 +177,80 @@ func TestStoreCRUD(t *testing.T) {
 		assert.True(t, updated.UpdatedAt.After(table.UpdatedAt))
 	})
 
+	t.Run("delete table with deletion protection enabled fails", func(t *testing.T) {
+		// Create table with deletion protection enabled
+		protectedTable := &Table{
+			TableName:          "protected_table",
+			StreamEnabled:      true,
+			DeletionProtection: true,
+		}
+		err := store.Create(ctx, protectedTable)
+		require.NoError(t, err)
+
+		// Try to delete - should fail
+		err = store.Delete(ctx, "protected_table")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "deletion protection is enabled")
+
+		// Table should still exist
+		exists, err := store.Get(ctx, "protected_table")
+		assert.NoError(t, err)
+		assert.NotNil(t, exists)
+
+		// Cleanup - disable protection first
+		protectedTable.DeletionProtection = false
+		err = store.Update(ctx, protectedTable)
+		require.NoError(t, err)
+		err = store.Delete(ctx, "protected_table")
+		require.NoError(t, err)
+	})
+
+	t.Run("delete table removes mongodb collection", func(t *testing.T) {
+		// Create table with deletion protection disabled
+		tableWithCollection := &Table{
+			TableName:          "collection_table",
+			StreamEnabled:      true,
+			DeletionProtection: false,
+		}
+		err := store.Create(ctx, tableWithCollection)
+		require.NoError(t, err)
+
+		// Verify collection exists
+		db := client.Database("relay_test")
+		collections, err := db.ListCollectionNames(ctx, bson.M{"name": "collection_table"})
+		require.NoError(t, err)
+		assert.Contains(t, collections, "collection_table")
+
+		// Delete table
+		err = store.Delete(ctx, "collection_table")
+		require.NoError(t, err)
+
+		// Verify configuration is removed
+		_, err = store.Get(ctx, "collection_table")
+		assert.Error(t, err)
+
+		// Verify collection is removed
+		collections, err = db.ListCollectionNames(ctx, bson.M{"name": "collection_table"})
+		require.NoError(t, err)
+		assert.NotContains(t, collections, "collection_table")
+	})
+
 	t.Run("delete table", func(t *testing.T) {
-		err := store.Delete(ctx, "test_table")
+		// Create table with deletion protection disabled
+		table := &Table{
+			TableName:          "test_table",
+			StreamEnabled:      true,
+			DeletionProtection: false,
+		}
+		err := store.Create(ctx, table)
+		require.NoError(t, err)
+
+		err = store.Delete(ctx, "test_table")
 		require.NoError(t, err)
 
 		_, err = store.Get(ctx, "test_table")
 		assert.Error(t, err)
 	})
-
-	// Cleanup
-	_ = store.Delete(ctx, "test_table")
 }
 
 func TestStoreListStreamEnabled(t *testing.T) {

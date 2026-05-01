@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -119,6 +120,11 @@ func (s *Server) createTable(c *gin.Context) {
 		return
 	}
 
+	// Set deletion protection to true by default
+	if !table.DeletionProtection {
+		table.DeletionProtection = true
+	}
+
 	if err := s.tableStore.Create(ctx, &table); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -169,6 +175,15 @@ func (s *Server) deleteTable(c *gin.Context) {
 	}
 
 	if err := s.tableStore.Delete(ctx, name); err != nil {
+		// Check for deletion protection error
+		if err.Error() == "get table: "+fmt.Sprintf("table not found") || err.Error() == "table not found" {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Table not found"})
+			return
+		}
+		if err.Error() == "deletion protection is enabled for table "+name {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Deletion protection is enabled. Disable it before deleting the table."})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

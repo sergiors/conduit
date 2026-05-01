@@ -207,6 +207,7 @@ curl -X POST http://localhost:8080/tables \
   "stream_enabled": true,
   "old_image": true,
   "ttl_field": "expiresAt",
+  "deletion_protection": true,
   "destinations": [
     {
       "type": "http",
@@ -216,6 +217,17 @@ curl -X POST http://localhost:8080/tables \
   ]
 }
 ```
+
+**Table Configuration:**
+
+| Field                | Type   | Default | Description                                      |
+| -------------------- | ------ | ------- | ------------------------------------------------ |
+| `table_name`         | string | -       | Name of the MongoDB collection                   |
+| `stream_enabled`     | bool   | false   | Enable CDC streaming for this table              |
+| `old_image`          | bool   | false   | Include old document state in change events      |
+| `ttl_field`          | string | -       | Field name for TTL expiration                    |
+| `deletion_protection`| bool   | true    | Prevent accidental deletion (default: true)      |
+| `destinations`       | array  | []      | List of event destinations                       |
 
 **Destination Configuration:**
 
@@ -307,6 +319,28 @@ curl -X PUT http://localhost:8080/tables \
     "table_name": "orders",
     "stream_enabled": false
   }'
+```
+
+**Disable deletion protection and delete table:**
+
+```bash
+# First, disable deletion protection
+curl -X PUT http://localhost:8080/tables \
+  -H "Content-Type: application/json" \
+  -d '{
+    "table_name": "orders",
+    "deletion_protection": false
+  }'
+
+# Then delete the table
+curl -X DELETE "http://localhost:8080/tables?name=orders"
+```
+
+**Delete table with protection enabled (fails):**
+
+```bash
+curl -X DELETE "http://localhost:8080/tables?name=orders"
+# Returns: 403 Forbidden - "Deletion protection is enabled. Disable it before deleting the table."
 ```
 
 **List tables:**
