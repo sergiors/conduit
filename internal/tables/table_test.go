@@ -323,6 +323,6 @@ func TestTableBSONTags(t *testing.T) {
 		assert.Equal(t, "test", decoded["table_name"])
 		assert.Equal(t, true, decoded["stream_enabled"])
 		assert.Equal(t, true, decoded["old_image"])
-		assert.Equal(t, "expiresAt", decoded["ttl_field"])
+		assert.Equal(t, "expiresAt", decoded["ttl_attribute"])
 	})
 }
