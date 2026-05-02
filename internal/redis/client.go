@@ -90,14 +90,6 @@ func (c *Client) processedKey(id string) string {
 	return "cdc:processed:" + id
 }
 
-func (c *Client) eventKey(id string) string {
-	return "cdc:event:" + id
-}
-
-func (c *Client) streamKey(tableName string) string {
-	return "cdc:events:" + tableName
-}
-
 // ResumeToken operations
 // GetResumeToken retrieves the resume token for a table
 func (c *Client) GetResumeToken(ctx context.Context, tableName string) (string, error) {
@@ -226,27 +218,6 @@ func (c *Client) SendToDLQ(ctx context.Context, tableName string, event interfac
 func (c *Client) GetDLQLength(ctx context.Context, tableName string) (int64, error) {
 	key := c.dlqKey(tableName)
 	return c.client.LLen(ctx, key).Result()
-}
-
-// Event storage operations
-// StoreEvent stores an event payload by ID
-func (c *Client) StoreEvent(ctx context.Context, id string, event interface{}, ttl time.Duration) error {
-	key := c.eventKey(id)
-	data, err := json.Marshal(event)
-	if err != nil {
-		return fmt.Errorf("marshal event: %w", err)
-	}
-	return c.client.Set(ctx, key, data, ttl).Err()
-}
-
-// GetEvent retrieves an event payload by ID
-func (c *Client) GetEvent(ctx context.Context, id string, dest interface{}) error {
-	key := c.eventKey(id)
-	data, err := c.client.Get(ctx, key).Result()
-	if err != nil {
-		return fmt.Errorf("get event: %w", err)
-	}
-	return json.Unmarshal([]byte(data), dest)
 }
 
 // Monitor operations

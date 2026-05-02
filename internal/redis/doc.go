@@ -8,11 +8,10 @@
 //
 // Key Naming Conventions:
 //
-//	cdc:resume_token:<tableName>  - Resume token for a table
+//	cdc:resume:<tableName>        - Resume token for a table
 //	cdc:retry:<tableName>         - Retry queue (sorted set by nextRetryAt)
 //	cdc:dlq:<tableName>           - Dead letter queue (list)
 //	cdc:processed:<table>:<type>:<ts> - Idempotency key (TTL: 24h)
-//	cdc:event:<id>                - Event payload storage
 //
 // Usage:
 //
