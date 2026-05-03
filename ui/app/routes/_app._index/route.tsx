@@ -12,6 +12,7 @@ import {
   CardHeader,
 } from "~/components/ui/card";
 import { Checkbox } from "~/components/ui/checkbox";
+import { Switch } from "~/components/ui/switch";
 import {
   Dialog,
   DialogClose,
@@ -199,7 +200,7 @@ function NewTableDialog() {
                   control={control}
                   render={({ field }) => (
                     <FieldLabel>
-                      <Checkbox
+                      <Switch
                         checked={field.value}
                         onCheckedChange={field.onChange}
                       />
@@ -215,7 +216,7 @@ function NewTableDialog() {
                   control={control}
                   render={({ field }) => (
                     <FieldLabel>
-                      <Checkbox
+                      <Switch
                         checked={field.value}
                         onCheckedChange={field.onChange}
                       />
@@ -231,7 +232,7 @@ function NewTableDialog() {
                   control={control}
                   render={({ field }) => (
                     <FieldLabel>
-                      <Checkbox
+                      <Switch
                         checked={field.value}
                         onCheckedChange={field.onChange}
                       />
