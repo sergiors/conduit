@@ -6,6 +6,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/sergiors/relay/internal/streams"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -17,10 +18,11 @@ var ValidEventTypes = []string{"INSERT", "MODIFY", "REMOVE"}
 
 // DestinationConfig represents a destination configuration
 type DestinationConfig struct {
-	Type        string   `bson:"type" json:"type"`
-	Endpoint    string   `bson:"endpoint,omitempty" json:"endpoint"`
-	BearerToken string   `bson:"bearer_token,omitempty" json:"bearer_token,omitempty"`
-	EventTypes  []string `bson:"event_types,omitempty" json:"event_types"` // INSERT, MODIFY, REMOVE
+	Type           string               `bson:"type" json:"type"`
+	Endpoint       string               `bson:"endpoint,omitempty" json:"endpoint"`
+	BearerToken    string               `bson:"bearer_token,omitempty" json:"bearer_token,omitempty"`
+	EventTypes     []string             `bson:"event_types,omitempty" json:"event_types"` // INSERT, MODIFY, REMOVE
+	FilterCriteria streams.FilterCriteria `bson:"filter_criteria,omitempty" json:"filterCriteria,omitempty"`
 }
 
 // ValidateEventTypes validates that all event types are valid

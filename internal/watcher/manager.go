@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"reflect"
 	"sync"
 	"time"
 
@@ -424,7 +425,7 @@ func (m *Manager) registerSingleDestination(ctx context.Context, tableName strin
 		if len(eventTypes) == 0 {
 			eventTypes = []string{"INSERT", "MODIFY", "REMOVE"}
 		}
-		httpDest, err := dispatch.NewHTTPDestination(dest.Endpoint, dest.BearerToken, eventTypes)
+		httpDest, err := dispatch.NewHTTPDestination(dest.Endpoint, dest.BearerToken, eventTypes, dest.FilterCriteria)
 		if err != nil {
 			log.Printf("Failed to create HTTP destination for %s: %v", tableName, err)
 			return
@@ -452,7 +453,7 @@ func (m *Manager) registerDestinations(ctx context.Context, tableName string, de
 			if len(eventTypes) == 0 {
 				eventTypes = []string{"INSERT", "MODIFY", "REMOVE"}
 			}
-			httpDest, err := dispatch.NewHTTPDestination(dest.Endpoint, dest.BearerToken, eventTypes)
+			httpDest, err := dispatch.NewHTTPDestination(dest.Endpoint, dest.BearerToken, eventTypes, dest.FilterCriteria)
 			if err != nil {
 				log.Printf("Failed to create HTTP destination for %s: %v", tableName, err)
 				continue
@@ -551,6 +552,55 @@ func configEqual(a, b tables.DestinationConfig) bool {
 	for _, et := range b.EventTypes {
 		if !aSet[et] {
 			return false
+		}
+	}
+	return imageFilterEqual(a.FilterCriteria.OldImage, b.FilterCriteria.OldImage) &&
+		imageFilterEqual(a.FilterCriteria.NewImage, b.FilterCriteria.NewImage)
+}
+
+func filterConditionEqual(a, b streams.FilterCondition) bool {
+	if !ptrStrEqual(a.Prefix, b.Prefix) || !ptrStrEqual(a.Suffix, b.Suffix) || !ptrBoolEqual(a.Exists, b.Exists) {
+		return false
+	}
+	if !reflect.DeepEqual(a.Numeric, b.Numeric) || !reflect.DeepEqual(a.AnythingBut, b.AnythingBut) {
+		return false
+	}
+	return true
+}
+
+func ptrStrEqual(a, b *string) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
+}
+
+func ptrBoolEqual(a, b *bool) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
+}
+
+func imageFilterEqual(a, b streams.ImageFilter) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for field, condsA := range a {
+		condsB, ok := b[field]
+		if !ok || len(condsA) != len(condsB) {
+			return false
+		}
+		for i := range condsA {
+			if !filterConditionEqual(condsA[i], condsB[i]) {
+				return false
+			}
 		}
 	}
 	return true

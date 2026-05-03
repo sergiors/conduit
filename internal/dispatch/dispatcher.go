@@ -118,15 +118,16 @@ func (d *Dispatcher) Clear(table string) {
 
 // HTTPDestination sends records to an HTTP endpoint via POST
 type HTTPDestination struct {
-	name        string
-	client      *http.Client
-	endpoint    string
-	eventTypes  map[string]bool
-	bearerToken string
+	name           string
+	client         *http.Client
+	endpoint       string
+	eventTypes     map[string]bool
+	bearerToken    string
+	filterCriteria streams.FilterCriteria
 }
 
 // NewHTTPDestination creates an HTTP destination
-func NewHTTPDestination(endpoint string, bearerToken string, eventTypes []string) (*HTTPDestination, error) {
+func NewHTTPDestination(endpoint string, bearerToken string, eventTypes []string, filterCriteria streams.FilterCriteria) (*HTTPDestination, error) {
 	if endpoint == "" {
 		return nil, fmt.Errorf("endpoint is required")
 	}
@@ -145,11 +146,12 @@ func NewHTTPDestination(endpoint string, bearerToken string, eventTypes []string
 	}
 
 	return &HTTPDestination{
-		name:        "http:" + endpoint,
-		client:      &http.Client{Timeout: 30 * time.Second},
-		endpoint:    endpoint,
-		bearerToken: bearerToken,
-		eventTypes:  eventTypeFilter,
+		name:           "http:" + endpoint,
+		client:         &http.Client{Timeout: 30 * time.Second},
+		endpoint:       endpoint,
+		bearerToken:    bearerToken,
+		eventTypes:     eventTypeFilter,
+		filterCriteria: filterCriteria,
 	}, nil
 }
 
@@ -161,6 +163,11 @@ func (h *HTTPDestination) Send(ctx context.Context, record streams.StreamRecord)
 	// Filter by event type
 	if !h.eventTypes[string(record.RecordType)] {
 		log.Printf("Skipping event type %s for HTTP destination", record.RecordType)
+		return nil
+	}
+
+	// Apply image filters
+	if !streams.MatchImage(record.OldImage, h.filterCriteria.OldImage) || !streams.MatchImage(record.NewImage, h.filterCriteria.NewImage) {
 		return nil
 	}
 

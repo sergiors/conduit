@@ -124,7 +124,7 @@ func TestDispatcherClose(t *testing.T) {
 
 func TestHTTPDestination(t *testing.T) {
 	t.Run("creation with valid endpoint succeeds", func(t *testing.T) {
-		dest, err := NewHTTPDestination("http://localhost:8080/events", "", []string{"INSERT", "MODIFY", "DELETE"})
+		dest, err := NewHTTPDestination("http://localhost:8080/events", "", []string{"INSERT", "MODIFY", "DELETE"}, streams.FilterCriteria{})
 		assert.NoError(t, err)
 		assert.NotNil(t, dest)
 		assert.Equal(t, "http://localhost:8080/events", dest.endpoint)
@@ -132,20 +132,20 @@ func TestHTTPDestination(t *testing.T) {
 	})
 
 	t.Run("creation with bearer token", func(t *testing.T) {
-		dest, err := NewHTTPDestination("http://localhost:8080/events", "my-secret-token", []string{"INSERT"})
+		dest, err := NewHTTPDestination("http://localhost:8080/events", "my-secret-token", []string{"INSERT"}, streams.FilterCriteria{})
 		assert.NoError(t, err)
 		assert.NotNil(t, dest)
 		assert.Equal(t, "my-secret-token", dest.bearerToken)
 	})
 
 	t.Run("creation with empty endpoint fails", func(t *testing.T) {
-		dest, err := NewHTTPDestination("", "", []string{"INSERT"})
+		dest, err := NewHTTPDestination("", "", []string{"INSERT"}, streams.FilterCriteria{})
 		assert.Error(t, err)
 		assert.Nil(t, dest)
 	})
 
 	t.Run("creation with empty event types defaults to all", func(t *testing.T) {
-		dest, err := NewHTTPDestination("http://localhost:8080/events", "", []string{})
+		dest, err := NewHTTPDestination("http://localhost:8080/events", "", []string{}, streams.FilterCriteria{})
 		assert.NoError(t, err)
 		assert.NotNil(t, dest)
 		assert.True(t, dest.eventTypes["INSERT"])
@@ -155,7 +155,7 @@ func TestHTTPDestination(t *testing.T) {
 
 	t.Run("send filters by event type", func(t *testing.T) {
 		// Create destination that only accepts INSERT events
-		dest, _ := NewHTTPDestination("http://localhost:8080/events", "", []string{"INSERT"})
+		dest, _ := NewHTTPDestination("http://localhost:8080/events", "", []string{"INSERT"}, streams.FilterCriteria{})
 
 		ctx := context.Background()
 
@@ -177,7 +177,7 @@ func TestHTTPDestination(t *testing.T) {
 	})
 
 	t.Run("close succeeds", func(t *testing.T) {
-		dest, _ := NewHTTPDestination("http://localhost:8080/events", "", []string{"INSERT"})
+		dest, _ := NewHTTPDestination("http://localhost:8080/events", "", []string{"INSERT"}, streams.FilterCriteria{})
 		err := dest.Close()
 		assert.NoError(t, err)
 	})

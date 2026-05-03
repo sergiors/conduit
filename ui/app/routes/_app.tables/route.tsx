@@ -290,7 +290,10 @@ export default function Route({ loaderData }: Route.ComponentProps) {
                             <span className="sr-only">Actions</span>
                           </Button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
+                        <DropdownMenuContent
+                          align="end"
+                          className="[&_[role='menuitem']]:cursor-pointer"
+                        >
                           <DropdownMenuItem
                             onClick={() => setEditingTable(table)}
                           >
