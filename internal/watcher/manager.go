@@ -25,9 +25,10 @@ type Manager struct {
 	redisClient    *redisclient.Client
 	dispatcher     Dispatcher
 	retryProcessor *retry.Processor
-	watchers       map[string]*Watcher
-	mu             sync.RWMutex
-	syncInterval   time.Duration
+	watchers             map[string]*Watcher
+	currentDestinations  map[string][]tables.DestinationConfig
+	mu                   sync.RWMutex
+	syncInterval         time.Duration
 	pubsub         *redis.PubSub
 	configChan     <-chan *redis.Message
 }
@@ -67,8 +68,9 @@ func NewManager(
 		redisClient:  redisClient,
 		dispatcher:   dispatcher,
 		retryProcessor: retryProcessor,
-		watchers:     make(map[string]*Watcher),
-		syncInterval: cfg.SyncInterval,
+		watchers:            make(map[string]*Watcher),
+		currentDestinations: make(map[string][]tables.DestinationConfig),
+		syncInterval:        cfg.SyncInterval,
 	}
 }
 
@@ -151,6 +153,7 @@ func (m *Manager) startWatcher(ctx context.Context, table tables.Table) error {
 	if err := m.registerDestinations(ctx, table.TableName, table.Destinations); err != nil {
 		log.Printf("Failed to register destinations for %s: %v", table.TableName, err)
 	}
+	m.currentDestinations[table.TableName] = table.Destinations
 
 	// Get resume token from Redis
 	resumeToken, err := m.redisClient.GetResumeToken(ctx, table.TableName)
@@ -202,6 +205,7 @@ func (m *Manager) stopWatcher(ctx context.Context, tableName string) error {
 	}
 
 	delete(m.watchers, tableName)
+	delete(m.currentDestinations, tableName)
 
 	// Unregister table from retry processor
 	if m.retryProcessor != nil {
@@ -370,29 +374,68 @@ func (m *Manager) syncWithTables(ctx context.Context) {
 	log.Printf("Sync complete: %d active watchers", len(enabledSet))
 }
 
-// refreshDestinations clears and re-registers destinations for a table (used on config change)
+// refreshDestinations diffs current vs desired destinations and only updates what changed
 func (m *Manager) refreshDestinations(ctx context.Context, tableName string) error {
-	// Get updated table config
 	table, err := m.tableStore.Get(ctx, tableName)
 	if err != nil {
 		log.Printf("Failed to fetch table %s for refresh: %v", tableName, err)
 		return err
 	}
 
-	// Clear existing destinations
-	if d, ok := m.dispatcher.(*dispatch.Dispatcher); ok {
-		d.Clear(tableName)
-		log.Printf("Cleared destinations for table %s", tableName)
+	d, ok := m.dispatcher.(*dispatch.Dispatcher)
+	if !ok {
+		return nil
 	}
 
-	// Re-register destinations with updated config
-	if err := m.registerDestinations(ctx, tableName, table.Destinations); err != nil {
-		log.Printf("Failed to re-register destinations for %s: %v", tableName, err)
-		return err
+	m.mu.RLock()
+	current := m.currentDestinations[tableName]
+	m.mu.RUnlock()
+
+	desired := table.Destinations
+	toAdd, toRemove := diffDestinations(current, desired)
+
+	for _, dest := range toRemove {
+		name := destinationName(dest)
+		d.Remove(tableName, name)
+		log.Printf("Removed destination %s for table %s", name, tableName)
 	}
 
-	log.Printf("Refreshed destinations for table %s", tableName)
+	for _, dest := range toAdd {
+		m.registerSingleDestination(ctx, tableName, dest, d)
+	}
+
+	m.mu.Lock()
+	m.currentDestinations[tableName] = desired
+	m.mu.Unlock()
+
+	log.Printf("Refreshed destinations for table %s (%d added, %d removed)", tableName, len(toAdd), len(toRemove))
 	return nil
+}
+
+// registerSingleDestination creates and registers a single destination
+func (m *Manager) registerSingleDestination(ctx context.Context, tableName string, dest tables.DestinationConfig, d *dispatch.Dispatcher) {
+	switch dest.Type {
+	case "http":
+		if dest.Endpoint == "" {
+			log.Printf("HTTP destination requested but endpoint not set for table %s", tableName)
+			return
+		}
+		eventTypes := dest.EventTypes
+		if len(eventTypes) == 0 {
+			eventTypes = []string{"INSERT", "MODIFY", "REMOVE"}
+		}
+		httpDest, err := dispatch.NewHTTPDestination(dest.Endpoint, dest.BearerToken, eventTypes)
+		if err != nil {
+			log.Printf("Failed to create HTTP destination for %s: %v", tableName, err)
+			return
+		}
+		d.Register(tableName, httpDest)
+		log.Printf("Registered HTTP destination for table %s -> %s", tableName, dest.Endpoint)
+	case "eventbridge":
+		log.Printf("EventBridge destination not yet implemented for table %s", tableName)
+	default:
+		log.Printf("Unknown destination type: %s for table %s", dest.Type, tableName)
+	}
 }
 
 // registerDestinations registers event destinations for a table
@@ -455,4 +498,60 @@ type WatcherStats struct {
 	EventsProcessed int64
 	LastError       error
 	LastErrorTime   time.Time
+}
+
+// diffDestinations compares current and desired destination configs, returning which to add/remove
+func diffDestinations(current, desired []tables.DestinationConfig) (toAdd, toRemove []tables.DestinationConfig) {
+	currentByKey := make(map[string]tables.DestinationConfig, len(current))
+	for _, c := range current {
+		currentByKey[destinationName(c)] = c
+	}
+
+	desiredByKey := make(map[string]tables.DestinationConfig, len(desired))
+	for _, d := range desired {
+		desiredByKey[destinationName(d)] = d
+	}
+
+	// Find destinations to remove: in current but not in desired, or config changed
+	for key, cur := range currentByKey {
+		des, exists := desiredByKey[key]
+		if !exists || !configEqual(cur, des) {
+			toRemove = append(toRemove, cur)
+		}
+	}
+
+	// Find destinations to add: in desired but not in current, or config changed
+	for key, des := range desiredByKey {
+		cur, exists := currentByKey[key]
+		if !exists || !configEqual(cur, des) {
+			toAdd = append(toAdd, des)
+		}
+	}
+
+	return
+}
+
+// destinationName builds the internal name for a destination config
+func destinationName(dest tables.DestinationConfig) string {
+	return dest.Type + ":" + dest.Endpoint
+}
+
+// configEqual compares two destination configs ignoring event type order
+func configEqual(a, b tables.DestinationConfig) bool {
+	if a.Type != b.Type || a.Endpoint != b.Endpoint || a.BearerToken != b.BearerToken {
+		return false
+	}
+	if len(a.EventTypes) != len(b.EventTypes) {
+		return false
+	}
+	aSet := make(map[string]bool, len(a.EventTypes))
+	for _, et := range a.EventTypes {
+		aSet[et] = true
+	}
+	for _, et := range b.EventTypes {
+		if !aSet[et] {
+			return false
+		}
+	}
+	return true
 }

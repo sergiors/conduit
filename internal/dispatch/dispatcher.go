@@ -81,6 +81,28 @@ func (d *Dispatcher) Close() error {
 	return lastErr
 }
 
+// Remove removes a single destination by name, closing it first
+func (d *Dispatcher) Remove(table, name string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	dests, ok := d.destinations[table]
+	if !ok {
+		return
+	}
+
+	for i, dest := range dests {
+		if dest.Name() == name {
+			dest.Close()
+			d.destinations[table] = append(dests[:i], dests[i+1:]...)
+			if len(d.destinations[table]) == 0 {
+				delete(d.destinations, table)
+			}
+			return
+		}
+	}
+}
+
 // Clear removes all destinations for a table (used when config changes)
 func (d *Dispatcher) Clear(table string) {
 	d.mu.Lock()
