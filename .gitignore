@@ -9,7 +9,6 @@ bin/
 *.out
 coverage.out
 coverage.html
-api
 
 # Data
 .mongodb_data/

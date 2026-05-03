@@ -9,7 +9,7 @@ all: fmt vet lint build test
 
 build: ## Build all packages
 	@echo "Building all packages..."
-	GOCACHE=$(GOCACHE) $(GO) build ./...
+	GOCACHE=$(GOCACHE) $(GO) build -o $(BUILD_DIR)/ ./...
 
 build-api: ## Build API server
 	@echo "Building API server..."
