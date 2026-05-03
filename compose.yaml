@@ -74,3 +74,13 @@ services:
       api:
         condition: service_started
     restart: unless-stopped
+
+  ui:
+    build:
+      context: ./ui
+      dockerfile: Dockerfile
+    ports:
+      - 80:80
+    depends_on:
+      - api
+    restart: unless-stopped

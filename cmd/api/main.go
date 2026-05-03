@@ -78,10 +78,10 @@ func main() {
 	router.Use(gin.Recovery())
 	router.Use(gin.Logger())
 
-	router.GET("/tables", server.listTables)
-	router.POST("/tables", server.createTable)
-	router.PUT("/tables", server.updateTable)
-	router.DELETE("/tables", server.deleteTable)
+	router.GET("/api/tables", server.listTables)
+	router.POST("/api/tables", server.createTable)
+	router.PUT("/api/tables", server.updateTable)
+	router.DELETE("/api/tables", server.deleteTable)
 	router.GET("/health", server.handleHealth)
 
 	port := getEnv("PORT", "8080")
