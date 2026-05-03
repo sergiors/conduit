@@ -23,6 +23,7 @@ import {
   DialogClose,
 } from "~/components/ui/dialog"
 import { Input } from "~/components/ui/input"
+import { Separator } from "~/components/ui/separator"
 import {
   Field,
   FieldLabel,
@@ -213,7 +214,11 @@ function NewTableDialog() {
               />
             </Field>
 
-            <FieldSeparator>Destinations</FieldSeparator>
+            <div className="flex items-center gap-4">
+              <Separator className="flex-1" />
+              <span className="text-sm font-medium">Destinations</span>
+              <Separator className="flex-1" />
+            </div>
 
             {destinations.map((dest, index) => (
               <div key={index} className="border rounded-lg p-4 space-y-4 relative">
