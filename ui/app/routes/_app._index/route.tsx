@@ -167,11 +167,9 @@ function NewTableDialog() {
                 control={control}
                 render={({ field }) => (
                   <FieldLabel>
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={field.value}
-                      onChange={field.onChange}
-                      className="h-4 w-4"
+                      onCheckedChange={field.onChange}
                     />
                     Stream Enabled
                   </FieldLabel>
@@ -185,11 +183,9 @@ function NewTableDialog() {
                 control={control}
                 render={({ field }) => (
                   <FieldLabel>
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={field.value}
-                      onChange={field.onChange}
-                      className="h-4 w-4"
+                      onCheckedChange={field.onChange}
                     />
                     Old Image
                   </FieldLabel>
@@ -203,11 +199,9 @@ function NewTableDialog() {
                 control={control}
                 render={({ field }) => (
                   <FieldLabel>
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={field.value}
-                      onChange={field.onChange}
-                      className="h-4 w-4"
+                      onCheckedChange={field.onChange}
                     />
                     Deletion Protection
                   </FieldLabel>
