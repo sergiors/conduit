@@ -31,6 +31,7 @@ import { Input } from "~/components/ui/input";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -107,6 +108,7 @@ function NewTableDialog() {
   });
 
   const destinations = watch("destinations");
+  const streamEnabled = watch("stream_enabled");
 
   const onSubmit = async (data: TableForm) => {
     try {
@@ -246,7 +248,7 @@ function NewTableDialog() {
               <Separator className="flex-1" />
             </div>
 
-            <div className="space-y-4">
+            <div className={`space-y-4 ${!streamEnabled ? "opacity-50 pointer-events-none" : ""}`}>
               {destinations.map((dest, index) => (
                 <Card key={index} className="relative">
                   {destinations.length > 1 && (
@@ -270,13 +272,22 @@ function NewTableDialog() {
                         name={`destinations.${index}.type`}
                         control={control}
                         render={({ field }) => (
-                          <Select {...field} value={field.value} onValueChange={field.onChange}>
+                          <Select
+                            {...field}
+                            value={field.value}
+                            onValueChange={field.onChange}
+                            disabled={!streamEnabled}
+                          >
                             <SelectTrigger>
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="http">HTTP</SelectItem>
-                              <SelectItem value="eventbridge" disabled>EventBridge</SelectItem>
+                              <SelectGroup>
+                                <SelectItem value="http">HTTP</SelectItem>
+                                <SelectItem value="eventbridge" disabled>
+                                  EventBridge
+                                </SelectItem>
+                              </SelectGroup>
                             </SelectContent>
                           </Select>
                         )}
@@ -290,6 +301,7 @@ function NewTableDialog() {
                           updateDestination(index, "endpoint", e.target.value)
                         }
                         placeholder="https://..."
+                        disabled={!streamEnabled}
                       />
                     </Field>
                     <Field>
@@ -305,6 +317,7 @@ function NewTableDialog() {
                         }
                         placeholder="Bearer token..."
                         type="password"
+                        disabled={!streamEnabled}
                       />
                     </Field>
                     <Field>
@@ -331,6 +344,7 @@ function NewTableDialog() {
                                   newEventTypes,
                                 );
                               }}
+                              disabled={!streamEnabled}
                             />
                             {eventType}
                           </label>
