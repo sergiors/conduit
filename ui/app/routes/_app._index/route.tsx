@@ -260,10 +260,10 @@ function NewTableDialog() {
                       </CardAction>
                     </CardHeader>
                   )}
-                  <CardContent className="space-y-4">
-                    <Field>
-                      <FieldLabel>
-                        Type
+                  <CardContent>
+                    <div className="grid grid-cols-1 gap-4">
+                      <div className="space-y-1.5">
+                        <label className="text-sm font-medium leading-none">Type</label>
                         <Controller
                           name={`destinations.${index}.type`}
                           control={control}
@@ -278,11 +278,9 @@ function NewTableDialog() {
                             </NativeSelect>
                           )}
                         />
-                      </FieldLabel>
-                    </Field>
-                    <Field>
-                      <FieldLabel>
-                        Endpoint
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-sm font-medium leading-none">Endpoint</label>
                         <Input
                           value={dest.endpoint || ""}
                           onChange={(e) =>
@@ -290,11 +288,9 @@ function NewTableDialog() {
                           }
                           placeholder="https://..."
                         />
-                      </FieldLabel>
-                    </Field>
-                    <Field>
-                      <FieldLabel>
-                        Bearer Token
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-sm font-medium leading-none">Bearer Token</label>
                         <Input
                           value={dest.bearer_token || ""}
                           onChange={(e) =>
@@ -307,38 +303,38 @@ function NewTableDialog() {
                           placeholder="Bearer token..."
                           type="password"
                         />
-                      </FieldLabel>
-                    </Field>
-                    <Field>
-                      <FieldLabel>Event Types</FieldLabel>
-                      <div className="flex gap-4">
-                        {["INSERT", "MODIFY", "REMOVE"].map((eventType) => (
-                          <label
-                            key={eventType}
-                            className="flex items-center gap-2 text-sm"
-                          >
-                            <Checkbox
-                              checked={
-                                dest.event_types?.includes(eventType) || false
-                              }
-                              onCheckedChange={(checked) => {
-                                const newEventTypes = checked
-                                  ? [...(dest.event_types || []), eventType]
-                                  : (dest.event_types || []).filter(
-                                      (t) => t !== eventType,
-                                    );
-                                updateDestination(
-                                  index,
-                                  "event_types",
-                                  newEventTypes,
-                                );
-                              }}
-                            />
-                            {eventType}
-                          </label>
-                        ))}
                       </div>
-                    </Field>
+                      <div className="space-y-1.5">
+                        <label className="text-sm font-medium leading-none">Event Types</label>
+                        <div className="flex gap-4">
+                          {["INSERT", "MODIFY", "REMOVE"].map((eventType) => (
+                            <label
+                              key={eventType}
+                              className="flex items-center gap-2 text-sm"
+                            >
+                              <Checkbox
+                                checked={
+                                  dest.event_types?.includes(eventType) || false
+                                }
+                                onCheckedChange={(checked) => {
+                                  const newEventTypes = checked
+                                    ? [...(dest.event_types || []), eventType]
+                                    : (dest.event_types || []).filter(
+                                        (t) => t !== eventType,
+                                      );
+                                  updateDestination(
+                                    index,
+                                    "event_types",
+                                    newEventTypes,
+                                  );
+                                }}
+                              />
+                              {eventType}
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
                   </CardContent>
                 </Card>
               ))}
