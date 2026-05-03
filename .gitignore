@@ -9,6 +9,7 @@ bin/
 *.out
 coverage.out
 coverage.html
+api
 
 # Data
 .mongodb_data/
@@ -27,3 +28,8 @@ coverage.html
 # OS
 .DS_Store
 Thumbs.db
+
+# UI
+ui/node_modules/
+ui/build/
+ui/.react-router/
