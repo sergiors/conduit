@@ -1,7 +1,9 @@
-import { useState } from "react";
-import { useRevalidator } from "react-router";
-
+import { zodResolver } from "@hookform/resolvers/zod";
 import { XIcon } from "lucide-react";
+import { useEffect } from "react";
+import { Controller, useForm } from "react-hook-form";
+import { z } from "zod";
+
 import { Button } from "~/components/ui/button";
 import {
   Card,
@@ -33,17 +35,15 @@ import {
 } from "~/components/ui/select";
 import { Separator } from "~/components/ui/separator";
 
-import { zodResolver } from "@hookform/resolvers/zod";
-import { Controller, useForm } from "react-hook-form";
-import { z } from "zod";
-
 import type { TableConfig } from "./loader.client";
 
 const destinationSchema = z.object({
   type: z.enum(["http", "eventbridge"]).default("http"),
   endpoint: z.string().min(1, "Endpoint is required"),
   bearer_token: z.string().optional(),
-  event_types: z.array(z.string()).min(1, "At least one event type is required"),
+  event_types: z
+    .array(z.string())
+    .min(1, "At least one event type is required"),
 });
 
 const tableSchema = z
@@ -52,26 +52,13 @@ const tableSchema = z
     stream_enabled: z.boolean().default(true),
     old_image: z.boolean().default(false),
     ttl_attribute: z.string().optional(),
-    destinations: z
-      .array(destinationSchema)
-      .min(1, "At least one destination is required"),
+    destinations: z.array(destinationSchema).default([]),
     deletion_protection: z.boolean().default(true),
   })
-  .refine(
-    (data) => {
-      // If stream is enabled, destinations must have valid data
-      if (data.stream_enabled) {
-        return data.destinations.every(
-          (d) => d.endpoint && d.endpoint.length > 0 && d.event_types.length > 0
-        );
-      }
-      return true;
-    },
-    {
-      message: "Destinations are required when stream is enabled",
-      path: ["destinations"],
-    }
-  );
+  .refine((data) => !data.stream_enabled || data.destinations.length > 0, {
+    message: "At least one destination is required",
+    path: ["destinations"],
+  });
 
 type TableForm = z.infer<typeof tableSchema>;
 
@@ -88,8 +75,6 @@ export function TableForm({
   onCancel,
   isSubmitting,
 }: TableFormProps) {
-  const revalidator = useRevalidator();
-
   const {
     control,
     handleSubmit,
@@ -114,16 +99,10 @@ export function TableForm({
         }
       : {
           table_name: "",
-          stream_enabled: true,
+          stream_enabled: false,
           old_image: false,
           ttl_attribute: "",
-          destinations: [
-            {
-              type: "http" as const,
-              endpoint: "",
-              event_types: [],
-            },
-          ],
+          destinations: [],
           deletion_protection: true,
         },
   });
@@ -131,7 +110,25 @@ export function TableForm({
   const destinations = watch("destinations");
   const streamEnabled = watch("stream_enabled");
 
+  // Add empty destination when enabling stream
+  useEffect(() => {
+    if (streamEnabled && destinations.length === 0) {
+      setValue("destinations", [
+        {
+          type: "http" as const,
+          endpoint: "",
+          bearer_token: "",
+          event_types: [],
+        },
+      ]);
+    }
+  }, [streamEnabled]);
+
   const submitHandler = async (data: TableForm) => {
+    // Clear destinations when stream is disabled
+    if (!data.stream_enabled) {
+      data.destinations = [];
+    }
     await onSubmit(data);
   };
 
@@ -153,19 +150,10 @@ export function TableForm({
     );
   };
 
-  const updateDestination = (index: number, field: string, value: unknown) => {
-    setValue(
-      "destinations",
-      destinations.map((d, i) => (i === index ? { ...d, [field]: value } : d)),
-    );
-  };
-
   return (
     <form onSubmit={handleSubmit(submitHandler)} className="space-y-6">
       <DialogHeader>
-        <DialogTitle>
-          {initialData ? "Edit Table" : "Create Table"}
-        </DialogTitle>
+        <DialogTitle>{initialData ? "Edit Table" : "Create Table"}</DialogTitle>
       </DialogHeader>
 
       <FieldGroup>
@@ -176,7 +164,11 @@ export function TableForm({
               name="table_name"
               control={control}
               render={({ field }) => (
-                <Input {...field} placeholder="users" disabled={!!initialData} />
+                <Input
+                  {...field}
+                  placeholder="users"
+                  disabled={!!initialData}
+                />
               )}
             />
             <FieldError errors={[errors.table_name]} />
@@ -237,6 +229,7 @@ export function TableForm({
                   <Checkbox
                     checked={field.value}
                     onCheckedChange={field.onChange}
+                    disabled={!initialData}
                   />
                   Deletion Protection
                 </FieldLabel>
@@ -245,134 +238,137 @@ export function TableForm({
           </Field>
         </div>
 
-        <div className="flex items-center gap-4">
-          <Separator className="flex-1" />
-          <span className="text-sm font-medium">Destinations</span>
-          <Separator className="flex-1" />
-        </div>
+        {streamEnabled && (
+          <>
+            <div className="flex items-center gap-4">
+              <Separator className="flex-1" />
+              <span className="text-sm font-medium">Destinations</span>
+              <Separator className="flex-1" />
+            </div>
 
-        <div
-          className={`space-y-4 ${!streamEnabled ? "opacity-50 pointer-events-none" : ""}`}
-        >
-          {destinations.map((dest, index) => (
-            <Card key={index} className="relative">
-              {destinations.length > 1 && (
-                <CardHeader>
-                  <CardAction>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={() => removeDestination(index)}
-                    >
-                      <XIcon />
-                    </Button>
-                  </CardAction>
-                </CardHeader>
-              )}
-              <CardContent className="space-y-4">
-                <Field>
-                  <FieldLabel>Type</FieldLabel>
-                  <Controller
-                    name={`destinations.${index}.type`}
-                    control={control}
-                    render={({ field }) => (
-                      <Select
-                        {...field}
-                        value={field.value}
-                        onValueChange={field.onChange}
-                        disabled={!streamEnabled}
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectGroup>
-                            <SelectItem value="http">HTTP</SelectItem>
-                            <SelectItem value="eventbridge" disabled>
-                              EventBridge
-                            </SelectItem>
-                          </SelectGroup>
-                        </SelectContent>
-                      </Select>
-                    )}
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel>Endpoint *</FieldLabel>
-                  <Controller
-                    name={`destinations.${index}.endpoint`}
-                    control={control}
-                    render={({ field }) => (
-                      <Input
-                        {...field}
-                        placeholder="https://..."
-                        disabled={!streamEnabled}
-                      />
-                    )}
-                  />
-                  <FieldError errors={[errors.destinations?.[index]?.endpoint]} />
-                </Field>
-                <Field>
-                  <FieldLabel>Bearer Token</FieldLabel>
-                  <Controller
-                    name={`destinations.${index}.bearer_token`}
-                    control={control}
-                    render={({ field }) => (
-                      <Input
-                        {...field}
-                        placeholder="Bearer token..."
-                        type="password"
-                        disabled={!streamEnabled}
-                      />
-                    )}
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel>Event Types *</FieldLabel>
-                  <Controller
-                    name={`destinations.${index}.event_types`}
-                    control={control}
-                    render={({ field }) => (
-                      <div className="flex flex-wrap gap-4">
-                        {["INSERT", "MODIFY", "REMOVE"].map((eventType) => (
-                          <label
-                            key={eventType}
-                            className="flex items-center gap-2 text-sm"
+            <div className="space-y-4">
+              {destinations.map((_, index) => (
+                <Card key={index} className="relative">
+                  {destinations.length > 1 && (
+                    <CardHeader>
+                      <CardAction>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          onClick={() => removeDestination(index)}
+                        >
+                          <XIcon />
+                        </Button>
+                      </CardAction>
+                    </CardHeader>
+                  )}
+                  <CardContent className="space-y-4">
+                    <Field>
+                      <FieldLabel>Type</FieldLabel>
+                      <Controller
+                        name={`destinations.${index}.type`}
+                        control={control}
+                        render={({ field }) => (
+                          <Select
+                            {...field}
+                            value={field.value}
+                            onValueChange={field.onChange}
+                            disabled={!streamEnabled}
                           >
-                            <Checkbox
-                              checked={field.value?.includes(eventType) || false}
-                              onCheckedChange={(checked) => {
-                                const newEventTypes = checked
-                                  ? [...(field.value || []), eventType]
-                                  : (field.value || []).filter(
-                                      (t) => t !== eventType,
-                                    );
-                                field.onChange(newEventTypes);
-                              }}
-                              disabled={!streamEnabled}
-                            />
-                            {eventType}
-                          </label>
-                        ))}
-                      </div>
-                    )}
-                  />
-                  <FieldError errors={[errors.destinations?.[index]?.event_types]} />
-                </Field>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectGroup>
+                                <SelectItem value="http">HTTP</SelectItem>
+                                <SelectItem value="eventbridge" disabled>
+                                  EventBridge
+                                </SelectItem>
+                              </SelectGroup>
+                            </SelectContent>
+                          </Select>
+                        )}
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel>Endpoint *</FieldLabel>
+                      <Controller
+                        name={`destinations.${index}.endpoint`}
+                        control={control}
+                        render={({ field }) => (
+                          <Input
+                            {...field}
+                            placeholder="https://..."
+                            disabled={!streamEnabled}
+                          />
+                        )}
+                      />
+                      <FieldError
+                        errors={[errors.destinations?.[index]?.endpoint]}
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel>Bearer Token</FieldLabel>
+                      <Controller
+                        name={`destinations.${index}.bearer_token`}
+                        control={control}
+                        render={({ field }) => (
+                          <Input
+                            {...field}
+                            placeholder="Bearer token..."
+                            type="password"
+                            disabled={!streamEnabled}
+                          />
+                        )}
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel>Event Types *</FieldLabel>
+                      <Controller
+                        name={`destinations.${index}.event_types`}
+                        control={control}
+                        render={({ field }) => (
+                          <div className="flex flex-wrap gap-4">
+                            {["INSERT", "MODIFY", "REMOVE"].map((eventType) => (
+                              <label
+                                key={eventType}
+                                className="flex items-center gap-2 text-sm"
+                              >
+                                <Checkbox
+                                  checked={
+                                    field.value?.includes(eventType) || false
+                                  }
+                                  onCheckedChange={(checked) => {
+                                    const newEventTypes = checked
+                                      ? [...(field.value || []), eventType]
+                                      : (field.value || []).filter(
+                                          (t) => t !== eventType,
+                                        );
+                                    field.onChange(newEventTypes);
+                                  }}
+                                  disabled={!streamEnabled}
+                                />
+                                {eventType}
+                              </label>
+                            ))}
+                          </div>
+                        )}
+                      />
+                      <FieldError
+                        errors={[errors.destinations?.[index]?.event_types]}
+                      />
+                    </Field>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
 
-        <Button
-          type="button"
-          variant="outline"
-          onClick={addDestination}
-          disabled={!streamEnabled}
-        >
-          Add Destination
-        </Button>
+            <Button type="button" variant="outline" onClick={addDestination}>
+              Add Destination
+            </Button>
+          </>
+        )}
       </FieldGroup>
 
       <DialogFooter>
@@ -381,8 +377,15 @@ export function TableForm({
             Cancel
           </Button>
         </DialogClose>
+
         <Button type="submit" disabled={isSubmitting}>
-          {isSubmitting ? (initialData ? "Updating..." : "Creating...") : (initialData ? "Update" : "Create")}
+          {isSubmitting
+            ? initialData
+              ? "Updating..."
+              : "Creating..."
+            : initialData
+              ? "Update"
+              : "Create"}
         </Button>
       </DialogFooter>
     </form>
