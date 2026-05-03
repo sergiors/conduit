@@ -256,21 +256,26 @@ function NewTableDialog() {
                   </FieldLabel>
                 </Field>
                 <Field>
-                  <FieldLabel>
-                    Event Types
-                    <FieldDescription>Comma-separated (e.g., INSERT, MODIFY, REMOVE)</FieldDescription>
-                    <Input
-                      value={dest.event_types?.join(", ") || ""}
-                      onChange={(e) => {
-                        const eventTypes = e.target.value
-                          .split(",")
-                          .map((s) => s.trim().toUpperCase())
-                          .filter(Boolean)
-                        updateDestination(index, "event_types", eventTypes)
-                      }}
-                      placeholder="INSERT, MODIFY, REMOVE"
-                    />
-                  </FieldLabel>
+                  <FieldLabel>Event Types</FieldLabel>
+                  <div className="flex gap-4">
+                    {["INSERT", "MODIFY", "REMOVE"].map((eventType) => (
+                      <label key={eventType} className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={dest.event_types?.includes(eventType) || false}
+                          onChange={(e) => {
+                            const checked = e.target.checked
+                            const newEventTypes = checked
+                              ? [...(dest.event_types || []), eventType]
+                              : (dest.event_types || []).filter((t) => t !== eventType)
+                            updateDestination(index, "event_types", newEventTypes)
+                          }}
+                          className="h-4 w-4"
+                        />
+                        {eventType}
+                      </label>
+                    ))}
+                  </div>
                 </Field>
                 {destinations.length > 1 && (
                   <Button
