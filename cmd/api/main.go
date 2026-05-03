@@ -80,8 +80,8 @@ func main() {
 
 	router.GET("/api/tables", server.listTables)
 	router.POST("/api/tables", server.createTable)
-	router.PUT("/api/tables/:id", server.updateTable)
-	router.DELETE("/api/tables/:id", server.deleteTable)
+	router.PUT("/api/tables/:name", server.updateTable)
+	router.DELETE("/api/tables/:name", server.deleteTable)
 	router.GET("/health", server.handleHealth)
 
 	port := getEnv("PORT", "8080")
@@ -161,7 +161,7 @@ func (s *Server) createTable(c *gin.Context) {
 
 func (s *Server) updateTable(c *gin.Context) {
 	ctx := c.Request.Context()
-	id := c.Param("id")
+	name := c.Param("name")
 
 	var table tables.Table
 	if err := c.ShouldBindJSON(&table); err != nil {
@@ -174,22 +174,9 @@ func (s *Server) updateTable(c *gin.Context) {
 		return
 	}
 
-	// Get existing table to validate table name cannot be changed
-	existingTable, err := s.tableStore.GetByID(ctx, id)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Table not found"})
-		return
-	}
-
-	// Table name cannot be changed
-	if table.TableName != existingTable.TableName {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Table name cannot be changed"})
-		return
-	}
-
-	// TTL Attribute cannot be changed once set
-	if existingTable.TTLAttribute != "" && table.TTLAttribute != existingTable.TTLAttribute {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "TTL attribute cannot be changed once set"})
+	// Table name in path must match body
+	if table.TableName != name {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Table name in path must match body"})
 		return
 	}
 
@@ -209,7 +196,7 @@ func (s *Server) updateTable(c *gin.Context) {
 		}
 	}
 
-	if err := s.tableStore.Update(ctx, id, &table); err != nil {
+	if err := s.tableStore.Update(ctx, &table); err != nil {
 		if err.Error() == "table not found" {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Table not found"})
 			return
@@ -235,10 +222,10 @@ func (s *Server) updateTable(c *gin.Context) {
 
 func (s *Server) deleteTable(c *gin.Context) {
 	ctx := c.Request.Context()
-	id := c.Param("id")
+	name := c.Param("name")
 
-	// Get table to check deletion protection and get table name
-	table, err := s.tableStore.GetByID(ctx, id)
+	// Get table to check deletion protection and get table name for notification
+	table, err := s.tableStore.Get(ctx, name)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Table not found"})
 		return
@@ -250,7 +237,7 @@ func (s *Server) deleteTable(c *gin.Context) {
 		return
 	}
 
-	if err := s.tableStore.Delete(ctx, id); err != nil {
+	if err := s.tableStore.Delete(ctx, name); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

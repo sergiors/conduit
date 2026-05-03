@@ -81,7 +81,7 @@ func NewWorker() (*Worker, error) {
 		dispatcher,
 		retryProcessor,
 		watcher.Config{
-			SyncInterval: 30 * time.Second,
+			SyncInterval: 15 * time.Minute,
 		},
 	)
 

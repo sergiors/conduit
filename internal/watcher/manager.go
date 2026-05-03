@@ -373,7 +373,7 @@ func (m *Manager) syncWithTables(ctx context.Context) {
 // refreshDestinations clears and re-registers destinations for a table (used on config change)
 func (m *Manager) refreshDestinations(ctx context.Context, tableName string) error {
 	// Get updated table config
-	table, err := m.tableStore.GetByTableName(ctx, tableName)
+	table, err := m.tableStore.Get(ctx, tableName)
 	if err != nil {
 		log.Printf("Failed to fetch table %s for refresh: %v", tableName, err)
 		return err

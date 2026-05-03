@@ -113,16 +113,19 @@ func (w *Watcher) watchLoop(handler func(streams.StreamRecord) error) {
 			if err := w.watchOnce(handler); err != nil {
 				w.recordError(err)
 
-				// Invalidate resume token on error
-				if delErr := w.redisClient.DeleteResumeToken(w.ctx, w.tableName); delErr != nil {
-					log.Printf("Failed to delete resume token: %v", delErr)
-				}
+				// Skip token cleanup if context is already cancelled (watcher is stopping)
+				if w.ctx.Err() == nil {
+					// Invalidate resume token on error
+					if delErr := w.redisClient.DeleteResumeToken(w.ctx, w.tableName); delErr != nil {
+						log.Printf("Failed to delete resume token: %v", delErr)
+					}
 
-				// Wait before retrying
-				select {
-				case <-w.ctx.Done():
-					return
-				case <-time.After(5 * time.Second):
+					// Wait before retrying
+					select {
+					case <-w.ctx.Done():
+						return
+					case <-time.After(5 * time.Second):
+					}
 				}
 			}
 		}
@@ -198,6 +201,9 @@ func (w *Watcher) watchOnce(handler func(streams.StreamRecord) error) error {
 	}
 
 	if err := cursor.Err(); err != nil {
+		if err == context.Canceled {
+			return nil // Expected when watcher is stopped
+		}
 		return fmt.Errorf("cursor error: %w", err)
 	}
 

@@ -89,12 +89,12 @@ export default function Route({ loaderData }: Route.ComponentProps) {
   };
 
   const handleUpdate = async (data: TableConfig) => {
-    if (!editingTable?._id) return;
+    if (!editingTable?.table_name) return;
 
     setIsSubmitting(true);
     setEditError(null);
     try {
-      const res = await fetch(`/api/tables/${editingTable._id}`, {
+      const res = await fetch(`/api/tables/${editingTable.table_name}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
@@ -116,12 +116,12 @@ export default function Route({ loaderData }: Route.ComponentProps) {
   };
 
   const handleDelete = async () => {
-    if (!deletingTable?._id) return;
+    if (!deletingTable?.table_name) return;
 
     setIsSubmitting(true);
     setDeleteError(null);
     try {
-      const res = await fetch(`/api/tables/${deletingTable._id}`, {
+      const res = await fetch(`/api/tables/${deletingTable.table_name}`, {
         method: "DELETE",
       });
 

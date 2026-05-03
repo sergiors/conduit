@@ -161,30 +161,6 @@ func (s *Store) Get(ctx context.Context, name string) (*Table, error) {
 	return &table, nil
 }
 
-// GetByID retrieves a table by its MongoDB ID
-func (s *Store) GetByID(ctx context.Context, id string) (*Table, error) {
-	objectID, err := primitive.ObjectIDFromHex(id)
-	if err != nil {
-		return nil, err
-	}
-	var table Table
-	err = s.collection.FindOne(ctx, bson.M{"_id": objectID}).Decode(&table)
-	if err != nil {
-		return nil, err
-	}
-	return &table, nil
-}
-
-// GetByTableName retrieves a table by its name
-func (s *Store) GetByTableName(ctx context.Context, tableName string) (*Table, error) {
-	var table Table
-	err := s.collection.FindOne(ctx, bson.M{"table_name": tableName}).Decode(&table)
-	if err != nil {
-		return nil, err
-	}
-	return &table, nil
-}
-
 // List returns all table configurations
 func (s *Store) List(ctx context.Context) ([]Table, error) {
 	cursor, err := s.collection.Find(ctx, bson.M{})
@@ -200,53 +176,45 @@ func (s *Store) List(ctx context.Context) ([]Table, error) {
 	return tables, nil
 }
 
-// Update modifies an existing table configuration by ID
-func (s *Store) Update(ctx context.Context, id string, table *Table) error {
-	objectID, err := primitive.ObjectIDFromHex(id)
-	if err != nil {
-		return fmt.Errorf("invalid id: %w", err)
-	}
-
-	// Get existing table to validate table name cannot be changed
-	existing, err := s.GetByID(ctx, id)
+// Update modifies an existing table configuration by table name
+func (s *Store) Update(ctx context.Context, table *Table) error {
+	// Get existing table to validate changes
+	existing, err := s.Get(ctx, table.TableName)
 	if err != nil {
 		return fmt.Errorf("table not found")
 	}
 
 	// Table name cannot be changed
 	if table.TableName != existing.TableName {
-		return fmt.Errorf("table name cannot be changed")
+		return fmt.Errorf("table name cannot be changed: '%s' -> '%s'", existing.TableName, table.TableName)
 	}
 
-	// Create a copy to avoid modifying the original and immutable _id
-	update := &Table{
-		TableName:          table.TableName,
-		StreamEnabled:      table.StreamEnabled,
-		OldImage:           table.OldImage,
-		TTLAttribute:       table.TTLAttribute,
-		Destinations:       table.Destinations,
-		DeletionProtection: table.DeletionProtection,
-		UpdatedAt:          time.Now(),
+	// TTL attribute cannot be changed once set
+	if existing.TTLAttribute != "" && table.TTLAttribute != existing.TTLAttribute {
+		return fmt.Errorf("TTL attribute cannot be changed once set: '%s' -> '%s'", existing.TTLAttribute, table.TTLAttribute)
 	}
 
-	result, err := s.collection.UpdateOne(
+	update := bson.M{
+		"stream_enabled":      table.StreamEnabled,
+		"old_image":           table.OldImage,
+		"ttl_attribute":       table.TTLAttribute,
+		"destinations":        table.Destinations,
+		"deletion_protection": table.DeletionProtection,
+		"updated_at":          time.Now(),
+	}
+
+	_, err = s.collection.UpdateOne(
 		ctx,
-		bson.M{"_id": objectID},
+		bson.M{"table_name": table.TableName},
 		bson.M{"$set": update},
 	)
-	if err != nil {
-		return err
-	}
-	if result.MatchedCount == 0 {
-		return fmt.Errorf("table not found")
-	}
 	return err
 }
 
-// Delete removes a table configuration and its MongoDB collection by ID
-func (s *Store) Delete(ctx context.Context, id string) error {
+// Delete removes a table configuration and its MongoDB collection by table name
+func (s *Store) Delete(ctx context.Context, name string) error {
 	// Get table to check deletion protection
-	table, err := s.GetByID(ctx, id)
+	table, err := s.Get(ctx, name)
 	if err != nil {
 		return fmt.Errorf("table not found")
 	}
@@ -263,11 +231,7 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 	}
 
 	// Delete the configuration
-	objectID, err := primitive.ObjectIDFromHex(id)
-	if err != nil {
-		return fmt.Errorf("invalid id: %w", err)
-	}
-	_, err = s.collection.DeleteOne(ctx, bson.M{"_id": objectID})
+	_, err = s.collection.DeleteOne(ctx, bson.M{"table_name": name})
 	return err
 }
 

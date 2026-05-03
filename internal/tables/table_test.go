@@ -137,9 +137,9 @@ func TestStoreCRUD(t *testing.T) {
 		if table, err := store.Get(ctx, name); err == nil {
 			if table.DeletionProtection {
 				table.DeletionProtection = false
-				_ = store.Update(ctx, table.ID, table)
+				_ = store.Update(ctx, table)
 			}
-			_ = store.Delete(ctx, table.ID)
+			_ = store.Delete(ctx, name)
 		}
 	}
 
@@ -178,7 +178,7 @@ func TestStoreCRUD(t *testing.T) {
 		table.StreamEnabled = false
 		table.Destinations = []DestinationConfig{{Type: "http", Endpoint: "http://localhost:3001/audit"}}
 
-		err = store.Update(ctx, table.ID, table)
+		err = store.Update(ctx, table)
 		require.NoError(t, err)
 
 		updated, _ := store.Get(ctx, "test_table")
@@ -188,17 +188,37 @@ func TestStoreCRUD(t *testing.T) {
 	})
 
 	t.Run("update table name fails", func(t *testing.T) {
-		table, err := store.Get(ctx, "test_table")
+		// Create a fresh table for this test
+		freshTable := &Table{
+			TableName:          "fresh_table",
+			StreamEnabled:      true,
+			DeletionProtection: false,
+			Destinations:       []DestinationConfig{{Type: "http", Endpoint: "http://localhost:3000/events"}},
+		}
+		err := store.Create(ctx, freshTable)
 		require.NoError(t, err)
 
-		table.TableName = "new_table_name"
-		err = store.Update(ctx, table.ID, table)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "table name cannot be changed")
+		// Get the existing table and try to change its name
+		existing, err := store.Get(ctx, "fresh_table")
+		require.NoError(t, err)
 
-		// Verify table name was not changed
-		updated, _ := store.Get(ctx, "test_table")
-		assert.Equal(t, "test_table", updated.TableName)
+		// Try to update with a different table name - should fail
+		existing.TableName = "new_table_name"
+		err = store.Update(ctx, existing)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "table not found")
+
+		// Verify table name was not changed - original should still exist
+		updated, err := store.Get(ctx, "fresh_table")
+		require.NoError(t, err)
+		assert.Equal(t, "fresh_table", updated.TableName)
+
+		// New table name should not exist
+		_, err = store.Get(ctx, "new_table_name")
+		assert.Error(t, err)
+
+		// Cleanup
+		_ = store.Delete(ctx, "fresh_table")
 	})
 
 	t.Run("delete table with deletion protection enabled fails", func(t *testing.T) {
@@ -207,12 +227,13 @@ func TestStoreCRUD(t *testing.T) {
 			TableName:          "protected_table",
 			StreamEnabled:      true,
 			DeletionProtection: true,
+			Destinations:       []DestinationConfig{{Type: "http", Endpoint: "http://localhost:3000/events"}},
 		}
 		err := store.Create(ctx, protectedTable)
 		require.NoError(t, err)
 
 		// Try to delete - should fail
-		err = store.Delete(ctx, protectedTable.ID)
+		err = store.Delete(ctx, protectedTable.TableName)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "deletion protection is enabled")
 
@@ -223,9 +244,9 @@ func TestStoreCRUD(t *testing.T) {
 
 		// Cleanup - disable protection first
 		protectedTable.DeletionProtection = false
-		err = store.Update(ctx, protectedTable.ID, protectedTable)
+		err = store.Update(ctx, protectedTable)
 		require.NoError(t, err)
-		err = store.Delete(ctx, protectedTable.ID)
+		err = store.Delete(ctx, protectedTable.TableName)
 		require.NoError(t, err)
 	})
 
@@ -246,7 +267,7 @@ func TestStoreCRUD(t *testing.T) {
 		assert.Contains(t, collections, "collection_table")
 
 		// Delete table
-		err = store.Delete(ctx, tableWithCollection.ID)
+		err = store.Delete(ctx, tableWithCollection.TableName)
 		require.NoError(t, err)
 
 		// Verify configuration is removed
@@ -265,10 +286,10 @@ func TestStoreCRUD(t *testing.T) {
 		require.NoError(t, err)
 
 		table.DeletionProtection = false
-		err = store.Update(ctx, table.ID, table)
+		err = store.Update(ctx, table)
 		require.NoError(t, err)
 
-		err = store.Delete(ctx, table.ID)
+		err = store.Delete(ctx, table.TableName)
 		require.NoError(t, err)
 
 		_, err = store.Get(ctx, "test_table")
