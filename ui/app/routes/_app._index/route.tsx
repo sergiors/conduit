@@ -23,10 +23,16 @@ import {
   DialogClose,
 } from "~/components/ui/dialog"
 import { Input } from "~/components/ui/input"
-import { Label } from "~/components/ui/label"
+import {
+  Field,
+  FieldLabel,
+  FieldDescription,
+  FieldError,
+  FieldGroup,
+} from "~/components/ui/field"
 
 import { z } from "zod"
-import { useForm } from "react-hook-form"
+import { useForm, Controller } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 
 const destinationSchema = z.object({
@@ -60,7 +66,7 @@ function NewTableDialog() {
   const [open, setOpen] = useState(false)
   const revalidator = useRevalidator()
 
-  const { register, handleSubmit, formState: { errors }, watch, setValue } = useForm<TableForm>({
+  const { control, handleSubmit, formState: { errors }, watch, setValue } = useForm<TableForm>({
     resolver: zodResolver(tableSchema),
     defaultValues: {
       table_name: "",
@@ -122,121 +128,163 @@ function NewTableDialog() {
           <DialogTitle>Create Table</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="table_name">Table Name *</Label>
-              <Input id="table_name" {...register("table_name")} placeholder="users" />
-              {errors.table_name && (
-                <p className="text-sm text-destructive">{errors.table_name.message}</p>
-              )}
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="ttl_attribute">TTL Attribute</Label>
-              <Input
-                id="ttl_attribute"
-                {...register("ttl_attribute")}
-                placeholder="expires_at"
-              />
-              {errors.ttl_attribute && (
-                <p className="text-sm text-destructive">{errors.ttl_attribute.message}</p>
-              )}
-            </div>
-          </div>
+          <FieldGroup>
+            <div className="grid grid-cols-2 gap-4">
+              <Field>
+                <FieldLabel>
+                  Table Name *
+                  <Controller
+                    name="table_name"
+                    control={control}
+                    render={({ field }) => (
+                      <Input {...field} placeholder="users" />
+                    )}
+                  />
+                </FieldLabel>
+                <FieldError errors={[errors.table_name]} />
+              </Field>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                id="stream_enabled"
-                checked={watch("stream_enabled")}
-                onChange={(e) => setValue("stream_enabled", e.target.checked)}
-                className="h-4 w-4"
-              />
-              <Label htmlFor="stream_enabled">Stream Enabled</Label>
+              <Field>
+                <FieldLabel>
+                  TTL Attribute
+                  <Controller
+                    name="ttl_attribute"
+                    control={control}
+                    render={({ field }) => (
+                      <Input {...field} placeholder="expires_at" />
+                    )}
+                  />
+                </FieldLabel>
+                <FieldError errors={[errors.ttl_attribute]} />
+              </Field>
             </div>
-            <div className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                id="old_image"
-                checked={watch("old_image")}
-                onChange={(e) => setValue("old_image", e.target.checked)}
-                className="h-4 w-4"
+
+            <Field orientation="horizontal">
+              <Controller
+                name="stream_enabled"
+                control={control}
+                render={({ field }) => (
+                  <FieldLabel>
+                    <input
+                      type="checkbox"
+                      checked={field.value}
+                      onChange={field.onChange}
+                      className="h-4 w-4"
+                    />
+                    Stream Enabled
+                  </FieldLabel>
+                )}
               />
-              <Label htmlFor="old_image">Old Image</Label>
-            </div>
-          </div>
+            </Field>
 
-          <div className="flex items-center space-x-2">
-            <input
-              type="checkbox"
-              id="deletion_protection"
-              checked={watch("deletion_protection")}
-              onChange={(e) => setValue("deletion_protection", e.target.checked)}
-              className="h-4 w-4"
-            />
-            <Label htmlFor="deletion_protection">Deletion Protection</Label>
-          </div>
+            <Field orientation="horizontal">
+              <Controller
+                name="old_image"
+                control={control}
+                render={({ field }) => (
+                  <FieldLabel>
+                    <input
+                      type="checkbox"
+                      checked={field.value}
+                      onChange={field.onChange}
+                      className="h-4 w-4"
+                    />
+                    Old Image
+                  </FieldLabel>
+                )}
+              />
+            </Field>
 
-          <div className="border rounded-md p-4 space-y-4">
-            <Label>Destinations</Label>
+            <Field orientation="horizontal">
+              <Controller
+                name="deletion_protection"
+                control={control}
+                render={({ field }) => (
+                  <FieldLabel>
+                    <input
+                      type="checkbox"
+                      checked={field.value}
+                      onChange={field.onChange}
+                      className="h-4 w-4"
+                    />
+                    Deletion Protection
+                  </FieldLabel>
+                )}
+              />
+            </Field>
+
+            <FieldSeparator>Destinations</FieldSeparator>
+
             {destinations.map((dest, index) => (
-              <div key={index} className="grid grid-cols-2 gap-4 border-b pb-4 relative">
-                <div className="space-y-2">
-                  <Label>Type</Label>
-                  <Input
-                    value={dest.type}
-                    onChange={(e) => updateDestination(index, "type", e.target.value)}
-                    placeholder="http"
-                  />
+              <div key={index} className="border rounded-lg p-4 space-y-4 relative">
+                <div className="grid grid-cols-2 gap-4">
+                  <Field>
+                    <FieldLabel>
+                      Type
+                      <Input
+                        value={dest.type}
+                        onChange={(e) => updateDestination(index, "type", e.target.value)}
+                        placeholder="http"
+                      />
+                    </FieldLabel>
+                  </Field>
+                  <Field>
+                    <FieldLabel>
+                      Endpoint
+                      <Input
+                        value={dest.endpoint || ""}
+                        onChange={(e) => updateDestination(index, "endpoint", e.target.value)}
+                        placeholder="https://..."
+                      />
+                    </FieldLabel>
+                  </Field>
                 </div>
-                <div className="space-y-2">
-                  <Label>Endpoint</Label>
-                  <Input
-                    value={dest.endpoint || ""}
-                    onChange={(e) => updateDestination(index, "endpoint", e.target.value)}
-                    placeholder="https://..."
-                  />
-                </div>
-                <div className="col-span-2 space-y-2">
-                  <Label>Bearer Token</Label>
-                  <Input
-                    value={dest.bearer_token || ""}
-                    onChange={(e) => updateDestination(index, "bearer_token", e.target.value)}
-                    placeholder="Bearer token..."
-                    type="password"
-                  />
-                </div>
-                <div className="col-span-2 space-y-2">
-                  <Label>Event Types (comma-separated)</Label>
-                  <Input
-                    value={dest.event_types?.join(", ") || ""}
-                    onChange={(e) => {
-                      const eventTypes = e.target.value
-                        .split(",")
-                        .map((s) => s.trim().toUpperCase())
-                        .filter(Boolean)
-                      updateDestination(index, "event_types", eventTypes)
-                    }}
-                    placeholder="INSERT, MODIFY, REMOVE"
-                  />
-                </div>
+                <Field>
+                  <FieldLabel>
+                    Bearer Token
+                    <Input
+                      value={dest.bearer_token || ""}
+                      onChange={(e) => updateDestination(index, "bearer_token", e.target.value)}
+                      placeholder="Bearer token..."
+                      type="password"
+                    />
+                  </FieldLabel>
+                </Field>
+                <Field>
+                  <FieldLabel>
+                    Event Types
+                    <FieldDescription>Comma-separated (e.g., INSERT, MODIFY, REMOVE)</FieldDescription>
+                    <Input
+                      value={dest.event_types?.join(", ") || ""}
+                      onChange={(e) => {
+                        const eventTypes = e.target.value
+                          .split(",")
+                          .map((s) => s.trim().toUpperCase())
+                          .filter(Boolean)
+                        updateDestination(index, "event_types", eventTypes)
+                      }}
+                      placeholder="INSERT, MODIFY, REMOVE"
+                    />
+                  </FieldLabel>
+                </Field>
                 {destinations.length > 1 && (
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
                     onClick={() => removeDestination(index)}
-                    className="absolute top-0 right-0"
+                    className="absolute top-2 right-2"
                   >
                     Remove
                   </Button>
                 )}
               </div>
             ))}
+
             <Button type="button" variant="outline" onClick={addDestination}>
               Add Destination
             </Button>
-          </div>
+          </FieldGroup>
 
           <DialogFooter>
             <DialogClose asChild>
