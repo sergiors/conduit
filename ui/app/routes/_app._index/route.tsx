@@ -55,14 +55,17 @@ export default function Route({ loaderData }: Route.ComponentProps) {
   const { tables } = loaderData;
   const revalidator = useRevalidator();
 
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editingTable, setEditingTable] = useState<TableConfig | null>(null);
   const [deletingTable, setDeletingTable] = useState<TableConfig | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const handleCreate = async (data: TableConfig) => {
     setIsSubmitting(true);
-    setError(null);
+    setCreateError(null);
     try {
       const res = await fetch("/api/tables", {
         method: "POST",
@@ -71,14 +74,14 @@ export default function Route({ loaderData }: Route.ComponentProps) {
       });
 
       if (res.ok) {
-        setEditingTable(null);
+        setCreateDialogOpen(false);
         revalidator.revalidate();
       } else {
         const error = await res.json();
-        setError(error.error || "Failed to create table");
+        setCreateError(error.error || "Failed to create table");
       }
     } catch (err) {
-      setError("Failed to create table");
+      setCreateError("Failed to create table");
       console.error("Failed to create table:", err);
     } finally {
       setIsSubmitting(false);
@@ -89,7 +92,7 @@ export default function Route({ loaderData }: Route.ComponentProps) {
     if (!editingTable?._id) return;
 
     setIsSubmitting(true);
-    setError(null);
+    setEditError(null);
     try {
       const res = await fetch(`/api/tables/${editingTable._id}`, {
         method: "PUT",
@@ -102,10 +105,10 @@ export default function Route({ loaderData }: Route.ComponentProps) {
         revalidator.revalidate();
       } else {
         const error = await res.json();
-        setError(error.error || "Failed to update table");
+        setEditError(error.error || "Failed to update table");
       }
     } catch (err) {
-      setError("Failed to update table");
+      setEditError("Failed to update table");
       console.error("Failed to update table:", err);
     } finally {
       setIsSubmitting(false);
@@ -116,7 +119,7 @@ export default function Route({ loaderData }: Route.ComponentProps) {
     if (!deletingTable?._id) return;
 
     setIsSubmitting(true);
-    setError(null);
+    setDeleteError(null);
     try {
       const res = await fetch(`/api/tables/${deletingTable._id}`, {
         method: "DELETE",
@@ -127,10 +130,10 @@ export default function Route({ loaderData }: Route.ComponentProps) {
         revalidator.revalidate();
       } else {
         const error = await res.json();
-        setError(error.error || "Failed to delete table");
+        setDeleteError(error.error || "Failed to delete table");
       }
     } catch (err) {
-      setError("Failed to delete table");
+      setDeleteError("Failed to delete table");
       console.error("Failed to delete table:", err);
     } finally {
       setIsSubmitting(false);
@@ -141,25 +144,25 @@ export default function Route({ loaderData }: Route.ComponentProps) {
     <div className="p-4 md:p-8">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
         <h1 className="text-2xl font-bold">Tables</h1>
-        <Dialog open={!!editingTable && !editingTable._id} onOpenChange={(open) => !open && setEditingTable(null)}>
+        <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
           <DialogTrigger asChild>
             <Button>New Table</Button>
           </DialogTrigger>
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <TableForm
               onSubmit={handleCreate}
-              onCancel={() => setEditingTable(null)}
+              onCancel={() => setCreateDialogOpen(false)}
               isSubmitting={isSubmitting}
             />
-            {error && (
-              <p className="text-sm text-destructive text-center">{error}</p>
+            {createError && (
+              <p className="text-sm text-destructive text-center">{createError}</p>
             )}
           </DialogContent>
         </Dialog>
       </div>
 
       {/* Edit Dialog */}
-      <Dialog open={!!editingTable && !!editingTable._id} onOpenChange={(open) => !open && setEditingTable(null)}>
+      <Dialog open={!!editingTable} onOpenChange={(open) => !open && setEditingTable(null)}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <TableForm
             initialData={editingTable || undefined}
@@ -167,8 +170,8 @@ export default function Route({ loaderData }: Route.ComponentProps) {
             onCancel={() => setEditingTable(null)}
             isSubmitting={isSubmitting}
           />
-          {error && (
-            <p className="text-sm text-destructive text-center">{error}</p>
+          {editError && (
+            <p className="text-sm text-destructive text-center">{editError}</p>
           )}
         </DialogContent>
       </Dialog>
@@ -196,6 +199,9 @@ export default function Route({ loaderData }: Route.ComponentProps) {
               {isSubmitting ? "Deleting..." : "Delete"}
             </AlertDialogAction>
           </AlertDialogFooter>
+          {deleteError && (
+            <p className="text-sm text-destructive text-center">{deleteError}</p>
+          )}
         </AlertDialogContent>
       </AlertDialog>
 
