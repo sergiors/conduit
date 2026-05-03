@@ -28,7 +28,10 @@ import {
   FieldLabel,
 } from "~/components/ui/field";
 import { Input } from "~/components/ui/input";
-import { NativeSelect, NativeSelectOption } from "~/components/ui/native-select";
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from "~/components/ui/native-select";
 import { Separator } from "~/components/ui/separator";
 import {
   Table,
@@ -258,35 +261,37 @@ function NewTableDialog() {
                     </CardHeader>
                   )}
                   <CardContent className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <Field>
-                        <FieldLabel>
-                          Type
-                          <Controller
-                            name={`destinations.${index}.type`}
-                            control={control}
-                            render={({ field }) => (
-                              <NativeSelect {...field}>
-                                <NativeSelectOption value="http">HTTP</NativeSelectOption>
-                                <NativeSelectOption value="eventbridge" disabled>EventBridge (em breve)</NativeSelectOption>
-                              </NativeSelect>
-                            )}
-                          />
-                        </FieldLabel>
-                      </Field>
-                      <Field>
-                        <FieldLabel>
-                          Endpoint
-                          <Input
-                            value={dest.endpoint || ""}
-                            onChange={(e) =>
-                              updateDestination(index, "endpoint", e.target.value)
-                            }
-                            placeholder="https://..."
-                          />
-                        </FieldLabel>
-                      </Field>
-                    </div>
+                    <Field>
+                      <FieldLabel>
+                        Type
+                        <Controller
+                          name={`destinations.${index}.type`}
+                          control={control}
+                          render={({ field }) => (
+                            <NativeSelect {...field}>
+                              <NativeSelectOption value="http">
+                                HTTP
+                              </NativeSelectOption>
+                              <NativeSelectOption value="eventbridge" disabled>
+                                EventBridge
+                              </NativeSelectOption>
+                            </NativeSelect>
+                          )}
+                        />
+                      </FieldLabel>
+                    </Field>
+                    <Field>
+                      <FieldLabel>
+                        Endpoint
+                        <Input
+                          value={dest.endpoint || ""}
+                          onChange={(e) =>
+                            updateDestination(index, "endpoint", e.target.value)
+                          }
+                          placeholder="https://..."
+                        />
+                      </FieldLabel>
+                    </Field>
                     <Field>
                       <FieldLabel>
                         Bearer Token
@@ -304,33 +309,36 @@ function NewTableDialog() {
                         />
                       </FieldLabel>
                     </Field>
-                    <div className="flex gap-4">
-                      {["INSERT", "MODIFY", "REMOVE"].map((eventType) => (
-                        <label
-                          key={eventType}
-                          className="flex items-center gap-2 text-sm"
-                        >
-                          <Checkbox
-                            checked={
-                              dest.event_types?.includes(eventType) || false
-                            }
-                            onCheckedChange={(checked) => {
-                              const newEventTypes = checked
-                                ? [...(dest.event_types || []), eventType]
-                                : (dest.event_types || []).filter(
-                                    (t) => t !== eventType,
-                                  );
-                              updateDestination(
-                                index,
-                                "event_types",
-                                newEventTypes,
-                              );
-                            }}
-                          />
-                          {eventType}
-                        </label>
-                      ))}
-                    </div>
+                    <Field>
+                      <FieldLabel>Event Types</FieldLabel>
+                      <div className="flex gap-4">
+                        {["INSERT", "MODIFY", "REMOVE"].map((eventType) => (
+                          <label
+                            key={eventType}
+                            className="flex items-center gap-2 text-sm"
+                          >
+                            <Checkbox
+                              checked={
+                                dest.event_types?.includes(eventType) || false
+                              }
+                              onCheckedChange={(checked) => {
+                                const newEventTypes = checked
+                                  ? [...(dest.event_types || []), eventType]
+                                  : (dest.event_types || []).filter(
+                                      (t) => t !== eventType,
+                                    );
+                                updateDestination(
+                                  index,
+                                  "event_types",
+                                  newEventTypes,
+                                );
+                              }}
+                            />
+                            {eventType}
+                          </label>
+                        ))}
+                      </div>
+                    </Field>
                   </CardContent>
                 </Card>
               ))}
