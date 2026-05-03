@@ -161,7 +161,7 @@ function NewTableDialog() {
         </DialogHeader>
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
           <FieldGroup>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Field>
                 <FieldLabel>Table Name *</FieldLabel>
                 <Controller
@@ -187,7 +187,7 @@ function NewTableDialog() {
               </Field>
             </div>
 
-            <div className="flex gap-6">
+            <div className="flex flex-col gap-4 md:flex-row md:flex-wrap">
               <Field orientation="horizontal">
                 <Controller
                   name="stream_enabled"
@@ -306,7 +306,7 @@ function NewTableDialog() {
                       </div>
                       <div className="space-y-1.5">
                         <label className="text-sm font-medium leading-none">Event Types</label>
-                        <div className="flex gap-4">
+                        <div className="flex flex-wrap gap-4">
                           {["INSERT", "MODIFY", "REMOVE"].map((eventType) => (
                             <label
                               key={eventType}
@@ -345,7 +345,7 @@ function NewTableDialog() {
             </Button>
           </FieldGroup>
 
-          <DialogFooter>
+          <DialogFooter className="flex flex-col-reverse sm:flex-row gap-2 sm:gap-0">
             <DialogClose asChild>
               <Button type="button" variant="outline">
                 Cancel
@@ -364,8 +364,8 @@ export default function Route() {
     useRouteLoaderData<typeof clientLoader>("routes/_app._index");
 
   return (
-    <div className="p-8">
-      <div className="flex items-center justify-between mb-4">
+    <div className="p-4 md:p-8">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
         <h1 className="text-2xl font-bold">Tables</h1>
         <NewTableDialog />
       </div>
