@@ -29,9 +29,12 @@ import {
 } from "~/components/ui/field";
 import { Input } from "~/components/ui/input";
 import {
-  NativeSelect,
-  NativeSelectOption,
-} from "~/components/ui/native-select";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "~/components/ui/select";
 import { Separator } from "~/components/ui/separator";
 import {
   Table,
@@ -267,14 +270,15 @@ function NewTableDialog() {
                         name={`destinations.${index}.type`}
                         control={control}
                         render={({ field }) => (
-                          <NativeSelect {...field}>
-                            <NativeSelectOption value="http">
-                              HTTP
-                            </NativeSelectOption>
-                            <NativeSelectOption value="eventbridge" disabled>
-                              EventBridge
-                            </NativeSelectOption>
-                          </NativeSelect>
+                          <Select {...field} value={field.value} onValueChange={field.onChange}>
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="http">HTTP</SelectItem>
+                              <SelectItem value="eventbridge" disabled>EventBridge</SelectItem>
+                            </SelectContent>
+                          </Select>
                         )}
                       />
                     </Field>
@@ -343,7 +347,7 @@ function NewTableDialog() {
             </Button>
           </FieldGroup>
 
-          <DialogFooter className="flex flex-col-reverse sm:flex-row gap-2 sm:gap-0">
+          <DialogFooter>
             <DialogClose asChild>
               <Button type="button" variant="outline">
                 Cancel
