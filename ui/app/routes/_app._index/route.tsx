@@ -28,6 +28,7 @@ import {
   FieldLabel,
 } from "~/components/ui/field";
 import { Input } from "~/components/ui/input";
+import { NativeSelect, NativeSelectOption } from "~/components/ui/native-select";
 import { Separator } from "~/components/ui/separator";
 import {
   Table,
@@ -43,7 +44,7 @@ import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
 
 const destinationSchema = z.object({
-  type: z.string().min(1, "Type is required"),
+  type: z.enum(["http", "eventbridge"]).default("http"),
   endpoint: z.string().optional(),
   bearer_token: z.string().optional(),
   event_types: z.array(z.string()).default(["INSERT", "MODIFY", "REMOVE"]),
@@ -90,7 +91,7 @@ function NewTableDialog() {
       ttl_attribute: "",
       destinations: [
         {
-          type: "http",
+          type: "http" as const,
           endpoint: "",
           event_types: ["INSERT", "MODIFY", "REMOVE"],
         },
@@ -125,7 +126,7 @@ function NewTableDialog() {
     setValue("destinations", [
       ...destinations,
       {
-        type: "http",
+        type: "http" as const,
         endpoint: "",
         event_types: ["INSERT", "MODIFY", "REMOVE"],
       },
@@ -261,12 +262,15 @@ function NewTableDialog() {
                       <Field>
                         <FieldLabel>
                           Type
-                          <Input
-                            value={dest.type}
-                            onChange={(e) =>
-                              updateDestination(index, "type", e.target.value)
-                            }
-                            placeholder="http"
+                          <Controller
+                            name={`destinations.${index}.type`}
+                            control={control}
+                            render={({ field }) => (
+                              <NativeSelect {...field}>
+                                <NativeSelectOption value="http">HTTP</NativeSelectOption>
+                                <NativeSelectOption value="eventbridge" disabled>EventBridge (em breve)</NativeSelectOption>
+                              </NativeSelect>
+                            )}
                           />
                         </FieldLabel>
                       </Field>
