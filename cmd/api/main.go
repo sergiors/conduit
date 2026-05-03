@@ -161,6 +161,19 @@ func (s *Server) updateTable(c *gin.Context) {
 		return
 	}
 
+	// Get existing table to validate table name cannot be changed
+	existingTable, err := s.tableStore.GetByID(ctx, id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Table not found"})
+		return
+	}
+
+	// Table name cannot be changed
+	if table.TableName != existingTable.TableName {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Table name cannot be changed"})
+		return
+	}
+
 	// Validate destination event types
 	for i, dest := range table.Destinations {
 		if err := dest.ValidateEventTypes(); err != nil {

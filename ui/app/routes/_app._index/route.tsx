@@ -140,6 +140,11 @@ export default function Route({ loaderData }: Route.ComponentProps) {
     }
   };
 
+  const openDeleteDialog = (table: TableConfig) => {
+    if (table.deletion_protection) return;
+    setDeletingTable(table);
+  };
+
   return (
     <div className="p-4 md:p-8">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
@@ -280,7 +285,8 @@ export default function Route({ loaderData }: Route.ComponentProps) {
                             Edit
                           </DropdownMenuItem>
                           <DropdownMenuItem
-                            onClick={() => setDeletingTable(table)}
+                            onClick={() => openDeleteDialog(table)}
+                            disabled={table.deletion_protection}
                             className="text-destructive focus:text-destructive"
                           >
                             Delete

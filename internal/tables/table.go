@@ -192,12 +192,37 @@ func (s *Store) List(ctx context.Context) ([]Table, error) {
 
 // Update modifies an existing table configuration by ID
 func (s *Store) Update(ctx context.Context, id string, table *Table) error {
-	table.UpdatedAt = time.Now()
+	objectID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		return fmt.Errorf("invalid id: %w", err)
+	}
+
+	// Get existing table to validate table name cannot be changed
+	existing, err := s.GetByID(ctx, id)
+	if err != nil {
+		return fmt.Errorf("table not found")
+	}
+
+	// Table name cannot be changed
+	if table.TableName != existing.TableName {
+		return fmt.Errorf("table name cannot be changed")
+	}
+
+	// Create a copy to avoid modifying the original and immutable _id
+	update := &Table{
+		TableName:          table.TableName,
+		StreamEnabled:      table.StreamEnabled,
+		OldImage:           table.OldImage,
+		TTLAttribute:       table.TTLAttribute,
+		Destinations:       table.Destinations,
+		DeletionProtection: table.DeletionProtection,
+		UpdatedAt:          time.Now(),
+	}
 
 	result, err := s.collection.UpdateOne(
 		ctx,
-		bson.M{"_id": id},
-		bson.M{"$set": table},
+		bson.M{"_id": objectID},
+		bson.M{"$set": update},
 	)
 	if err != nil {
 		return err
@@ -228,7 +253,11 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 	}
 
 	// Delete the configuration
-	_, err = s.collection.DeleteOne(ctx, bson.M{"_id": id})
+	objectID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		return fmt.Errorf("invalid id: %w", err)
+	}
+	_, err = s.collection.DeleteOne(ctx, bson.M{"_id": objectID})
 	return err
 }
 

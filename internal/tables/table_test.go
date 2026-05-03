@@ -132,8 +132,16 @@ func TestStoreCRUD(t *testing.T) {
 
 	store := NewStore(client, "relay_test")
 
-	// Cleanup before test
-	_ = store.Delete(ctx, "test_table")
+	// Cleanup before test - remove any leftover test tables
+	for _, name := range []string{"test_table", "protected_table", "collection_table", "stream_table", "no_stream_table"} {
+		if table, err := store.Get(ctx, name); err == nil {
+			if table.DeletionProtection {
+				table.DeletionProtection = false
+				_ = store.Update(ctx, table.ID, table)
+			}
+			_ = store.Delete(ctx, table.ID)
+		}
+	}
 
 	t.Run("create table", func(t *testing.T) {
 		table := &Table{
@@ -164,17 +172,33 @@ func TestStoreCRUD(t *testing.T) {
 	})
 
 	t.Run("update table", func(t *testing.T) {
-		table, _ := store.Get(ctx, "test_table")
+		table, err := store.Get(ctx, "test_table")
+		require.NoError(t, err)
+
 		table.StreamEnabled = false
 		table.Destinations = []DestinationConfig{{Type: "http", Endpoint: "http://localhost:3001/audit"}}
 
-		err := store.Update(ctx, table)
+		err = store.Update(ctx, table.ID, table)
 		require.NoError(t, err)
 
 		updated, _ := store.Get(ctx, "test_table")
 		assert.False(t, updated.StreamEnabled)
 		assert.Equal(t, []DestinationConfig{{Type: "http", Endpoint: "http://localhost:3001/audit"}}, updated.Destinations)
 		assert.True(t, updated.UpdatedAt.After(table.UpdatedAt))
+	})
+
+	t.Run("update table name fails", func(t *testing.T) {
+		table, err := store.Get(ctx, "test_table")
+		require.NoError(t, err)
+
+		table.TableName = "new_table_name"
+		err = store.Update(ctx, table.ID, table)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "table name cannot be changed")
+
+		// Verify table name was not changed
+		updated, _ := store.Get(ctx, "test_table")
+		assert.Equal(t, "test_table", updated.TableName)
 	})
 
 	t.Run("delete table with deletion protection enabled fails", func(t *testing.T) {
@@ -188,7 +212,7 @@ func TestStoreCRUD(t *testing.T) {
 		require.NoError(t, err)
 
 		// Try to delete - should fail
-		err = store.Delete(ctx, "protected_table")
+		err = store.Delete(ctx, protectedTable.ID)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "deletion protection is enabled")
 
@@ -199,9 +223,9 @@ func TestStoreCRUD(t *testing.T) {
 
 		// Cleanup - disable protection first
 		protectedTable.DeletionProtection = false
-		err = store.Update(ctx, protectedTable)
+		err = store.Update(ctx, protectedTable.ID, protectedTable)
 		require.NoError(t, err)
-		err = store.Delete(ctx, "protected_table")
+		err = store.Delete(ctx, protectedTable.ID)
 		require.NoError(t, err)
 	})
 
@@ -222,7 +246,7 @@ func TestStoreCRUD(t *testing.T) {
 		assert.Contains(t, collections, "collection_table")
 
 		// Delete table
-		err = store.Delete(ctx, "collection_table")
+		err = store.Delete(ctx, tableWithCollection.ID)
 		require.NoError(t, err)
 
 		// Verify configuration is removed
@@ -236,16 +260,15 @@ func TestStoreCRUD(t *testing.T) {
 	})
 
 	t.Run("delete table", func(t *testing.T) {
-		// Create table with deletion protection disabled
-		table := &Table{
-			TableName:          "test_table",
-			StreamEnabled:      true,
-			DeletionProtection: false,
-		}
-		err := store.Create(ctx, table)
+		// Get the existing test_table and update deletion protection to false
+		table, err := store.Get(ctx, "test_table")
 		require.NoError(t, err)
 
-		err = store.Delete(ctx, "test_table")
+		table.DeletionProtection = false
+		err = store.Update(ctx, table.ID, table)
+		require.NoError(t, err)
+
+		err = store.Delete(ctx, table.ID)
 		require.NoError(t, err)
 
 		_, err = store.Get(ctx, "test_table")
@@ -299,8 +322,8 @@ func TestStoreListStreamEnabled(t *testing.T) {
 	assert.True(t, found, "stream_table should be in the list")
 
 	// Cleanup
-	_ = store.Delete(ctx, "stream_table")
-	_ = store.Delete(ctx, "no_stream_table")
+	_ = store.Delete(ctx, streamTable.ID)
+	_ = store.Delete(ctx, nonStreamTable.ID)
 }
 
 func TestTableBSONTags(t *testing.T) {

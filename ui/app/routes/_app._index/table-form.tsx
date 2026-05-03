@@ -160,7 +160,7 @@ export function TableForm({
               name="table_name"
               control={control}
               render={({ field }) => (
-                <Input {...field} placeholder="users" />
+                <Input {...field} placeholder="users" disabled={!!initialData} />
               )}
             />
             <FieldError errors={[errors.table_name]} />
