@@ -198,7 +198,7 @@ function NewTableDialog() {
                   name="stream_enabled"
                   control={control}
                   render={({ field }) => (
-                    <FieldLabel>
+                    <FieldLabel className="has-data-checked:bg-transparent">
                       <Checkbox
                         checked={field.value}
                         onCheckedChange={field.onChange}
@@ -214,7 +214,7 @@ function NewTableDialog() {
                   name="old_image"
                   control={control}
                   render={({ field }) => (
-                    <FieldLabel>
+                    <FieldLabel className="has-data-checked:bg-transparent">
                       <Checkbox
                         checked={field.value}
                         onCheckedChange={field.onChange}
@@ -230,7 +230,7 @@ function NewTableDialog() {
                   name="deletion_protection"
                   control={control}
                   render={({ field }) => (
-                    <FieldLabel>
+                    <FieldLabel className="has-data-checked:bg-transparent">
                       <Checkbox
                         checked={field.value}
                         onCheckedChange={field.onChange}
