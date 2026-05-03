@@ -1,12 +1,7 @@
-import { useEffect } from "react";
-import { useNavigate } from "react-router";
+import { redirect } from "react-router";
 
-export default function Index() {
-  const navigate = useNavigate();
+import type { Route } from "./+types/route";
 
-  useEffect(() => {
-    navigate("/tables", { replace: true });
-  }, [navigate]);
-
-  return null;
+export async function clientLoader({}: Route.ClientLoaderArgs) {
+  throw redirect("/tables");
 }

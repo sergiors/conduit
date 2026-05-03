@@ -234,6 +234,7 @@ func (c *Client) Ping(ctx context.Context) error {
 
 // Pub/Sub operations
 // PublishConfigChange publishes a table change notification
+// payload can be tableName or tableID - receiver decides how to interpret
 func (c *Client) PublishConfigChange(ctx context.Context, tableName string) error {
 	channel := "cdc:config-change"
 	return c.client.Publish(ctx, channel, tableName).Err()

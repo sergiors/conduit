@@ -1,12 +1,10 @@
 import { useState } from "react";
-import { useRevalidator, useRouteLoaderData } from "react-router";
+import { useRevalidator } from "react-router";
 
 import type { Route } from "./+types/route";
 import { clientLoader, type TableConfig } from "./loader.client";
 import { TableForm } from "./table-form";
 
-import { Button } from "~/components/ui/button";
-import { Card, CardContent } from "~/components/ui/card";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -17,6 +15,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "~/components/ui/alert-dialog";
+import { Button } from "~/components/ui/button";
+import { Card, CardContent } from "~/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -160,14 +160,19 @@ export default function Route({ loaderData }: Route.ComponentProps) {
               isSubmitting={isSubmitting}
             />
             {createError && (
-              <p className="text-sm text-destructive text-center">{createError}</p>
+              <p className="text-sm text-destructive text-center">
+                {createError}
+              </p>
             )}
           </DialogContent>
         </Dialog>
       </div>
 
       {/* Edit Dialog */}
-      <Dialog open={!!editingTable} onOpenChange={(open) => !open && setEditingTable(null)}>
+      <Dialog
+        open={!!editingTable}
+        onOpenChange={(open) => !open && setEditingTable(null)}
+      >
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <TableForm
             initialData={editingTable || undefined}
@@ -182,7 +187,10 @@ export default function Route({ loaderData }: Route.ComponentProps) {
       </Dialog>
 
       {/* Delete Confirmation Dialog */}
-      <AlertDialog open={!!deletingTable} onOpenChange={(open) => !open && setDeletingTable(null)}>
+      <AlertDialog
+        open={!!deletingTable}
+        onOpenChange={(open) => !open && setDeletingTable(null)}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Table</AlertDialogTitle>
@@ -205,7 +213,9 @@ export default function Route({ loaderData }: Route.ComponentProps) {
             </AlertDialogAction>
           </AlertDialogFooter>
           {deleteError && (
-            <p className="text-sm text-destructive text-center">{deleteError}</p>
+            <p className="text-sm text-destructive text-center">
+              {deleteError}
+            </p>
           )}
         </AlertDialogContent>
       </AlertDialog>
@@ -221,9 +231,9 @@ export default function Route({ loaderData }: Route.ComponentProps) {
                   <TableHead>Name</TableHead>
                   <TableHead>Stream</TableHead>
                   <TableHead>Old Image</TableHead>
-                  <TableHead>TTL</TableHead>
+                  <TableHead>TTL Attribute</TableHead>
                   <TableHead>Destinations</TableHead>
-                  <TableHead>Protection</TableHead>
+                  <TableHead>Deletion Protection</TableHead>
                   <TableHead className="w-[50px]"></TableHead>
                 </TableRow>
               </TableHeader>
@@ -281,7 +291,9 @@ export default function Route({ loaderData }: Route.ComponentProps) {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => setEditingTable(table)}>
+                          <DropdownMenuItem
+                            onClick={() => setEditingTable(table)}
+                          >
                             Edit
                           </DropdownMenuItem>
                           <DropdownMenuItem

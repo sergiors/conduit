@@ -70,7 +70,6 @@ func (c *Client) Close(ctx context.Context) error {
 }
 
 // CreateTTLIndex creates a TTL index on a collection
-// Uses expireAfterSeconds=0 as per AGENTS.md spec
 func (c *Client) CreateTTLIndex(ctx context.Context, collection, field string) error {
 	indexModel := mongo.IndexModel{
 		Keys:    bson.D{{Key: field, Value: 1}},

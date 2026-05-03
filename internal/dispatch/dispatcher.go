@@ -81,6 +81,19 @@ func (d *Dispatcher) Close() error {
 	return lastErr
 }
 
+// Clear removes all destinations for a table (used when config changes)
+func (d *Dispatcher) Clear(table string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if dests, ok := d.destinations[table]; ok {
+		for _, dest := range dests {
+			dest.Close()
+		}
+		delete(d.destinations, table)
+	}
+}
+
 // HTTPDestination sends records to an HTTP endpoint via POST
 type HTTPDestination struct {
 	name        string

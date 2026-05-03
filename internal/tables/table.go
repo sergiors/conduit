@@ -175,6 +175,16 @@ func (s *Store) GetByID(ctx context.Context, id string) (*Table, error) {
 	return &table, nil
 }
 
+// GetByTableName retrieves a table by its name
+func (s *Store) GetByTableName(ctx context.Context, tableName string) (*Table, error) {
+	var table Table
+	err := s.collection.FindOne(ctx, bson.M{"table_name": tableName}).Decode(&table)
+	if err != nil {
+		return nil, err
+	}
+	return &table, nil
+}
+
 // List returns all table configurations
 func (s *Store) List(ctx context.Context) ([]Table, error) {
 	cursor, err := s.collection.Find(ctx, bson.M{})

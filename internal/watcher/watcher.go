@@ -267,3 +267,8 @@ func (w *Watcher) GetStats() WatcherStats {
 func (w *Watcher) IsRunning() bool {
 	return w.isRunning.Load()
 }
+
+// OldImage returns the oldImage configuration
+func (w *Watcher) OldImage() bool {
+	return w.oldImage
+}

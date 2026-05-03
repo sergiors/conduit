@@ -144,6 +144,13 @@ func (s *Server) createTable(c *gin.Context) {
 		return
 	}
 
+	// Apply TTL index if configured
+	if table.TTLAttribute != "" {
+		if err := s.mongoClient.CreateTTLIndex(ctx, table.TableName, table.TTLAttribute); err != nil {
+			log.Printf("Failed to create TTL index for %s: %v", table.TableName, err)
+		}
+	}
+
 	// Notify worker of config change
 	if err := s.redisClient.PublishConfigChange(ctx, table.TableName); err != nil {
 		log.Printf("Failed to publish config change: %v", err)
@@ -180,6 +187,12 @@ func (s *Server) updateTable(c *gin.Context) {
 		return
 	}
 
+	// TTL Attribute cannot be changed once set
+	if existingTable.TTLAttribute != "" && table.TTLAttribute != existingTable.TTLAttribute {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "TTL attribute cannot be changed once set"})
+		return
+	}
+
 	// Validate destinations
 	for i, dest := range table.Destinations {
 		if dest.Endpoint == "" {
@@ -205,6 +218,13 @@ func (s *Server) updateTable(c *gin.Context) {
 		return
 	}
 
+	// Apply TTL index if configured (create or update)
+	if table.TTLAttribute != "" {
+		if err := s.mongoClient.CreateTTLIndex(ctx, table.TableName, table.TTLAttribute); err != nil {
+			log.Printf("Failed to create/update TTL index for %s: %v", table.TableName, err)
+		}
+	}
+
 	// Notify worker of config change
 	if err := s.redisClient.PublishConfigChange(ctx, table.TableName); err != nil {
 		log.Printf("Failed to publish config change: %v", err)
@@ -217,18 +237,27 @@ func (s *Server) deleteTable(c *gin.Context) {
 	ctx := c.Request.Context()
 	id := c.Param("id")
 
+	// Get table to check deletion protection and get table name
+	table, err := s.tableStore.GetByID(ctx, id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Table not found"})
+		return
+	}
+
+	// Check deletion protection
+	if table.DeletionProtection {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Deletion protection is enabled. Disable it before deleting the table."})
+		return
+	}
+
 	if err := s.tableStore.Delete(ctx, id); err != nil {
-		// Check for deletion protection error
-		if err.Error() == "table not found" {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Table not found"})
-			return
-		}
-		if err.Error() == "deletion protection is enabled" {
-			c.JSON(http.StatusForbidden, gin.H{"error": "Deletion protection is enabled. Disable it before deleting the table."})
-			return
-		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+
+	// Notify worker of config change
+	if err := s.redisClient.PublishConfigChange(ctx, table.TableName); err != nil {
+		log.Printf("Failed to publish config change: %v", err)
 	}
 
 	c.Status(http.StatusNoContent)

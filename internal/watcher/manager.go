@@ -211,6 +211,17 @@ func (m *Manager) stopWatcher(ctx context.Context, tableName string) error {
 	return nil
 }
 
+// restartWatcher stops and restarts a watcher with updated config
+func (m *Manager) restartWatcher(ctx context.Context, table tables.Table) error {
+	// Stop existing watcher
+	if err := m.stopWatcher(ctx, table.TableName); err != nil {
+		return err
+	}
+
+	// Start new watcher with updated config
+	return m.startWatcher(ctx, table)
+}
+
 // handleEvent processes an event with idempotency and retry logic
 func (m *Manager) handleEvent(ctx context.Context, tableName string, record streams.StreamRecord) error {
 	// Generate event ID: {table}:{type}:{timestamp}
@@ -278,6 +289,8 @@ func (m *Manager) configChangeLoop(ctx context.Context) {
 			tableName := msg.Payload
 			log.Printf("Config change detected for table: %s", tableName)
 			m.syncWithTables(ctx)
+			// Clear and re-register destinations for the changed table
+			m.refreshDestinations(ctx, tableName)
 		}
 	}
 }
@@ -316,22 +329,31 @@ func (m *Manager) syncWithTables(ctx context.Context) {
 
 	// Get current watchers
 	m.mu.RLock()
-	currentWatchers := make(map[string]bool)
-	for tableName := range m.watchers {
-		currentWatchers[tableName] = true
+	currentWatchers := make(map[string]*Watcher)
+	for tableName, watcher := range m.watchers {
+		currentWatchers[tableName] = watcher
 	}
 	m.mu.RUnlock()
 
 	// Start watchers for new tables and register destinations
 	for tableName, table := range enabledSet {
-		if !currentWatchers[tableName] {
-			// Register destinations for this table
+		existingWatcher, exists := currentWatchers[tableName]
+		if !exists {
+			// New table - register destinations and start watcher
 			if err := m.registerDestinations(ctx, tableName, table.Destinations); err != nil {
 				log.Printf("Failed to register destinations for %s: %v", tableName, err)
 			}
 
 			if err := m.startWatcher(ctx, table); err != nil {
 				log.Printf("Failed to start watcher for %s: %v", tableName, err)
+			}
+		} else {
+			// Existing table - check if oldImage config changed
+			if existingWatcher.OldImage() != table.OldImage {
+				log.Printf("oldImage config changed for %s (old=%v, new=%v), restarting watcher", tableName, existingWatcher.OldImage(), table.OldImage)
+				if err := m.restartWatcher(ctx, table); err != nil {
+					log.Printf("Failed to restart watcher for %s: %v", tableName, err)
+				}
 			}
 		}
 	}
@@ -346,6 +368,31 @@ func (m *Manager) syncWithTables(ctx context.Context) {
 	}
 
 	log.Printf("Sync complete: %d active watchers", len(enabledSet))
+}
+
+// refreshDestinations clears and re-registers destinations for a table (used on config change)
+func (m *Manager) refreshDestinations(ctx context.Context, tableName string) error {
+	// Get updated table config
+	table, err := m.tableStore.GetByTableName(ctx, tableName)
+	if err != nil {
+		log.Printf("Failed to fetch table %s for refresh: %v", tableName, err)
+		return err
+	}
+
+	// Clear existing destinations
+	if d, ok := m.dispatcher.(*dispatch.Dispatcher); ok {
+		d.Clear(tableName)
+		log.Printf("Cleared destinations for table %s", tableName)
+	}
+
+	// Re-register destinations with updated config
+	if err := m.registerDestinations(ctx, tableName, table.Destinations); err != nil {
+		log.Printf("Failed to re-register destinations for %s: %v", tableName, err)
+		return err
+	}
+
+	log.Printf("Refreshed destinations for table %s", tableName)
+	return nil
 }
 
 // registerDestinations registers event destinations for a table

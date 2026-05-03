@@ -164,11 +164,7 @@ export function TableForm({
               name="table_name"
               control={control}
               render={({ field }) => (
-                <Input
-                  {...field}
-                  placeholder="users"
-                  disabled={!!initialData}
-                />
+                <Input {...field} disabled={!!initialData} />
               )}
             />
             <FieldError errors={[errors.table_name]} />
@@ -180,7 +176,7 @@ export function TableForm({
               name="ttl_attribute"
               control={control}
               render={({ field }) => (
-                <Input {...field} placeholder="expires_at" />
+                <Input {...field} disabled={!!initialData?.ttl_attribute} />
               )}
             />
             <FieldError errors={[errors.ttl_attribute]} />
@@ -299,7 +295,7 @@ export function TableForm({
                         render={({ field }) => (
                           <Input
                             {...field}
-                            placeholder="https://..."
+                            // placeholder="https://..."
                             disabled={!streamEnabled}
                           />
                         )}
@@ -316,7 +312,6 @@ export function TableForm({
                         render={({ field }) => (
                           <Input
                             {...field}
-                            placeholder="Bearer token..."
                             type="password"
                             disabled={!streamEnabled}
                           />
