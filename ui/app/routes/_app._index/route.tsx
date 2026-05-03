@@ -356,7 +356,12 @@ function NewTableDialog() {
               ))}
             </div>
 
-            <Button type="button" variant="outline" onClick={addDestination}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={addDestination}
+              disabled={!streamEnabled}
+            >
               Add Destination
             </Button>
           </FieldGroup>
