@@ -120,18 +120,24 @@ func (s *Server) createTable(c *gin.Context) {
 		return
 	}
 
-	// Validate destination event types
+	// Validate destinations
 	for i, dest := range table.Destinations {
+		if dest.Endpoint == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("destination[%d]: endpoint is required", i)})
+			return
+		}
+		if len(dest.EventTypes) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("destination[%d]: at least one event type is required", i)})
+			return
+		}
 		if err := dest.ValidateEventTypes(); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("destination[%d]: %v", i, err)})
 			return
 		}
 	}
 
-	// Set deletion protection to true by default
-	if !table.DeletionProtection {
-		table.DeletionProtection = true
-	}
+	// Deletion protection is mandatory on create
+	table.DeletionProtection = true
 
 	if err := s.tableStore.Create(ctx, &table); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -174,8 +180,16 @@ func (s *Server) updateTable(c *gin.Context) {
 		return
 	}
 
-	// Validate destination event types
+	// Validate destinations
 	for i, dest := range table.Destinations {
+		if dest.Endpoint == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("destination[%d]: endpoint is required", i)})
+			return
+		}
+		if len(dest.EventTypes) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("destination[%d]: at least one event type is required", i)})
+			return
+		}
 		if err := dest.ValidateEventTypes(); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("destination[%d]: %v", i, err)})
 			return
