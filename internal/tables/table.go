@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -139,14 +140,35 @@ func (s *Store) Create(ctx context.Context, table *Table) error {
 		return fmt.Errorf("create collection: %w", err)
 	}
 
-	_, err := s.collection.InsertOne(ctx, table)
-	return err
+	result, err := s.collection.InsertOne(ctx, table)
+	if err != nil {
+		return err
+	}
+	// Set the ID on the table so it can be returned to the client
+	if objectID, ok := result.InsertedID.(primitive.ObjectID); ok {
+		table.ID = objectID.Hex()
+	}
+	return nil
 }
 
 // Get retrieves a table by name
 func (s *Store) Get(ctx context.Context, name string) (*Table, error) {
 	var table Table
 	err := s.collection.FindOne(ctx, bson.M{"table_name": name}).Decode(&table)
+	if err != nil {
+		return nil, err
+	}
+	return &table, nil
+}
+
+// GetByID retrieves a table by its MongoDB ID
+func (s *Store) GetByID(ctx context.Context, id string) (*Table, error) {
+	objectID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		return nil, err
+	}
+	var table Table
+	err = s.collection.FindOne(ctx, bson.M{"_id": objectID}).Decode(&table)
 	if err != nil {
 		return nil, err
 	}
@@ -168,39 +190,45 @@ func (s *Store) List(ctx context.Context) ([]Table, error) {
 	return tables, nil
 }
 
-// Update modifies an existing table configuration
-func (s *Store) Update(ctx context.Context, table *Table) error {
+// Update modifies an existing table configuration by ID
+func (s *Store) Update(ctx context.Context, id string, table *Table) error {
 	table.UpdatedAt = time.Now()
 
-	_, err := s.collection.UpdateOne(
+	result, err := s.collection.UpdateOne(
 		ctx,
-		bson.M{"table_name": table.TableName},
+		bson.M{"_id": id},
 		bson.M{"$set": table},
 	)
+	if err != nil {
+		return err
+	}
+	if result.MatchedCount == 0 {
+		return fmt.Errorf("table not found")
+	}
 	return err
 }
 
-// Delete removes a table configuration and its MongoDB collection
-func (s *Store) Delete(ctx context.Context, name string) error {
+// Delete removes a table configuration and its MongoDB collection by ID
+func (s *Store) Delete(ctx context.Context, id string) error {
 	// Get table to check deletion protection
-	table, err := s.Get(ctx, name)
+	table, err := s.GetByID(ctx, id)
 	if err != nil {
-		return fmt.Errorf("get table: %w", err)
+		return fmt.Errorf("table not found")
 	}
 
 	// Check deletion protection
 	if table.DeletionProtection {
-		return fmt.Errorf("deletion protection is enabled for table %s", name)
+		return fmt.Errorf("deletion protection is enabled")
 	}
 
 	// Drop the MongoDB collection
 	db := s.client.Database(s.database)
-	if err := db.Collection(name).Drop(ctx); err != nil {
+	if err := db.Collection(table.TableName).Drop(ctx); err != nil {
 		return fmt.Errorf("drop collection: %w", err)
 	}
 
 	// Delete the configuration
-	_, err = s.collection.DeleteOne(ctx, bson.M{"table_name": name})
+	_, err = s.collection.DeleteOne(ctx, bson.M{"_id": id})
 	return err
 }
 

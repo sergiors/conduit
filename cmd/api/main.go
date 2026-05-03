@@ -80,8 +80,8 @@ func main() {
 
 	router.GET("/api/tables", server.listTables)
 	router.POST("/api/tables", server.createTable)
-	router.PUT("/api/tables", server.updateTable)
-	router.DELETE("/api/tables", server.deleteTable)
+	router.PUT("/api/tables/:id", server.updateTable)
+	router.DELETE("/api/tables/:id", server.deleteTable)
 	router.GET("/health", server.handleHealth)
 
 	port := getEnv("PORT", "8080")
@@ -148,6 +148,7 @@ func (s *Server) createTable(c *gin.Context) {
 
 func (s *Server) updateTable(c *gin.Context) {
 	ctx := c.Request.Context()
+	id := c.Param("id")
 
 	var table tables.Table
 	if err := c.ShouldBindJSON(&table); err != nil {
@@ -168,7 +169,11 @@ func (s *Server) updateTable(c *gin.Context) {
 		}
 	}
 
-	if err := s.tableStore.Update(ctx, &table); err != nil {
+	if err := s.tableStore.Update(ctx, id, &table); err != nil {
+		if err.Error() == "table not found" {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Table not found"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -183,20 +188,15 @@ func (s *Server) updateTable(c *gin.Context) {
 
 func (s *Server) deleteTable(c *gin.Context) {
 	ctx := c.Request.Context()
-	name := c.Query("name")
+	id := c.Param("id")
 
-	if name == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Table name is required"})
-		return
-	}
-
-	if err := s.tableStore.Delete(ctx, name); err != nil {
+	if err := s.tableStore.Delete(ctx, id); err != nil {
 		// Check for deletion protection error
-		if err.Error() == "get table: "+fmt.Sprintf("table not found") || err.Error() == "table not found" {
+		if err.Error() == "table not found" {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Table not found"})
 			return
 		}
-		if err.Error() == "deletion protection is enabled for table "+name {
+		if err.Error() == "deletion protection is enabled" {
 			c.JSON(http.StatusForbidden, gin.H{"error": "Deletion protection is enabled. Disable it before deleting the table."})
 			return
 		}
