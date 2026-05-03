@@ -216,71 +216,74 @@ function NewTableDialog() {
             </div>
 
             {destinations.map((dest, index) => (
-              <div key={index} className="border rounded-lg p-4 space-y-4 relative">
-                <div className="grid grid-cols-2 gap-4">
-                  <Field>
-                    <FieldLabel>
-                      Type
-                      <Input
-                        value={dest.type}
-                        onChange={(e) => updateDestination(index, "type", e.target.value)}
-                        placeholder="http"
-                      />
-                    </FieldLabel>
-                  </Field>
-                  <Field>
-                    <FieldLabel>
-                      Endpoint
-                      <Input
-                        value={dest.endpoint || ""}
-                        onChange={(e) => updateDestination(index, "endpoint", e.target.value)}
-                        placeholder="https://..."
-                      />
-                    </FieldLabel>
-                  </Field>
-                </div>
-                <Field>
-                  <FieldLabel>
-                    Bearer Token
-                    <Input
-                      value={dest.bearer_token || ""}
-                      onChange={(e) => updateDestination(index, "bearer_token", e.target.value)}
-                      placeholder="Bearer token..."
-                      type="password"
-                    />
-                  </FieldLabel>
-                </Field>
-                <Field>
-                  <FieldLabel>Event Types</FieldLabel>
-                  <div className="flex gap-4">
-                    {["INSERT", "MODIFY", "REMOVE"].map((eventType) => (
-                      <label key={eventType} className="flex items-center gap-2 text-sm">
-                        <Checkbox
-                          checked={dest.event_types?.includes(eventType) || false}
-                          onCheckedChange={(checked) => {
-                            const newEventTypes = checked
-                              ? [...(dest.event_types || []), eventType]
-                              : (dest.event_types || []).filter((t) => t !== eventType)
-                            updateDestination(index, "event_types", newEventTypes)
-                          }}
-                        />
-                        {eventType}
-                      </label>
-                    ))}
-                  </div>
-                </Field>
+              <Card key={index} className="relative">
                 {destinations.length > 1 && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => removeDestination(index)}
-                    className="absolute top-2 right-2"
-                  >
-                    Remove
-                  </Button>
+                  <CardAction>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => removeDestination(index)}
+                    >
+                      Remove
+                    </Button>
+                  </CardAction>
                 )}
-              </div>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <Field>
+                      <FieldLabel>
+                        Type
+                        <Input
+                          value={dest.type}
+                          onChange={(e) => updateDestination(index, "type", e.target.value)}
+                          placeholder="http"
+                        />
+                      </FieldLabel>
+                    </Field>
+                    <Field>
+                      <FieldLabel>
+                        Endpoint
+                        <Input
+                          value={dest.endpoint || ""}
+                          onChange={(e) => updateDestination(index, "endpoint", e.target.value)}
+                          placeholder="https://..."
+                        />
+                      </FieldLabel>
+                    </Field>
+                  </div>
+                  <Field>
+                    <FieldLabel>
+                      Bearer Token
+                      <Input
+                        value={dest.bearer_token || ""}
+                        onChange={(e) => updateDestination(index, "bearer_token", e.target.value)}
+                        placeholder="Bearer token..."
+                        type="password"
+                      />
+                    </FieldLabel>
+                  </Field>
+                  <Field>
+                    <FieldLabel>Event Types</FieldLabel>
+                    <div className="flex gap-4">
+                      {["INSERT", "MODIFY", "REMOVE"].map((eventType) => (
+                        <label key={eventType} className="flex items-center gap-2 text-sm">
+                          <Checkbox
+                            checked={dest.event_types?.includes(eventType) || false}
+                            onCheckedChange={(checked) => {
+                              const newEventTypes = checked
+                                ? [...(dest.event_types || []), eventType]
+                                : (dest.event_types || []).filter((t) => t !== eventType)
+                              updateDestination(index, "event_types", newEventTypes)
+                            }}
+                          />
+                          {eventType}
+                        </label>
+                      ))}
+                    </div>
+                  </Field>
+                </CardContent>
+              </Card>
             ))}
 
             <Button type="button" variant="outline" onClick={addDestination}>
