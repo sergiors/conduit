@@ -28,8 +28,3 @@ api
 # OS
 .DS_Store
 Thumbs.db
-
-# UI
-ui/node_modules/
-ui/build/
-ui/.react-router/
