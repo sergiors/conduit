@@ -21,7 +21,7 @@ redis-cli -h ${REDIS_ADDR%:*} -p ${REDIS_ADDR#*:} KEYS "cdc:dlq:*" | while read 
 done
 
 echo ""
-echo "Active Resume Tokens:"
-redis-cli -h ${REDIS_ADDR%:*} -p ${REDIS_ADDR#*:} KEYS "cdc:resume_token:*" | while read key; do
+echo "Resume Tokens:"
+redis-cli -h ${REDIS_ADDR%:*} -p ${REDIS_ADDR#*:} KEYS "cdc:resume:*" | while read key; do
   echo "  $key: $(redis-cli -h ${REDIS_ADDR%:*} -p ${REDIS_ADDR#*:} GET "$key" | head -c 50)..."
 done

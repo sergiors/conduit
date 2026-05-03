@@ -175,17 +175,19 @@ The API will automatically initialize the MongoDB replica set on first start.
 ### 5. Create Your First Table
 
 ```bash
-curl -X POST http://localhost:8080/tables \
+curl -X POST http://localhost:8080/api/tables \
   -H "Content-Type: application/json" \
   -d '{
     "table_name": "users",
     "stream_enabled": true,
     "old_image": true,
+    "ttl_attribute": "expiresAt",
+    "deletion_protection": true,
     "destinations": [
       {
         "type": "http",
         "endpoint": "http://localhost:3000/events",
-        "event_types": ["INSERT", "MODIFY", "DELETE"]
+        "event_types": ["INSERT", "MODIFY", "REMOVE"]
       }
     ]
   }'
@@ -195,13 +197,13 @@ curl -X POST http://localhost:8080/tables \
 
 ### Tables
 
-| Method   | Endpoint              | Description     |
-| -------- | --------------------- | --------------- |
-| `GET`    | `/tables`             | List all tables |
-| `POST`   | `/tables`             | Create table    |
-| `PUT`    | `/tables`             | Update table    |
-| `DELETE` | `/tables?name=<name>` | Delete table    |
-| `GET`    | `/health`             | Health check    |
+| Method   | Endpoint                 | Description     |
+| -------- | ------------------------ | --------------- |
+| `GET`    | `/api/tables`            | List all tables |
+| `POST`   | `/api/tables`            | Create table    |
+| `PUT`    | `/api/tables/:name`      | Update table    |
+| `DELETE` | `/api/tables/:name`      | Delete table    |
+| `GET`    | `/health`                | Health check    |
 
 ### Table Schema
 
@@ -255,12 +257,14 @@ If `event_types` is not specified, all event types are sent by default.
 **Create table with streaming (HTTP destination):**
 
 ```bash
-curl -X POST http://localhost:8080/tables \
+curl -X POST http://localhost:8080/api/tables \
   -H "Content-Type: application/json" \
   -d '{
     "table_name": "orders",
     "stream_enabled": true,
     "old_image": true,
+    "ttl_attribute": "expiresAt",
+    "deletion_protection": true,
     "destinations": [
       {
         "type": "http",
@@ -274,12 +278,14 @@ curl -X POST http://localhost:8080/tables \
 **Create table with bearer token authentication:**
 
 ```bash
-curl -X POST http://localhost:8080/tables \
+curl -X POST http://localhost:8080/api/tables \
   -H "Content-Type: application/json" \
   -d '{
     "table_name": "orders",
     "stream_enabled": true,
     "old_image": true,
+    "ttl_attribute": "expiresAt",
+    "deletion_protection": true,
     "destinations": [
       {
         "type": "http",
@@ -294,12 +300,14 @@ curl -X POST http://localhost:8080/tables \
 **Create table with multiple destinations:**
 
 ```bash
-curl -X POST http://localhost:8080/tables \
+curl -X POST http://localhost:8080/api/tables \
   -H "Content-Type: application/json" \
   -d '{
     "table_name": "orders",
     "stream_enabled": true,
     "old_image": true,
+    "ttl_attribute": "expiresAt",
+    "deletion_protection": true,
     "destinations": [
       {
         "type": "http",
@@ -315,14 +323,24 @@ curl -X POST http://localhost:8080/tables \
   }'
 ```
 
-**Disable streaming:**
+**Update table:**
 
 ```bash
-curl -X PUT http://localhost:8080/tables \
+curl -X PUT http://localhost:8080/api/tables/orders \
   -H "Content-Type: application/json" \
   -d '{
     "table_name": "orders",
-    "stream_enabled": false
+    "stream_enabled": true,
+    "old_image": false,
+    "ttl_attribute": "expiresAt",
+    "deletion_protection": true,
+    "destinations": [
+      {
+        "type": "http",
+        "endpoint": "http://localhost:3000/events",
+        "event_types": ["INSERT", "REMOVE"]
+      }
+    ]
   }'
 ```
 
@@ -330,28 +348,36 @@ curl -X PUT http://localhost:8080/tables \
 
 ```bash
 # First, disable deletion protection
-curl -X PUT http://localhost:8080/tables \
+curl -X PUT http://localhost:8080/api/tables/orders \
   -H "Content-Type: application/json" \
   -d '{
     "table_name": "orders",
-    "deletion_protection": false
+    "stream_enabled": true,
+    "deletion_protection": false,
+    "destinations": [
+      {
+        "type": "http",
+        "endpoint": "http://localhost:3000/events",
+        "event_types": ["INSERT", "MODIFY", "REMOVE"]
+      }
+    ]
   }'
 
 # Then delete the table
-curl -X DELETE "http://localhost:8080/tables?name=orders"
+curl -X DELETE "http://localhost:8080/api/tables/orders"
 ```
 
 **Delete table with protection enabled (fails):**
 
 ```bash
-curl -X DELETE "http://localhost:8080/tables?name=orders"
+curl -X DELETE "http://localhost:8080/api/tables/orders"
 # Returns: 403 Forbidden - "Deletion protection is enabled. Disable it before deleting the table."
 ```
 
 **List tables:**
 
 ```bash
-curl http://localhost:8080/tables | jq .
+curl http://localhost:8080/api/tables | jq .
 ```
 
 ## ⚙️ Configuration
@@ -425,7 +451,7 @@ Streaming is **explicitly enabled per table**:
 1. **Initial Load**: Fetch all `stream_enabled=true` tables from `config.tables`
 2. **Start Watchers**: One watcher per enabled table
 3. **Sync Loop**:
-   - Polling: Diff with `config.tables` every 30s (fallback)
+   - Polling: Diff with `config.tables` every 15min (fallback)
    - **Push notifications**: Immediate sync via Redis Pub/Sub when tables change
 4. **Resume Tokens**: Updated after each successful batch
 5. **Graceful Stop**: Context cancellation, no data loss
