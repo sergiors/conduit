@@ -111,6 +111,12 @@ func (w *Watcher) watchLoop(handler func(streams.StreamRecord) error) {
 			return
 		default:
 			if err := w.watchOnce(handler); err != nil {
+				// Check if this is a drop/invalidate error (expected when collection is removed)
+				if err.Error() == "collection dropped" || err.Error() == "change stream invalidated" {
+					log.Printf("Stopping watcher for %s: %v", w.tableName, err)
+					return
+				}
+
 				w.recordError(err)
 
 				// Skip token cleanup if context is already cancelled (watcher is stopping)
@@ -241,12 +247,26 @@ func (w *Watcher) parseChange(change bson.M) (streams.StreamRecord, error) {
 		if doc, ok := change["fullDocument"].(bson.M); ok {
 			record.NewImage = doc
 		}
+		if doc, ok := change["fullDocumentBeforeChange"].(bson.M); ok {
+			record.OldImage = doc
+		}
 	case "delete":
 		record.RecordType = streams.RemoveRecord
 		if doc, ok := change["fullDocumentBeforeChange"].(bson.M); ok {
 			record.OldImage = doc
 		}
+	case "drop":
+		// Collection was dropped - stop watcher
+		log.Printf("Collection %s was dropped, stopping watcher", w.tableName)
+		w.cancel()
+		return streams.StreamRecord{}, fmt.Errorf("collection dropped")
+	case "invalidate":
+		// Change stream invalidated - collection likely dropped or renamed
+		log.Printf("Change stream for %s invalidated, stopping watcher", w.tableName)
+		w.cancel()
+		return streams.StreamRecord{}, fmt.Errorf("change stream invalidated")
 	default:
+		// Ignore unknown operation types (renames, etc.)
 		return streams.StreamRecord{}, fmt.Errorf("unknown operation type: %s", opType)
 	}
 
