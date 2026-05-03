@@ -24,6 +24,7 @@ import {
 } from "~/components/ui/dialog"
 import { Input } from "~/components/ui/input"
 import { Separator } from "~/components/ui/separator"
+import { Checkbox } from "~/components/ui/checkbox"
 import {
   Field,
   FieldLabel,
@@ -260,17 +261,14 @@ function NewTableDialog() {
                   <div className="flex gap-4">
                     {["INSERT", "MODIFY", "REMOVE"].map((eventType) => (
                       <label key={eventType} className="flex items-center gap-2 text-sm">
-                        <input
-                          type="checkbox"
+                        <Checkbox
                           checked={dest.event_types?.includes(eventType) || false}
-                          onChange={(e) => {
-                            const checked = e.target.checked
+                          onCheckedChange={(checked) => {
                             const newEventTypes = checked
                               ? [...(dest.event_types || []), eventType]
                               : (dest.event_types || []).filter((t) => t !== eventType)
                             updateDestination(index, "event_types", newEventTypes)
                           }}
-                          className="h-4 w-4"
                         />
                         {eventType}
                       </label>
