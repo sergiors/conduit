@@ -11,6 +11,14 @@ import {
   TableCell,
 } from "~/components/ui/table"
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "~/components/ui/dialog"
+import { Button } from "~/components/ui/button"
 
 export { clientLoader }
 
@@ -19,6 +27,46 @@ export function meta({}: Route.MetaArgs) {
     { title: "Tables - Relay" },
     { name: "description", content: "Relay Tables Management" },
   ]
+}
+
+function DestinationsCell({ destinations }: { destinations: TableConfig["destinations"] }) {
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm">
+          {destinations.length} {destinations.length === 1 ? "destination" : "destinations"}
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Destinations</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          {destinations.map((d, i) => (
+            <div key={i} className="border rounded-lg p-4 space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="font-medium">{d.type}</span>
+                {d.endpoint && (
+                  <span className="text-muted-foreground text-sm">→ {d.endpoint}</span>
+                )}
+              </div>
+              {d.bearer_token && (
+                <div className="text-sm text-muted-foreground">
+                  <span className="font-medium">Bearer Token:</span> {d.bearer_token.substring(0, 20)}...
+                </div>
+              )}
+              <div className="text-sm">
+                <span className="font-medium">Event Types:</span>{" "}
+                <span className="text-muted-foreground">
+                  {d.event_types?.join(", ") || "ALL"}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
 }
 
 export default function Route() {
@@ -80,15 +128,7 @@ export default function Route() {
                       {table.ttl_attribute || "-"}
                     </TableCell>
                     <TableCell>
-                      {table.destinations.map((d, i) => (
-                        <div key={i} className="text-sm">
-                          {d.type}
-                          {d.endpoint && ` → ${d.endpoint}`}
-                          <span className="text-muted-foreground ml-1">
-                            ({d.event_types?.join(", ") || "ALL"})
-                          </span>
-                        </div>
-                      ))}
+                      <DestinationsCell destinations={table.destinations} />
                     </TableCell>
                     <TableCell>
                       <span
