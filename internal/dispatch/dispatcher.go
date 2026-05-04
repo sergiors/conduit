@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sergiors/relay/internal/streams"
+	"github.com/sergiors/relay/internal/tables"
 )
 
 // Destination defines the interface for event destinations
@@ -123,11 +124,11 @@ type HTTPDestination struct {
 	endpoint       string
 	eventTypes     map[string]bool
 	bearerToken    string
-	filterCriteria streams.FilterCriteria
+	filterCriteria tables.FilterCriteria
 }
 
 // NewHTTPDestination creates an HTTP destination
-func NewHTTPDestination(endpoint string, bearerToken string, eventTypes []string, filterCriteria streams.FilterCriteria) (*HTTPDestination, error) {
+func NewHTTPDestination(endpoint string, bearerToken string, eventTypes []string, filterCriteria tables.FilterCriteria) (*HTTPDestination, error) {
 	if endpoint == "" {
 		return nil, fmt.Errorf("endpoint is required")
 	}
@@ -166,8 +167,8 @@ func (h *HTTPDestination) Send(ctx context.Context, record streams.StreamRecord)
 		return nil
 	}
 
-	// Apply image filters
-	if !streams.MatchImage(record.OldImage, h.filterCriteria.OldImage) || !streams.MatchImage(record.NewImage, h.filterCriteria.NewImage) {
+	if !tables.MatchImage(record.NewImage, h.filterCriteria.NewImage) || !tables.MatchImage(record.OldImage, h.filterCriteria.OldImage) {
+		log.Printf("Event filtered out by image criteria for %s", h.name)
 		return nil
 	}
 

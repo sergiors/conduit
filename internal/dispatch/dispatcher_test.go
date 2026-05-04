@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/sergiors/relay/internal/streams"
+	"github.com/sergiors/relay/internal/tables"
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/bson"
 )
@@ -124,7 +125,7 @@ func TestDispatcherClose(t *testing.T) {
 
 func TestHTTPDestination(t *testing.T) {
 	t.Run("creation with valid endpoint succeeds", func(t *testing.T) {
-		dest, err := NewHTTPDestination("http://localhost:8080/events", "", []string{"INSERT", "MODIFY", "DELETE"}, streams.FilterCriteria{})
+		dest, err := NewHTTPDestination("http://localhost:8080/events", "", []string{"INSERT", "MODIFY", "DELETE"}, tables.FilterCriteria{})
 		assert.NoError(t, err)
 		assert.NotNil(t, dest)
 		assert.Equal(t, "http://localhost:8080/events", dest.endpoint)
@@ -132,20 +133,20 @@ func TestHTTPDestination(t *testing.T) {
 	})
 
 	t.Run("creation with bearer token", func(t *testing.T) {
-		dest, err := NewHTTPDestination("http://localhost:8080/events", "my-secret-token", []string{"INSERT"}, streams.FilterCriteria{})
+		dest, err := NewHTTPDestination("http://localhost:8080/events", "my-secret-token", []string{"INSERT"}, tables.FilterCriteria{})
 		assert.NoError(t, err)
 		assert.NotNil(t, dest)
 		assert.Equal(t, "my-secret-token", dest.bearerToken)
 	})
 
 	t.Run("creation with empty endpoint fails", func(t *testing.T) {
-		dest, err := NewHTTPDestination("", "", []string{"INSERT"}, streams.FilterCriteria{})
+		dest, err := NewHTTPDestination("", "", []string{"INSERT"}, tables.FilterCriteria{})
 		assert.Error(t, err)
 		assert.Nil(t, dest)
 	})
 
 	t.Run("creation with empty event types defaults to all", func(t *testing.T) {
-		dest, err := NewHTTPDestination("http://localhost:8080/events", "", []string{}, streams.FilterCriteria{})
+		dest, err := NewHTTPDestination("http://localhost:8080/events", "", []string{}, tables.FilterCriteria{})
 		assert.NoError(t, err)
 		assert.NotNil(t, dest)
 		assert.True(t, dest.eventTypes["INSERT"])
@@ -155,7 +156,7 @@ func TestHTTPDestination(t *testing.T) {
 
 	t.Run("send filters by event type", func(t *testing.T) {
 		// Create destination that only accepts INSERT events
-		dest, _ := NewHTTPDestination("http://localhost:8080/events", "", []string{"INSERT"}, streams.FilterCriteria{})
+		dest, _ := NewHTTPDestination("http://localhost:8080/events", "", []string{"INSERT"}, tables.FilterCriteria{})
 
 		ctx := context.Background()
 
@@ -177,7 +178,7 @@ func TestHTTPDestination(t *testing.T) {
 	})
 
 	t.Run("close succeeds", func(t *testing.T) {
-		dest, _ := NewHTTPDestination("http://localhost:8080/events", "", []string{"INSERT"}, streams.FilterCriteria{})
+		dest, _ := NewHTTPDestination("http://localhost:8080/events", "", []string{"INSERT"}, tables.FilterCriteria{})
 		err := dest.Close()
 		assert.NoError(t, err)
 	})

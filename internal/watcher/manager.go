@@ -208,6 +208,11 @@ func (m *Manager) stopWatcher(ctx context.Context, tableName string) error {
 	delete(m.watchers, tableName)
 	delete(m.currentDestinations, tableName)
 
+	// Clear destinations from dispatcher
+	if d, ok := m.dispatcher.(*dispatch.Dispatcher); ok {
+		d.Clear(tableName)
+	}
+
 	// Unregister table from retry processor
 	if m.retryProcessor != nil {
 		m.retryProcessor.UnregisterTable(tableName)
@@ -558,7 +563,7 @@ func configEqual(a, b tables.DestinationConfig) bool {
 		imageFilterEqual(a.FilterCriteria.NewImage, b.FilterCriteria.NewImage)
 }
 
-func filterConditionEqual(a, b streams.FilterCondition) bool {
+func filterConditionEqual(a, b tables.FilterCondition) bool {
 	if !ptrStrEqual(a.Prefix, b.Prefix) || !ptrStrEqual(a.Suffix, b.Suffix) || !ptrBoolEqual(a.Exists, b.Exists) {
 		return false
 	}
@@ -588,19 +593,17 @@ func ptrBoolEqual(a, b *bool) bool {
 	return *a == *b
 }
 
-func imageFilterEqual(a, b streams.ImageFilter) bool {
+func imageFilterEqual(a, b tables.ImageFilter) bool {
 	if len(a) != len(b) {
 		return false
 	}
-	for field, condsA := range a {
-		condsB, ok := b[field]
-		if !ok || len(condsA) != len(condsB) {
+	for field, condA := range a {
+		condB, ok := b[field]
+		if !ok {
 			return false
 		}
-		for i := range condsA {
-			if !filterConditionEqual(condsA[i], condsB[i]) {
-				return false
-			}
+		if !filterConditionEqual(condA, condB) {
+			return false
 		}
 	}
 	return true
