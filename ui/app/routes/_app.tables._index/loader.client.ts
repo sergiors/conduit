@@ -1,4 +1,3 @@
-import type { Route } from "./+types/route";
 
 export interface FilterCondition {
   prefix?: string;
@@ -37,7 +36,7 @@ export interface TableConfig {
   updated_at?: string;
 }
 
-export async function clientLoader({}: Route.ClientLoaderArgs) {
+export async function clientLoader() {
   const res = await fetch("/api/tables");
   if (!res.ok) throw new Error("Failed to fetch tables");
   const data: TableConfig[] = await res.json();

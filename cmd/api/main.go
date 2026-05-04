@@ -80,6 +80,7 @@ func main() {
 
 	router.GET("/api/tables", server.listTables)
 	router.POST("/api/tables", server.createTable)
+	router.GET("/api/tables/:name", server.getTable)
 	router.PUT("/api/tables/:name", server.updateTable)
 	router.DELETE("/api/tables/:name", server.deleteTable)
 	router.GET("/health", server.handleHealth)
@@ -104,6 +105,19 @@ func (s *Server) listTables(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, tableList)
+}
+
+func (s *Server) getTable(c *gin.Context) {
+	ctx := c.Request.Context()
+	name := c.Param("name")
+
+	table, err := s.tableStore.Get(ctx, name)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Table not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, table)
 }
 
 func (s *Server) createTable(c *gin.Context) {

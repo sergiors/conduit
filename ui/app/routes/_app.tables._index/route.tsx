@@ -1,9 +1,7 @@
 import { useState } from "react";
-import { useRevalidator } from "react-router";
+import { Link, useRevalidator } from "react-router";
 
-import type { Route } from "./+types/route";
 import { clientLoader, type TableConfig } from "./loader.client";
-import { TableForm } from "./table-form";
 
 import {
   AlertDialog,
@@ -44,76 +42,20 @@ import { MoreHorizontalIcon } from "lucide-react";
 
 export { clientLoader };
 
-export function meta({}: Route.MetaArgs) {
+export function meta() {
   return [
     { title: "Tables - Relay" },
     { name: "description", content: "Relay Tables Management" },
   ];
 }
 
-export default function Route({ loaderData }: Route.ComponentProps) {
+export default function Route({ loaderData }: { loaderData: { tables: TableConfig[] } }) {
   const { tables } = loaderData;
   const revalidator = useRevalidator();
 
-  const [createDialogOpen, setCreateDialogOpen] = useState(false);
-  const [editingTable, setEditingTable] = useState<TableConfig | null>(null);
   const [deletingTable, setDeletingTable] = useState<TableConfig | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
-  const [editError, setEditError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
-
-  const handleCreate = async (data: TableConfig) => {
-    setIsSubmitting(true);
-    setCreateError(null);
-    try {
-      const res = await fetch("/api/tables", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
-
-      if (res.ok) {
-        setCreateDialogOpen(false);
-        revalidator.revalidate();
-      } else {
-        const error = await res.json();
-        setCreateError(error.error || "Failed to create table");
-      }
-    } catch (err) {
-      setCreateError("Failed to create table");
-      console.error("Failed to create table:", err);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleUpdate = async (data: TableConfig) => {
-    if (!editingTable?.table_name) return;
-
-    setIsSubmitting(true);
-    setEditError(null);
-    try {
-      const res = await fetch(`/api/tables/${editingTable.table_name}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
-
-      if (res.ok) {
-        setEditingTable(null);
-        revalidator.revalidate();
-      } else {
-        const error = await res.json();
-        setEditError(error.error || "Failed to update table");
-      }
-    } catch (err) {
-      setEditError("Failed to update table");
-      console.error("Failed to update table:", err);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
 
   const handleDelete = async () => {
     if (!deletingTable?.table_name) return;
@@ -149,42 +91,10 @@ export default function Route({ loaderData }: Route.ComponentProps) {
     <div className="p-4 md:p-8">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
         <h1 className="text-2xl font-bold">Tables</h1>
-        <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-          <DialogTrigger asChild>
-            <Button>New Table</Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-            <TableForm
-              onSubmit={handleCreate}
-              onCancel={() => setCreateDialogOpen(false)}
-              isSubmitting={isSubmitting}
-            />
-            {createError && (
-              <p className="text-sm text-destructive text-center">
-                {createError}
-              </p>
-            )}
-          </DialogContent>
-        </Dialog>
+        <Link to="/tables/new">
+          <Button>New Table</Button>
+        </Link>
       </div>
-
-      {/* Edit Dialog */}
-      <Dialog
-        open={!!editingTable}
-        onOpenChange={(open) => !open && setEditingTable(null)}
-      >
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <TableForm
-            initialData={editingTable || undefined}
-            onSubmit={handleUpdate}
-            onCancel={() => setEditingTable(null)}
-            isSubmitting={isSubmitting}
-          />
-          {editError && (
-            <p className="text-sm text-destructive text-center">{editError}</p>
-          )}
-        </DialogContent>
-      </Dialog>
 
       {/* Delete Confirmation Dialog */}
       <AlertDialog
@@ -238,7 +148,7 @@ export default function Route({ loaderData }: Route.ComponentProps) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {tables.map((table) => (
+                {tables.map((table: TableConfig) => (
                   <TableRow key={table._id || table.table_name}>
                     <TableCell className="font-medium">
                       {table.table_name}
@@ -294,10 +204,8 @@ export default function Route({ loaderData }: Route.ComponentProps) {
                           align="end"
                           className="[&_[role='menuitem']]:cursor-pointer"
                         >
-                          <DropdownMenuItem
-                            onClick={() => setEditingTable(table)}
-                          >
-                            Edit
+                          <DropdownMenuItem asChild>
+                            <Link to={`/tables/${table.table_name}/edit`}>Edit</Link>
                           </DropdownMenuItem>
                           <DropdownMenuItem
                             onClick={() => openDeleteDialog(table)}
@@ -325,45 +233,47 @@ function DestinationsCell({
 }: {
   destinations: TableConfig["destinations"];
 }) {
+  const [open, setOpen] = useState(false);
+
   return (
-    <Dialog>
-      <DialogTrigger asChild>
-        <Button variant="outline" size="sm">
-          {destinations.length}{" "}
-          {destinations.length === 1 ? "destination" : "destinations"}
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>Destinations</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-4">
-          {destinations.map((d, i) => (
-            <div key={i} className="border rounded-lg p-4 space-y-2">
-              <div className="flex items-center gap-2">
-                <span className="font-medium">{d.type}</span>
-                {d.endpoint && (
-                  <span className="text-muted-foreground text-sm">
-                    → {d.endpoint}
-                  </span>
-                )}
-              </div>
-              {d.bearer_token && (
-                <div className="text-sm text-muted-foreground">
-                  <span className="font-medium">Bearer Token:</span>{" "}
-                  {d.bearer_token.substring(0, 20)}...
+    <>
+      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+        {destinations.length}{" "}
+        {destinations.length === 1 ? "destination" : "destinations"}
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Destinations</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            {destinations.map((d, i) => (
+              <div key={i} className="border rounded-lg p-4 space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium">{d.type}</span>
+                  {d.endpoint && (
+                    <span className="text-muted-foreground text-sm">
+                      → {d.endpoint}
+                    </span>
+                  )}
                 </div>
-              )}
-              <div className="text-sm">
-                <span className="font-medium">Event Types:</span>{" "}
-                <span className="text-muted-foreground">
-                  {d.event_types?.join(", ") || "ALL"}
-                </span>
+                {d.bearer_token && (
+                  <div className="text-sm text-muted-foreground">
+                    <span className="font-medium">Bearer Token:</span>{" "}
+                    {d.bearer_token.substring(0, 20)}...
+                  </div>
+                )}
+                <div className="text-sm">
+                  <span className="font-medium">Event Types:</span>{" "}
+                  <span className="text-muted-foreground">
+                    {d.event_types?.join(", ") || "ALL"}
+                  </span>
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
-      </DialogContent>
-    </Dialog>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
