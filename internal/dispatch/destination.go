@@ -3,7 +3,7 @@ package dispatch
 import (
 	"context"
 
-	"github.com/sergiors/relay/internal/streams"
+	"github.com/sergiors/conduit/internal/streams"
 )
 
 // Destination defines the interface for event destinations.

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/sergiors/relay/internal/streams"
+	"github.com/sergiors/conduit/internal/streams"
 )
 
 // EventBridgeDestination sends records to AWS EventBridge.
@@ -21,7 +21,7 @@ type EventBridgeDestination struct {
 // NewEventBridgeDestination creates an EventBridge destination.
 //   - region: AWS region (e.g. "us-east-1")
 //   - eventBusName: name of the EventBridge event bus
-//   - source: optional source identifier (default: "relay-mongodb")
+//   - source: optional source identifier (default: "conduit-mongodb")
 //   - detailType: optional detail-type (default: record.RecordType)
 func NewEventBridgeDestination(region, eventBusName, source, detailType string) (*EventBridgeDestination, error) {
 	if region == "" {
@@ -31,7 +31,7 @@ func NewEventBridgeDestination(region, eventBusName, source, detailType string) 
 		return nil, fmt.Errorf("event_bus_name is required for EventBridge destination")
 	}
 	if source == "" {
-		source = "relay-mongodb"
+		source = "conduit-mongodb"
 	}
 
 	return &EventBridgeDestination{

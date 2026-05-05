@@ -47,7 +47,7 @@ services:
       - 8080:8080
     environment:
       - MONGODB_URI=mongodb://mongo:27017/?directConnection=true
-      - MONGODB_DATABASE=relay
+      - MONGODB_DATABASE=conduit
       - REDIS_URI=redis://redis:6379
       - PORT=8080
     depends_on:
@@ -64,7 +64,7 @@ services:
     command: ["./bin/worker"]
     environment:
       - MONGODB_URI=mongodb://mongo:27017/?directConnection=true
-      - MONGODB_DATABASE=relay
+      - MONGODB_DATABASE=conduit
       - REDIS_URI=redis://redis:6379
     depends_on:
       mongo:

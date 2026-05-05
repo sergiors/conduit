@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sergiors/relay/internal/dispatch"
-	"github.com/sergiors/relay/internal/redis"
-	"github.com/sergiors/relay/internal/streams"
+	"github.com/sergiors/conduit/internal/dispatch"
+	"github.com/sergiors/conduit/internal/redis"
+	"github.com/sergiors/conduit/internal/streams"
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/bson"
 )

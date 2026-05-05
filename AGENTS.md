@@ -4,7 +4,7 @@
 
 This project is a control plane + data plane system built in Go.  
 It manages MongoDB collections ("tables") and enables CDC (Change Data Capture)
-to external systems like Redis or EventBridge.
+to external systems like HTTP, EventBridge or Meilisearch.
 
 Main components:
 
@@ -257,6 +257,14 @@ System MUST include:
 - No event loss
 - No duplicate processing
 - No goroutine leaks
+
+---
+
+## Git
+
+- Use conventional commits: `feat:`, `fix:`, `chore:`, `test:`, `docs:`, `refactor:`.
+- Do not add attribution trailers such as `Co-Authored-By` or generated-by messages.
+- Prefer worktrees for parallel work to avoid conflicts.
 
 ---
 

@@ -1,4 +1,4 @@
-module github.com/sergiors/relay
+module github.com/sergiors/conduit
 
 go 1.25.6
 

@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/sergiors/relay/internal/streams"
-	"github.com/sergiors/relay/internal/tables"
+	"github.com/sergiors/conduit/internal/streams"
+	"github.com/sergiors/conduit/internal/tables"
 )
 
 // HTTPDestination sends records to an HTTP endpoint via POST.

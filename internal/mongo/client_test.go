@@ -16,12 +16,12 @@ func TestConfig(t *testing.T) {
 	t.Run("default configuration", func(t *testing.T) {
 		cfg := Config{
 			URI:      "mongodb://localhost:27017",
-			Database: "relay",
+			Database: "conduit",
 			Timeout:  10 * time.Second,
 		}
 
 		assert.Equal(t, "mongodb://localhost:27017", cfg.URI)
-		assert.Equal(t, "relay", cfg.Database)
+		assert.Equal(t, "conduit", cfg.Database)
 		assert.Equal(t, 10*time.Second, cfg.Timeout)
 	})
 
@@ -66,7 +66,7 @@ func TestClientIntegration(t *testing.T) {
 
 		client, err := NewClient(ctx, Config{
 			URI:      "mongodb://localhost:27017",
-			Database: "relay",
+			Database: "conduit",
 			Timeout:  10 * time.Second,
 		})
 		if err != nil {
@@ -75,7 +75,7 @@ func TestClientIntegration(t *testing.T) {
 		defer client.Close(ctx)
 
 		assert.NotNil(t, client.Client)
-		assert.Equal(t, "relay", client.Database())
+		assert.Equal(t, "conduit", client.Database())
 	})
 
 	t.Run("get collection", func(t *testing.T) {
@@ -84,7 +84,7 @@ func TestClientIntegration(t *testing.T) {
 
 		client, err := NewClient(ctx, Config{
 			URI:      "mongodb://localhost:27017",
-			Database: "relay",
+			Database: "conduit",
 			Timeout:  10 * time.Second,
 		})
 		if err != nil {
@@ -108,7 +108,7 @@ func TestClientCreateTTLIndex(t *testing.T) {
 
 	client, err := NewClient(ctx, Config{
 			URI:      "mongodb://localhost:27017",
-			Database: "relay",
+			Database: "conduit",
 			Timeout:  10 * time.Second,
 		})
 	if err != nil {
@@ -186,7 +186,7 @@ func TestClientEnableTableStreams(t *testing.T) {
 
 	client, err := NewClient(ctx, Config{
 			URI:      "mongodb://localhost:27017",
-			Database: "relay",
+			Database: "conduit",
 			Timeout:  10 * time.Second,
 		})
 	if err != nil {

@@ -10,11 +10,11 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	"github.com/sergiors/relay/internal/dispatch"
-	redisclient "github.com/sergiors/relay/internal/redis"
-	"github.com/sergiors/relay/internal/retry"
-	"github.com/sergiors/relay/internal/streams"
-	"github.com/sergiors/relay/internal/tables"
+	"github.com/sergiors/conduit/internal/dispatch"
+	redisclient "github.com/sergiors/conduit/internal/redis"
+	"github.com/sergiors/conduit/internal/retry"
+	"github.com/sergiors/conduit/internal/streams"
+	"github.com/sergiors/conduit/internal/tables"
 	"go.mongodb.org/mongo-driver/mongo"
 )
 

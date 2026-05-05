@@ -448,7 +448,7 @@ export function TableForm({
                             render={({ field }) => (
                               <Input
                                 {...field}
-                                placeholder="relay-mongodb"
+                                placeholder="conduit-mongodb"
                                 disabled={!streamEnabled}
                               />
                             )}

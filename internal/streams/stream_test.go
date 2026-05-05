@@ -113,16 +113,16 @@ func TestStreamRecordJSON(t *testing.T) {
 
 func TestWatcherCreation(t *testing.T) {
 	t.Run("new watcher with correct configuration", func(t *testing.T) {
-		watcher := NewWatcher(nil, "relay", "users", true)
+		watcher := NewWatcher(nil, "conduit", "users", true)
 
 		assert.NotNil(t, watcher)
-		assert.Equal(t, "relay", watcher.database)
+		assert.Equal(t, "conduit", watcher.database)
 		assert.Equal(t, "users", watcher.table)
 		assert.True(t, watcher.oldImage)
 	})
 
 	t.Run("watcher without old image", func(t *testing.T) {
-		watcher := NewWatcher(nil, "relay", "orders", false)
+		watcher := NewWatcher(nil, "conduit", "orders", false)
 
 		assert.NotNil(t, watcher)
 		assert.False(t, watcher.oldImage)
@@ -131,7 +131,7 @@ func TestWatcherCreation(t *testing.T) {
 
 func TestWatcherWatchContext(t *testing.T) {
 	t.Run("watch respects context cancellation", func(t *testing.T) {
-		watcher := NewWatcher(nil, "relay", "test", false)
+		watcher := NewWatcher(nil, "conduit", "test", false)
 
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel() // Cancel immediately

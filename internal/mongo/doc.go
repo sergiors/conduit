@@ -16,7 +16,7 @@
 //
 //	client, err := mongo.NewClient(ctx, mongo.Config{
 //	    URI:      "mongodb://localhost:27017",
-//	    Database: "relay",
+//	    Database: "conduit",
 //	})
 //	if err != nil {
 //	    log.Fatal(err)

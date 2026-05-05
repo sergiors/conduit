@@ -5,7 +5,7 @@ import (
 	"log"
 	"sync"
 
-	"github.com/sergiors/relay/internal/streams"
+	"github.com/sergiors/conduit/internal/streams"
 )
 
 // Dispatcher routes stream records to configured destinations.

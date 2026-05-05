@@ -1,4 +1,4 @@
-# Relay
+# Conduit
 
 [![Go Version](https://img.shields.io/badge/go-1.25+-blue.svg)](https://golang.org)
 [![License](https://img.shields.io/badge/license-GPL--v3-blue.svg)](LICENSE)
@@ -12,7 +12,7 @@ MongoDB Change Data Capture (CDC) control plane + data plane system built in Go.
 
 ## 📋 Overview
 
-Relay manages MongoDB collections ("tables") and enables CDC (Change Data Capture) to external systems like HTTP endpoints, AWS EventBridge, or Meilisearch. The design follows **DynamoDB concepts** and naming conventions.
+Conduit manages MongoDB collections ("tables") and enables CDC (Change Data Capture) to external systems like HTTP endpoints, AWS EventBridge, or Meilisearch. The design follows **DynamoDB concepts** and naming conventions.
 
 ```
 ┌─────────────────┐     ┌──────────────┐     ┌─────────────────┐
@@ -86,7 +86,7 @@ cdc:config-change                      # Pub/Sub channel for table changes
 
 ```bash
 git clone <repository>
-cd relay
+cd conduit
 make init
 ```
 
@@ -135,7 +135,7 @@ cp .env.example .env
 ```bash
 # MongoDB (REQUIRED)
 MONGODB_URI=mongodb://localhost:27017
-MONGODB_DATABASE=relay
+MONGODB_DATABASE=conduit
 
 # Redis - Use URI/DSN format (REQUIRED)
 # Format: redis://[username[:password]@]host[:port][/db_number]
@@ -262,7 +262,7 @@ curl -X POST http://localhost:8080/api/tables \
 | ---------------- | ------ | -------- | --------------------------------------- |
 | `region`         | string | Yes      | AWS region (e.g. `us-east-1`)           |
 | `event_bus_name` | string | Yes      | EventBridge event bus name              |
-| `source`         | string | No       | Event source (default: `relay-mongodb`) |
+| `source`         | string | No       | Event source (default: `conduit-mongodb`) |
 
 **Meilisearch-specific fields:**
 
@@ -562,7 +562,7 @@ make test-coverage     # Run tests with coverage report
 ## 📁 Project Structure
 
 ```
-relay/
+conduit/
 ├── cmd/
 │   ├── api/              # Control plane API (Gin)
 │   └── worker/           # Data plane CDC worker
@@ -630,7 +630,7 @@ FATAL: Required environment variable MONGODB_URI is not set
 
 ```bash
 export MONGODB_URI=mongodb://localhost:27017
-export MONGODB_DATABASE=relay
+export MONGODB_DATABASE=conduit
 export REDIS_URI=redis://localhost:6379
 ```
 
@@ -639,8 +639,8 @@ export REDIS_URI=redis://localhost:6379
 New tables should be detected within ~1 second via Redis Pub/Sub. If not:
 
 1. Check Redis is running: `redis-cli ping` → should return `PONG`
-2. Check worker logs for Pub/Sub subscription: `docker logs relay-mongodb-worker-1 | grep "config-change"`
-3. Verify API is publishing: `docker logs relay-mongodb-api-1 | grep "config change"`
+2. Check worker logs for Pub/Sub subscription: `docker logs conduit-mongodb-worker-1 | grep "config-change"`
+3. Verify API is publishing: `docker logs conduit-mongodb-api-1 | grep "config change"`
 4. Fallback: Sync runs every 30s if Pub/Sub fails
 
 ### Invalid Redis URI
@@ -686,10 +686,6 @@ redis-cli -h localhost -p 6379 ping
 3. Check Redis connection
 4. Review worker logs for errors
 
-## 📝 License
-
-GNU General Public License v3.0 - see [LICENSE](LICENSE.md) for details.
-
 ## 🤝 Contributing
 
 1. Fork the repository
@@ -698,6 +694,6 @@ GNU General Public License v3.0 - see [LICENSE](LICENSE.md) for details.
 4. Push to branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
----
+## 📝 License
 
-**Built with ❤️ using Go and MongoDB**
+GNU General Public License v3.0 - see [LICENSE](LICENSE.md) for details.

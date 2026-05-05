@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/sergiors/relay/internal/mongo"
-	"github.com/sergiors/relay/internal/redis"
-	"github.com/sergiors/relay/internal/tables"
+	"github.com/sergiors/conduit/internal/mongo"
+	"github.com/sergiors/conduit/internal/redis"
+	"github.com/sergiors/conduit/internal/tables"
 )
 
 type Server struct {

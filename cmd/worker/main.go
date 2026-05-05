@@ -8,12 +8,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/sergiors/relay/internal/dispatch"
-	"github.com/sergiors/relay/internal/mongo"
-	"github.com/sergiors/relay/internal/redis"
-	"github.com/sergiors/relay/internal/retry"
-	"github.com/sergiors/relay/internal/tables"
-	"github.com/sergiors/relay/internal/watcher"
+	"github.com/sergiors/conduit/internal/dispatch"
+	"github.com/sergiors/conduit/internal/mongo"
+	"github.com/sergiors/conduit/internal/redis"
+	"github.com/sergiors/conduit/internal/retry"
+	"github.com/sergiors/conduit/internal/tables"
+	"github.com/sergiors/conduit/internal/watcher"
 )
 
 type Worker struct {

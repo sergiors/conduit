@@ -110,7 +110,7 @@ func TestStoreCreateIndex(t *testing.T) {
 	}
 	defer client.Disconnect(ctx)
 
-	store := NewStore(client, "relay_test")
+	store := NewStore(client, "conduit_test")
 
 	err = store.CreateIndex(ctx)
 	require.NoError(t, err, "should create unique index on table_name")
@@ -130,7 +130,7 @@ func TestStoreCRUD(t *testing.T) {
 	}
 	defer client.Disconnect(ctx)
 
-	store := NewStore(client, "relay_test")
+	store := NewStore(client, "conduit_test")
 
 	// Cleanup before test - remove any leftover test tables
 	for _, name := range []string{"test_table", "protected_table", "collection_table", "stream_table", "no_stream_table"} {
@@ -261,7 +261,7 @@ func TestStoreCRUD(t *testing.T) {
 		require.NoError(t, err)
 
 		// Verify collection exists
-		db := client.Database("relay_test")
+		db := client.Database("conduit_test")
 		collections, err := db.ListCollectionNames(ctx, bson.M{"name": "collection_table"})
 		require.NoError(t, err)
 		assert.Contains(t, collections, "collection_table")
@@ -311,7 +311,7 @@ func TestStoreListStreamEnabled(t *testing.T) {
 	}
 	defer client.Disconnect(ctx)
 
-	store := NewStore(client, "relay_test")
+	store := NewStore(client, "conduit_test")
 
 	// Create stream-enabled table
 	streamTable := &Table{

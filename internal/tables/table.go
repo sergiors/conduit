@@ -29,7 +29,7 @@ type DestinationConfig struct {
 	// EventBridge-specific
 	Region       string `bson:"region,omitempty" json:"region,omitempty"`             // AWS region, e.g. "us-east-1"
 	EventBusName string `bson:"event_bus_name,omitempty" json:"event_bus_name,omitempty"` // EventBridge event bus name
-	Source       string `bson:"source,omitempty" json:"source,omitempty"`             // Event source (default: "relay-mongodb")
+	Source       string `bson:"source,omitempty" json:"source,omitempty"`             // Event source (default: "conduit-mongodb")
 
 	// Meilisearch-specific
 	IndexName string `bson:"index_name,omitempty" json:"index_name,omitempty"` // Target index (default: table_name)

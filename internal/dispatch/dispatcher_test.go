@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/sergiors/relay/internal/streams"
-	"github.com/sergiors/relay/internal/tables"
+	"github.com/sergiors/conduit/internal/streams"
+	"github.com/sergiors/conduit/internal/tables"
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/bson"
 )
@@ -186,7 +186,7 @@ func TestHTTPDestination(t *testing.T) {
 
 func TestEventBridgeDestination(t *testing.T) {
 	t.Run("creation succeeds", func(t *testing.T) {
-		dest, err := NewEventBridgeDestination("us-east-1", "my-event-bus", "relay-mongodb", "")
+		dest, err := NewEventBridgeDestination("us-east-1", "my-event-bus", "conduit-mongodb", "")
 		assert.NoError(t, err)
 		assert.NotNil(t, dest)
 		assert.Equal(t, "eventbridge:my-event-bus@us-east-1", dest.Name())
@@ -205,7 +205,7 @@ func TestEventBridgeDestination(t *testing.T) {
 	})
 
 	t.Run("send logs but does not fail", func(t *testing.T) {
-		dest, _ := NewEventBridgeDestination("us-east-1", "my-event-bus", "relay-mongodb", "")
+		dest, _ := NewEventBridgeDestination("us-east-1", "my-event-bus", "conduit-mongodb", "")
 		ctx := context.Background()
 		record := streams.StreamRecord{
 			TableName:  "orders",
@@ -217,7 +217,7 @@ func TestEventBridgeDestination(t *testing.T) {
 	})
 
 	t.Run("close succeeds", func(t *testing.T) {
-		dest, _ := NewEventBridgeDestination("us-east-1", "my-event-bus", "relay-mongodb", "")
+		dest, _ := NewEventBridgeDestination("us-east-1", "my-event-bus", "conduit-mongodb", "")
 		err := dest.Close()
 		assert.NoError(t, err)
 	})

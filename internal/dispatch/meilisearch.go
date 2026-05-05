@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/sergiors/relay/internal/streams"
+	"github.com/sergiors/conduit/internal/streams"
 )
 
 // MeilisearchDestination sends records to Meilisearch for full-text indexing.

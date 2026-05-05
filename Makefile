@@ -99,7 +99,7 @@ init: deps fmt vet ## Initialize project (first time setup)
 	@echo "Project initialized!"
 
 help: ## Show this help message
-	@echo "Relay MongoDB CDC - Makefile Commands"
+	@echo "Conduit MongoDB CDC - Makefile Commands"
 	@echo "======================================"
 	@echo ""
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \

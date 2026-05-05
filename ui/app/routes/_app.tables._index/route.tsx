@@ -43,8 +43,8 @@ export { clientLoader };
 
 export function meta() {
   return [
-    { title: "Tables - Relay" },
-    { name: "description", content: "Relay Tables Management" },
+    { title: "Tables - Conduit" },
+    { name: "description", content: "Conduit Tables Management" },
   ];
 }
 

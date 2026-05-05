@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sergiors/relay/internal/dispatch"
-	"github.com/sergiors/relay/internal/redis"
-	"github.com/sergiors/relay/internal/streams"
+	"github.com/sergiors/conduit/internal/dispatch"
+	"github.com/sergiors/conduit/internal/redis"
+	"github.com/sergiors/conduit/internal/streams"
 )
 
 // Processor handles retry queue processing with exponential backoff

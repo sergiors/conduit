@@ -4,17 +4,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sergiors/relay/internal/streams"
+	"github.com/sergiors/conduit/internal/streams"
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/bson"
 )
 
 func TestWatcherCreation(t *testing.T) {
 	t.Run("new watcher with correct configuration", func(t *testing.T) {
-		watcher := NewWatcher(nil, "relay", "users", true, "", nil)
+		watcher := NewWatcher(nil, "conduit", "users", true, "", nil)
 
 		assert.NotNil(t, watcher)
-		assert.Equal(t, "relay", watcher.database)
+		assert.Equal(t, "conduit", watcher.database)
 		assert.Equal(t, "users", watcher.tableName)
 		assert.True(t, watcher.oldImage)
 		assert.Equal(t, "", watcher.resumeToken)
@@ -22,7 +22,7 @@ func TestWatcherCreation(t *testing.T) {
 
 	t.Run("watcher with resume token", func(t *testing.T) {
 		token := "test-resume-token"
-		watcher := NewWatcher(nil, "relay", "orders", false, token, nil)
+		watcher := NewWatcher(nil, "conduit", "orders", false, token, nil)
 
 		assert.NotNil(t, watcher)
 		assert.Equal(t, token, watcher.resumeToken)
@@ -31,7 +31,7 @@ func TestWatcherCreation(t *testing.T) {
 
 func TestWatcherStats(t *testing.T) {
 	t.Run("initial stats are correct", func(t *testing.T) {
-		watcher := NewWatcher(nil, "relay", "test", false, "", nil)
+		watcher := NewWatcher(nil, "conduit", "test", false, "", nil)
 
 		stats := watcher.GetStats()
 		assert.Zero(t, stats.EventsProcessed)
@@ -40,14 +40,14 @@ func TestWatcherStats(t *testing.T) {
 	})
 
 	t.Run("IsRunning returns false before start", func(t *testing.T) {
-		watcher := NewWatcher(nil, "relay", "test", false, "", nil)
+		watcher := NewWatcher(nil, "conduit", "test", false, "", nil)
 		assert.False(t, watcher.IsRunning())
 	})
 }
 
 func TestParseChange(t *testing.T) {
 	t.Run("parse insert operation", func(t *testing.T) {
-		watcher := NewWatcher(nil, "relay", "users", false, "", nil)
+		watcher := NewWatcher(nil, "conduit", "users", false, "", nil)
 
 		change := bson.M{
 			"operationType": "insert",
@@ -67,7 +67,7 @@ func TestParseChange(t *testing.T) {
 	})
 
 	t.Run("parse update operation with old image", func(t *testing.T) {
-		watcher := NewWatcher(nil, "relay", "orders", true, "", nil)
+		watcher := NewWatcher(nil, "conduit", "orders", true, "", nil)
 
 		change := bson.M{
 			"operationType": "update",
@@ -89,7 +89,7 @@ func TestParseChange(t *testing.T) {
 	})
 
 	t.Run("parse delete operation", func(t *testing.T) {
-		watcher := NewWatcher(nil, "relay", "sessions", true, "", nil)
+		watcher := NewWatcher(nil, "conduit", "sessions", true, "", nil)
 
 		change := bson.M{
 			"operationType": "delete",
@@ -107,7 +107,7 @@ func TestParseChange(t *testing.T) {
 	})
 
 	t.Run("parse unknown operation type", func(t *testing.T) {
-		watcher := NewWatcher(nil, "relay", "test", false, "", nil)
+		watcher := NewWatcher(nil, "conduit", "test", false, "", nil)
 
 		change := bson.M{
 			"operationType": "unknown",
@@ -119,7 +119,7 @@ func TestParseChange(t *testing.T) {
 	})
 
 	t.Run("parse missing operation type", func(t *testing.T) {
-		watcher := NewWatcher(nil, "relay", "test", false, "", nil)
+		watcher := NewWatcher(nil, "conduit", "test", false, "", nil)
 
 		change := bson.M{}
 
@@ -132,10 +132,10 @@ func TestParseChange(t *testing.T) {
 func TestManagerCreation(t *testing.T) {
 	t.Run("new manager with correct configuration", func(t *testing.T) {
 		cfg := DefaultConfig()
-		manager := NewManager(nil, "relay", nil, nil, nil, nil, cfg)
+		manager := NewManager(nil, "conduit", nil, nil, nil, nil, cfg)
 
 		assert.NotNil(t, manager)
-		assert.Equal(t, "relay", manager.database)
+		assert.Equal(t, "conduit", manager.database)
 		assert.Equal(t, 30*time.Second, manager.syncInterval)
 		assert.Equal(t, 0, manager.GetActiveWatchers())
 	})
