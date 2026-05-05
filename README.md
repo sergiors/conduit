@@ -1,7 +1,7 @@
 # Relay
 
 [![Go Version](https://img.shields.io/badge/go-1.25+-blue.svg)](https://golang.org)
-[![License](https://img.shields.io/badge/license-GPL v3.0-green.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-GPL--v3-blue.svg)](LICENSE)
 
 MongoDB Change Data Capture (CDC) control plane + data plane system built in Go.
 
@@ -662,7 +662,7 @@ redis-cli -h localhost -p 6379 ping
 
 ## 📝 License
 
-GPL v3.0 License - see [LICENSE](LICENSE) for details.
+GNU General Public License v3.0 - see [LICENSE](LICENSE) for details.
 
 ## 🤝 Contributing
 

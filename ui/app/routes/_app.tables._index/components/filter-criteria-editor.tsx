@@ -2,6 +2,7 @@ import { PlusIcon, Trash2Icon } from "lucide-react";
 import { Controller, useFieldArray, type Control } from "react-hook-form";
 
 import { Button } from "~/components/ui/button";
+import { Input } from "~/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -9,13 +10,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "~/components/ui/select";
-import { Input } from "~/components/ui/input";
 import { Separator } from "~/components/ui/separator";
 
 import type { TableForm } from "./types";
 
 // Condition types
-type ConditionType = "prefix" | "suffix" | "exists" | "numeric" | "anything-but";
+type ConditionType =
+  | "prefix"
+  | "suffix"
+  | "exists"
+  | "numeric"
+  | "anything-but";
 
 const conditionOptions: { value: ConditionType; label: string }[] = [
   { value: "prefix", label: "Prefix" },
@@ -44,7 +49,6 @@ export function FilterCriteriaEditor({
   destIndex,
   control,
 }: FilterCriteriaEditorProps) {
-
   const { fields, append, remove } = useFieldArray({
     control,
     name: `destinations.${destIndex}.filter_criteria.${imageType}` as const,
@@ -60,12 +64,7 @@ export function FilterCriteriaEditor({
         <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
           {imageType.replace("_", " ")}
         </span>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={addField}
-        >
+        <Button type="button" variant="outline" size="sm" onClick={addField}>
           <PlusIcon className="h-3.5 w-3.5 mr-1" />
           Add Field
         </Button>
@@ -80,12 +79,14 @@ export function FilterCriteriaEditor({
       {fields.map((field, fieldIndex) => (
         <div
           key={field.id}
-          className="border border-border rounded-xl p-3 space-y-2 bg-card"
+          className="border border-border rounded-2xl p-6 space-y-6 bg-card"
         >
           {/* Field Name + Remove */}
           <div className="flex items-center gap-2">
             <Controller
-              name={`destinations.${destIndex}.filter_criteria.${imageType}.${fieldIndex}.field` as const}
+              name={
+                `destinations.${destIndex}.filter_criteria.${imageType}.${fieldIndex}.field` as const
+              }
               control={control}
               render={({ field: fieldProps }) => (
                 <Input
@@ -108,121 +109,128 @@ export function FilterCriteriaEditor({
 
           {/* Conditions */}
           <Controller
-            name={`destinations.${destIndex}.filter_criteria.${imageType}.${fieldIndex}.conditions` as const}
+            name={
+              `destinations.${destIndex}.filter_criteria.${imageType}.${fieldIndex}.conditions` as const
+            }
             control={control}
             render={({ field: conditionsProps }) => {
               const conditions = conditionsProps.value || [];
               const availableConditions = conditionOptions.filter(
-                (opt) =>
-                  !conditions.some((c) => c.type === opt.value),
+                (opt) => !conditions.some((c) => c.type === opt.value),
               );
 
               return (
                 <div className="space-y-2">
                   <Separator />
 
-                  {conditions.map(
-                    (condition, conditionIndex) => (
-                      <div
-                        key={conditionIndex}
-                        className="flex items-center gap-2"
-                      >
-                        {/* Condition Type Badge */}
-                        <span className="text-xs font-medium px-2 py-0.5 rounded bg-secondary text-secondary-foreground min-w-[80px] text-center">
-                          {
-                            conditionOptions.find(
-                              (opt) => opt.value === condition.type,
-                            )?.label
-                          }
-                        </span>
+                  {conditions.map((condition, conditionIndex) => (
+                    <div
+                      key={conditionIndex}
+                      className="flex items-center gap-2"
+                    >
+                      {/* Condition Type Badge */}
+                      <span className="text-xs font-medium px-2 py-0.5 rounded bg-secondary text-secondary-foreground min-w-[80px] text-center">
+                        {
+                          conditionOptions.find(
+                            (opt) => opt.value === condition.type,
+                          )?.label
+                        }
+                      </span>
 
-                        {/* Condition Value Input */}
-                        {condition.type === "exists" ? (
+                      {/* Condition Value Input */}
+                      {condition.type === "exists" ? (
+                        <Controller
+                          name={
+                            `destinations.${destIndex}.filter_criteria.${imageType}.${fieldIndex}.conditions.${conditionIndex}.value` as const
+                          }
+                          control={control}
+                          render={({ field }) => (
+                            <Select
+                              value={field.value || "true"}
+                              onValueChange={field.onChange}
+                            >
+                              <SelectTrigger className="h-7 text-xs w-[100px]">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="true">true</SelectItem>
+                                <SelectItem value="false">false</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          )}
+                        />
+                      ) : condition.type === "numeric" ? (
+                        <>
                           <Controller
-                            name={`destinations.${destIndex}.filter_criteria.${imageType}.${fieldIndex}.conditions.${conditionIndex}.value` as const}
+                            name={
+                              `destinations.${destIndex}.filter_criteria.${imageType}.${fieldIndex}.conditions.${conditionIndex}.numericOp` as const
+                            }
                             control={control}
                             render={({ field }) => (
                               <Select
-                                value={field.value || "true"}
+                                value={field.value || ">"}
                                 onValueChange={field.onChange}
                               >
-                                <SelectTrigger className="h-7 text-xs w-[100px]">
+                                <SelectTrigger className="h-7 text-xs w-[70px]">
                                   <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  <SelectItem value="true">true</SelectItem>
-                                  <SelectItem value="false">false</SelectItem>
+                                  {numericOperators.map((op) => (
+                                    <SelectItem key={op.value} value={op.value}>
+                                      {op.label}
+                                    </SelectItem>
+                                  ))}
                                 </SelectContent>
                               </Select>
                             )}
                           />
-                        ) : condition.type === "numeric" ? (
-                          <>
-                            <Controller
-                              name={`destinations.${destIndex}.filter_criteria.${imageType}.${fieldIndex}.conditions.${conditionIndex}.numericOp` as const}
-                              control={control}
-                              render={({ field }) => (
-                                <Select
-                                  value={field.value || ">"}
-                                  onValueChange={field.onChange}
-                                >
-                                  <SelectTrigger className="h-7 text-xs w-[70px]">
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {numericOperators.map((op) => (
-                                      <SelectItem key={op.value} value={op.value}>
-                                        {op.label}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              )}
-                            />
-                            <Controller
-                              name={`destinations.${destIndex}.filter_criteria.${imageType}.${fieldIndex}.conditions.${conditionIndex}.value` as const}
-                              control={control}
-                              render={({ field }) => (
-                                <Input
-                                  {...field}
-                                  type="number"
-                                  placeholder="0"
-                                  className="h-7 text-xs w-[100px]"
-                                />
-                              )}
-                            />
-                          </>
-                        ) : (
                           <Controller
-                            name={`destinations.${destIndex}.filter_criteria.${imageType}.${fieldIndex}.conditions.${conditionIndex}.value` as const}
+                            name={
+                              `destinations.${destIndex}.filter_criteria.${imageType}.${fieldIndex}.conditions.${conditionIndex}.value` as const
+                            }
                             control={control}
                             render={({ field }) => (
                               <Input
                                 {...field}
-                                placeholder={`Enter ${condition.type} value`}
-                                className="h-7 text-xs flex-1"
+                                type="number"
+                                placeholder="0"
+                                className="h-7 text-xs w-[100px]"
                               />
                             )}
                           />
-                        )}
+                        </>
+                      ) : (
+                        <Controller
+                          name={
+                            `destinations.${destIndex}.filter_criteria.${imageType}.${fieldIndex}.conditions.${conditionIndex}.value` as const
+                          }
+                          control={control}
+                          render={({ field }) => (
+                            <Input
+                              {...field}
+                              placeholder={`Enter ${condition.type} value`}
+                              className="h-7 text-xs flex-1"
+                            />
+                          )}
+                        />
+                      )}
 
-                        {/* Remove Condition */}
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-sm"
-                          onClick={() => {
-                            const updated = conditions.filter(
-                              (_, i) => i !== conditionIndex,
-                            );
-                            conditionsProps.onChange(updated);
-                          }}
-                        >
-                          <Trash2Icon className="h-3 w-3" />
-                        </Button>
-                      </div>
-                    ),
-                  )}
+                      {/* Remove Condition */}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => {
+                          const updated = conditions.filter(
+                            (_, i) => i !== conditionIndex,
+                          );
+                          conditionsProps.onChange(updated);
+                        }}
+                      >
+                        <Trash2Icon className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ))}
 
                   {/* Add Condition Button */}
                   {availableConditions.length > 0 && (

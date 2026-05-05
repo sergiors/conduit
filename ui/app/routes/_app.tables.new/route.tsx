@@ -38,18 +38,8 @@ export default function NewTableRoute() {
   };
 
   return (
-    <div className="p-4 md:p-8">
-      <div className="mb-6">
-        <Button
-          variant="ghost"
-          onClick={() => navigate("/tables")}
-          className="mb-4"
-        >
-          <ArrowLeftIcon className="h-4 w-4 mr-2" />
-          Back to Tables
-        </Button>
-        <h1 className="text-2xl font-bold">New Table</h1>
-      </div>
+    <div className="space-y-6">
+      <h1 className="text-2xl font-bold">New Table</h1>
 
       <Card>
         <CardContent className="pt-6">

@@ -28,13 +28,13 @@ import {
 } from "~/components/ui/select";
 import { Separator } from "~/components/ui/separator";
 
-import type { FilterCondition, FilterCriteria, TableConfig } from "../loader.client";
+import type {
+  FilterCondition,
+  FilterCriteria,
+  TableConfig,
+} from "../loader.client";
 import { FilterCriteriaEditor } from "./filter-criteria-editor";
-import {
-  tableSchema,
-  type TableForm,
-  type FieldFilter,
-} from "./types";
+import { tableSchema, type FieldFilter, type TableForm } from "./types";
 
 // --- Conversions (form ↔ API) ---
 
@@ -57,7 +57,11 @@ function formToAPICriteria(
           cond.suffix = condition.value;
         } else if (condition.type === "exists") {
           cond.exists = condition.value === "true";
-        } else if (condition.type === "numeric" && condition.value && condition.numericOp) {
+        } else if (
+          condition.type === "numeric" &&
+          condition.value &&
+          condition.numericOp
+        ) {
           cond.numeric = [condition.numericOp, Number(condition.value) || 0];
         } else if (condition.type === "anything-but" && condition.value) {
           if (condition.value.startsWith("[")) {
@@ -82,10 +86,14 @@ function formToAPICriteria(
   return criteria;
 }
 
-function apiToFormCriteria(
-  criteria: FilterCriteria | undefined,
-): { old_image: FieldFilter[]; new_image: FieldFilter[] } {
-  const form: { old_image: FieldFilter[]; new_image: FieldFilter[] } = { old_image: [], new_image: [] };
+function apiToFormCriteria(criteria: FilterCriteria | undefined): {
+  old_image: FieldFilter[];
+  new_image: FieldFilter[];
+} {
+  const form: { old_image: FieldFilter[]; new_image: FieldFilter[] } = {
+    old_image: [],
+    new_image: [],
+  };
   if (!criteria) return form;
   for (const image of ["old_image", "new_image"] as const) {
     const filter = criteria[image];
@@ -305,30 +313,23 @@ export function TableForm({
 
         {streamEnabled && (
           <>
-            <div className="flex items-center gap-4">
-              <Separator className="flex-1" />
-              <span className="text-sm font-medium">Destinations</span>
-              <Separator className="flex-1" />
-            </div>
+            <span className="text-xl font-medium">Destinations</span>
 
-            <div className="space-y-4">
+            <div className="space-y-6">
               {destinations.map((dest, index) => (
                 <Card key={index} className="relative">
-                  {destinations.length > 1 && (
-                    <CardHeader>
-                      <CardAction>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-sm"
-                          onClick={() => removeDestination(index)}
-                        >
-                          <XIcon />
-                        </Button>
-                      </CardAction>
-                    </CardHeader>
-                  )}
-                  <CardContent className="space-y-4">
+                  <CardContent className="space-y-6">
+                    {destinations.length > 1 && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => removeDestination(index)}
+                      >
+                        <XIcon />
+                      </Button>
+                    )}
+
                     <Field>
                       <FieldLabel>Type</FieldLabel>
                       <Controller
@@ -347,6 +348,9 @@ export function TableForm({
                             <SelectContent>
                               <SelectGroup>
                                 <SelectItem value="http">HTTP</SelectItem>
+                                <SelectItem value="meilisearch" disabled>
+                                  Meilisearch
+                                </SelectItem>
                                 <SelectItem value="eventbridge" disabled>
                                   EventBridge
                                 </SelectItem>
@@ -356,33 +360,35 @@ export function TableForm({
                         )}
                       />
                     </Field>
-                    <Field>
-                      <FieldLabel>Endpoint *</FieldLabel>
-                      <Controller
-                        name={`destinations.${index}.endpoint` as const}
-                        control={control}
-                        render={({ field }) => (
-                          <Input {...field} disabled={!streamEnabled} />
-                        )}
-                      />
-                      <FieldError
-                        errors={[errors.destinations?.[index]?.endpoint]}
-                      />
-                    </Field>
-                    <Field>
-                      <FieldLabel>Bearer Token</FieldLabel>
-                      <Controller
-                        name={`destinations.${index}.bearer_token` as const}
-                        control={control}
-                        render={({ field }) => (
-                          <Input
-                            {...field}
-                            type="password"
-                            disabled={!streamEnabled}
-                          />
-                        )}
-                      />
-                    </Field>
+                    <div className="grid grid-cols-3 gap-4">
+                      <Field className="col-span-2">
+                        <FieldLabel>Endpoint *</FieldLabel>
+                        <Controller
+                          name={`destinations.${index}.endpoint` as const}
+                          control={control}
+                          render={({ field }) => (
+                            <Input {...field} disabled={!streamEnabled} />
+                          )}
+                        />
+                        <FieldError
+                          errors={[errors.destinations?.[index]?.endpoint]}
+                        />
+                      </Field>
+                      <Field>
+                        <FieldLabel>Bearer Token</FieldLabel>
+                        <Controller
+                          name={`destinations.${index}.bearer_token` as const}
+                          control={control}
+                          render={({ field }) => (
+                            <Input
+                              {...field}
+                              type="password"
+                              disabled={!streamEnabled}
+                            />
+                          )}
+                        />
+                      </Field>
+                    </div>
                     <Field>
                       <FieldLabel>Event Types *</FieldLabel>
                       <Controller
@@ -418,13 +424,9 @@ export function TableForm({
                       />
                     </Field>
 
-                    <Separator />
-
                     {/* Filter Criteria */}
-                    <div className="space-y-4">
-                      <span className="text-sm font-medium">
-                        Filter Criteria
-                      </span>
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium">Filter Criteria</div>
 
                       <FilterCriteriaEditor
                         imageType="old_image"

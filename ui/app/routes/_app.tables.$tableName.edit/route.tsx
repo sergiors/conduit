@@ -1,12 +1,10 @@
-import { useNavigate, useParams } from "react-router";
 import { useEffect, useState } from "react";
+import { useNavigate, useParams } from "react-router";
 
 import { TableForm } from "../_app.tables._index/components/table-form";
 import type { TableConfig } from "../_app.tables._index/loader.client";
 
-import { Button } from "~/components/ui/button";
 import { Card, CardContent } from "~/components/ui/card";
-import { ArrowLeftIcon } from "lucide-react";
 
 export default function EditTableRoute() {
   const { tableName } = useParams<{ tableName: string }>();
@@ -75,19 +73,8 @@ export default function EditTableRoute() {
   }
 
   return (
-    <div className="p-4 md:p-8">
-      <div className="mb-6">
-        <Button
-          variant="ghost"
-          onClick={() => navigate("/tables")}
-          className="mb-4"
-        >
-          <ArrowLeftIcon className="h-4 w-4 mr-2" />
-          Back to Tables
-        </Button>
-        <h1 className="text-2xl font-bold">Edit Table</h1>
-        <p className="text-muted-foreground">{table.table_name}</p>
-      </div>
+    <div className="space-y-6">
+      <h1 className="text-2xl font-bold">Edit Table</h1>
 
       <Card>
         <CardContent className="pt-6">
@@ -98,9 +85,7 @@ export default function EditTableRoute() {
             isSubmitting={isSubmitting}
           />
           {error && (
-            <p className="text-sm text-destructive text-center mt-4">
-              {error}
-            </p>
+            <p className="text-sm text-destructive text-center mt-4">{error}</p>
           )}
         </CardContent>
       </Card>

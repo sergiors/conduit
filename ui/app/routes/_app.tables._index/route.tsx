@@ -20,7 +20,6 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "~/components/ui/dialog";
 import {
   Table,
@@ -49,7 +48,11 @@ export function meta() {
   ];
 }
 
-export default function Route({ loaderData }: { loaderData: { tables: TableConfig[] } }) {
+export default function Route({
+  loaderData,
+}: {
+  loaderData: { tables: TableConfig[] };
+}) {
   const { tables } = loaderData;
   const revalidator = useRevalidator();
 
@@ -88,7 +91,7 @@ export default function Route({ loaderData }: { loaderData: { tables: TableConfi
   };
 
   return (
-    <div className="p-4 md:p-8">
+    <div className="space-y-6">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
         <h1 className="text-2xl font-bold">Tables</h1>
         <Link to="/tables/new">
@@ -136,7 +139,7 @@ export default function Route({ loaderData }: { loaderData: { tables: TableConfi
             <p className="text-muted-foreground">No tables configured.</p>
           ) : (
             <Table>
-              <TableHeader>
+              <TableHeader className="pointer-events-none">
                 <TableRow>
                   <TableHead>Name</TableHead>
                   <TableHead>Stream</TableHead>
@@ -205,7 +208,9 @@ export default function Route({ loaderData }: { loaderData: { tables: TableConfi
                           className="[&_[role='menuitem']]:cursor-pointer"
                         >
                           <DropdownMenuItem asChild>
-                            <Link to={`/tables/${table.table_name}/edit`}>Edit</Link>
+                            <Link to={`/tables/${table.table_name}/edit`}>
+                              Edit
+                            </Link>
                           </DropdownMenuItem>
                           <DropdownMenuItem
                             onClick={() => openDeleteDialog(table)}
