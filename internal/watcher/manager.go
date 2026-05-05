@@ -438,7 +438,43 @@ func (m *Manager) registerSingleDestination(ctx context.Context, tableName strin
 		d.Register(tableName, httpDest)
 		log.Printf("Registered HTTP destination for table %s -> %s", tableName, dest.Endpoint)
 	case "eventbridge":
-		log.Printf("EventBridge destination not yet implemented for table %s", tableName)
+		region := dest.Region
+		if region == "" {
+			log.Printf("EventBridge destination for %s missing required 'region'", tableName)
+			return
+		}
+		busName := dest.EventBusName
+		if busName == "" {
+			busName = dest.Endpoint
+		}
+		if busName == "" {
+			log.Printf("EventBridge destination for %s missing required 'event_bus_name' or 'endpoint'", tableName)
+			return
+		}
+		ebDest, err := dispatch.NewEventBridgeDestination(region, busName, dest.Source, "")
+		if err != nil {
+			log.Printf("Failed to create EventBridge destination for %s: %v", tableName, err)
+			return
+		}
+		d.Register(tableName, ebDest)
+		log.Printf("Registered EventBridge destination for table %s -> %s@%s", tableName, busName, region)
+	case "meilisearch":
+		host := dest.Endpoint
+		if host == "" {
+			log.Printf("Meilisearch destination for %s missing required 'endpoint' (host)", tableName)
+			return
+		}
+		indexName := dest.IndexName
+		if indexName == "" {
+			indexName = tableName
+		}
+		meiliDest, err := dispatch.NewMeilisearchDestination(host, dest.BearerToken, indexName)
+		if err != nil {
+			log.Printf("Failed to create Meilisearch destination for %s: %v", tableName, err)
+			return
+		}
+		d.Register(tableName, meiliDest)
+		log.Printf("Registered Meilisearch destination for table %s -> %s/%s", tableName, host, indexName)
 	default:
 		log.Printf("Unknown destination type: %s for table %s", dest.Type, tableName)
 	}
@@ -469,8 +505,47 @@ func (m *Manager) registerDestinations(ctx context.Context, tableName string, de
 				log.Printf("Registered HTTP destination for table %s -> %s", tableName, dest.Endpoint)
 			}
 		case "eventbridge":
-			// TODO: Add EventBridge destination when configured
-			log.Printf("EventBridge destination not yet implemented for table %s", tableName)
+			region := dest.Region
+			if region == "" {
+				log.Printf("EventBridge destination for %s missing required 'region'", tableName)
+				continue
+			}
+			busName := dest.EventBusName
+			if busName == "" {
+				busName = dest.Endpoint
+			}
+			if busName == "" {
+				log.Printf("EventBridge destination for %s missing required 'event_bus_name' or 'endpoint'", tableName)
+				continue
+			}
+			ebDest, err := dispatch.NewEventBridgeDestination(region, busName, dest.Source, "")
+			if err != nil {
+				log.Printf("Failed to create EventBridge destination for %s: %v", tableName, err)
+				continue
+			}
+			if d, ok := m.dispatcher.(*dispatch.Dispatcher); ok {
+				d.Register(tableName, ebDest)
+				log.Printf("Registered EventBridge destination for table %s -> %s@%s", tableName, busName, region)
+			}
+		case "meilisearch":
+			host := dest.Endpoint
+			if host == "" {
+				log.Printf("Meilisearch destination for %s missing required 'endpoint' (host)", tableName)
+				continue
+			}
+			indexName := dest.IndexName
+			if indexName == "" {
+				indexName = tableName
+			}
+			meiliDest, err := dispatch.NewMeilisearchDestination(host, dest.BearerToken, indexName)
+			if err != nil {
+				log.Printf("Failed to create Meilisearch destination for %s: %v", tableName, err)
+				continue
+			}
+			if d, ok := m.dispatcher.(*dispatch.Dispatcher); ok {
+				d.Register(tableName, meiliDest)
+				log.Printf("Registered Meilisearch destination for table %s -> %s/%s", tableName, host, indexName)
+			}
 		default:
 			log.Printf("Unknown destination type: %s for table %s", dest.Type, tableName)
 		}
@@ -537,14 +612,27 @@ func diffDestinations(current, desired []tables.DestinationConfig) (toAdd, toRem
 	return
 }
 
-// destinationName builds the internal name for a destination config
+// destinationName builds the internal name for a destination config.
+// It includes type-specific identifiers so that two destinations of the same
+// type but with different configs are treated as distinct.
 func destinationName(dest tables.DestinationConfig) string {
-	return dest.Type + ":" + dest.Endpoint
+	switch dest.Type {
+	case "eventbridge":
+		return dest.Type + ":" + dest.Region + ":" + dest.EventBusName
+	case "meilisearch":
+		return dest.Type + ":" + dest.Endpoint + ":" + dest.IndexName
+	default:
+		return dest.Type + ":" + dest.Endpoint
+	}
 }
 
-// configEqual compares two destination configs ignoring event type order
+// configEqual compares two destination configs ignoring event type order.
+// It checks both common fields and type-specific fields.
 func configEqual(a, b tables.DestinationConfig) bool {
 	if a.Type != b.Type || a.Endpoint != b.Endpoint || a.BearerToken != b.BearerToken {
+		return false
+	}
+	if a.Region != b.Region || a.EventBusName != b.EventBusName || a.Source != b.Source || a.IndexName != b.IndexName {
 		return false
 	}
 	if len(a.EventTypes) != len(b.EventTypes) {

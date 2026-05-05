@@ -16,15 +16,33 @@ export const filterCriteriaSchema = z.object({
   new_image: z.array(fieldFilterSchema),
 });
 
-const destinationSchema = z.object({
-  type: z.enum(["http", "eventbridge"]),
-  endpoint: z.string().min(1, "Endpoint is required"),
-  bearer_token: z.string().optional(),
-  event_types: z
-    .array(z.string())
-    .min(1, "At least one event type is required"),
-  filter_criteria: filterCriteriaSchema.optional(),
-});
+const destinationSchema = z
+  .object({
+    type: z.enum(["http", "eventbridge", "meilisearch"]),
+    endpoint: z.string().optional(),
+    bearer_token: z.string().optional(),
+    event_types: z
+      .array(z.string())
+      .min(1, "At least one event type is required"),
+    filter_criteria: filterCriteriaSchema.optional(),
+    region: z.string().optional(),
+    event_bus_name: z.string().optional(),
+    source: z.string().optional(),
+    index_name: z.string().optional(),
+  })
+  .refine(
+    (data) => {
+      if (data.type === "http" && !data.endpoint) return false;
+      if (data.type === "eventbridge" && !data.region) return false;
+      if (data.type === "eventbridge" && !data.event_bus_name) return false;
+      if (data.type === "meilisearch" && !data.endpoint) return false;
+      return true;
+    },
+    {
+      message: "Required fields missing for destination type",
+      path: ["endpoint"],
+    },
+  );
 
 export const tableSchema = z
   .object({

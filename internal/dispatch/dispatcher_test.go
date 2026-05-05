@@ -186,14 +186,26 @@ func TestHTTPDestination(t *testing.T) {
 
 func TestEventBridgeDestination(t *testing.T) {
 	t.Run("creation succeeds", func(t *testing.T) {
-		dest, err := NewEventBridgeDestination("my-event-bus")
+		dest, err := NewEventBridgeDestination("us-east-1", "my-event-bus", "relay-mongodb", "")
 		assert.NoError(t, err)
 		assert.NotNil(t, dest)
-		assert.Equal(t, "eventbridge:my-event-bus", dest.Name())
+		assert.Equal(t, "eventbridge:my-event-bus@us-east-1", dest.Name())
+	})
+
+	t.Run("creation fails without region", func(t *testing.T) {
+		dest, err := NewEventBridgeDestination("", "my-event-bus", "", "")
+		assert.Error(t, err)
+		assert.Nil(t, dest)
+	})
+
+	t.Run("creation fails without event bus", func(t *testing.T) {
+		dest, err := NewEventBridgeDestination("us-east-1", "", "", "")
+		assert.Error(t, err)
+		assert.Nil(t, dest)
 	})
 
 	t.Run("send logs but does not fail", func(t *testing.T) {
-		dest, _ := NewEventBridgeDestination("my-event-bus")
+		dest, _ := NewEventBridgeDestination("us-east-1", "my-event-bus", "relay-mongodb", "")
 		ctx := context.Background()
 		record := streams.StreamRecord{
 			TableName:  "orders",
@@ -205,7 +217,46 @@ func TestEventBridgeDestination(t *testing.T) {
 	})
 
 	t.Run("close succeeds", func(t *testing.T) {
-		dest, _ := NewEventBridgeDestination("my-event-bus")
+		dest, _ := NewEventBridgeDestination("us-east-1", "my-event-bus", "relay-mongodb", "")
+		err := dest.Close()
+		assert.NoError(t, err)
+	})
+}
+
+func TestMeilisearchDestination(t *testing.T) {
+	t.Run("creation succeeds", func(t *testing.T) {
+		dest, err := NewMeilisearchDestination("http://localhost:7700", "master-key", "orders")
+		assert.NoError(t, err)
+		assert.NotNil(t, dest)
+		assert.Equal(t, "meilisearch:http://localhost:7700/orders", dest.Name())
+	})
+
+	t.Run("creation fails without host", func(t *testing.T) {
+		dest, err := NewMeilisearchDestination("", "master-key", "orders")
+		assert.Error(t, err)
+		assert.Nil(t, dest)
+	})
+
+	t.Run("creation fails without index", func(t *testing.T) {
+		dest, err := NewMeilisearchDestination("http://localhost:7700", "master-key", "")
+		assert.Error(t, err)
+		assert.Nil(t, dest)
+	})
+
+	t.Run("send logs but does not fail", func(t *testing.T) {
+		dest, _ := NewMeilisearchDestination("http://localhost:7700", "master-key", "orders")
+		ctx := context.Background()
+		record := streams.StreamRecord{
+			TableName:  "orders",
+			RecordType: streams.InsertRecord,
+		}
+
+		err := dest.Send(ctx, record)
+		assert.NoError(t, err)
+	})
+
+	t.Run("close succeeds", func(t *testing.T) {
+		dest, _ := NewMeilisearchDestination("http://localhost:7700", "master-key", "orders")
 		err := dest.Close()
 		assert.NoError(t, err)
 	})

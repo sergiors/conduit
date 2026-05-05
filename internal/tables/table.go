@@ -15,13 +15,24 @@ import (
 // ValidEventTypes are the allowed event types for destinations
 var ValidEventTypes = []string{"INSERT", "MODIFY", "REMOVE"}
 
-// DestinationConfig represents a destination configuration
+// DestinationConfig represents a destination configuration.
+// Common fields are used by all destinations; type-specific fields are
+// documented below and applied by the watcher manager when building each
+// destination.
 type DestinationConfig struct {
-	Type           string               `bson:"type" json:"type"`
-	Endpoint       string               `bson:"endpoint,omitempty" json:"endpoint"`
-	BearerToken    string               `bson:"bearer_token,omitempty" json:"bearer_token,omitempty"`
-	EventTypes     []string             `bson:"event_types,omitempty" json:"event_types"` // INSERT, MODIFY, REMOVE
+	Type           string         `bson:"type" json:"type"`
+	Endpoint       string         `bson:"endpoint,omitempty" json:"endpoint"`                 // HTTP URL or Meilisearch host or EventBridge event-bus name
+	BearerToken    string         `bson:"bearer_token,omitempty" json:"bearer_token,omitempty"` // HTTP auth token or Meilisearch API key
+	EventTypes     []string       `bson:"event_types,omitempty" json:"event_types"`
 	FilterCriteria FilterCriteria `bson:"filter_criteria,omitempty" json:"filter_criteria,omitempty"`
+
+	// EventBridge-specific
+	Region       string `bson:"region,omitempty" json:"region,omitempty"`             // AWS region, e.g. "us-east-1"
+	EventBusName string `bson:"event_bus_name,omitempty" json:"event_bus_name,omitempty"` // EventBridge event bus name
+	Source       string `bson:"source,omitempty" json:"source,omitempty"`             // Event source (default: "relay-mongodb")
+
+	// Meilisearch-specific
+	IndexName string `bson:"index_name,omitempty" json:"index_name,omitempty"` // Target index (default: table_name)
 }
 
 // ValidateEventTypes validates that all event types are valid

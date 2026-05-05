@@ -163,11 +163,15 @@ export function TableForm({
       ttl_attribute: initialData?.ttl_attribute ?? "",
       destinations: initialData
         ? initialData.destinations.map((d) => ({
-            type: d.type as "http" | "eventbridge",
+            type: d.type as "http" | "eventbridge" | "meilisearch",
             endpoint: d.endpoint ?? "",
             bearer_token: d.bearer_token ?? "",
             event_types: d.event_types ?? [],
             filter_criteria: apiToFormCriteria(d.filter_criteria),
+            region: d.region ?? "",
+            event_bus_name: d.event_bus_name ?? "",
+            source: d.source ?? "",
+            index_name: d.index_name ?? "",
           }))
         : [],
       deletion_protection: initialData?.deletion_protection ?? true,
@@ -207,6 +211,10 @@ export function TableForm({
         bearer_token: dest.bearer_token,
         event_types: dest.event_types,
         filter_criteria: formToAPICriteria(dest.filter_criteria),
+        region: dest.region,
+        event_bus_name: dest.event_bus_name,
+        source: dest.source,
+        index_name: dest.index_name,
       })),
     };
     await onSubmit(apiData);
@@ -218,8 +226,13 @@ export function TableForm({
       {
         type: "http" as const,
         endpoint: "",
+        bearer_token: "",
         event_types: [],
         filter_criteria: { old_image: [], new_image: [] },
+        region: "",
+        event_bus_name: "",
+        source: "",
+        index_name: "",
       },
     ]);
   };
@@ -348,10 +361,10 @@ export function TableForm({
                             <SelectContent>
                               <SelectGroup>
                                 <SelectItem value="http">HTTP</SelectItem>
-                                <SelectItem value="meilisearch" disabled>
+                                <SelectItem value="meilisearch">
                                   Meilisearch
                                 </SelectItem>
-                                <SelectItem value="eventbridge" disabled>
+                                <SelectItem value="eventbridge">
                                   EventBridge
                                 </SelectItem>
                               </SelectGroup>
@@ -360,35 +373,142 @@ export function TableForm({
                         )}
                       />
                     </Field>
-                    <div className="grid grid-cols-3 gap-4">
-                      <Field className="col-span-2">
-                        <FieldLabel>Endpoint *</FieldLabel>
-                        <Controller
-                          name={`destinations.${index}.endpoint` as const}
-                          control={control}
-                          render={({ field }) => (
-                            <Input {...field} disabled={!streamEnabled} />
-                          )}
-                        />
-                        <FieldError
-                          errors={[errors.destinations?.[index]?.endpoint]}
-                        />
-                      </Field>
-                      <Field>
-                        <FieldLabel>Bearer Token</FieldLabel>
-                        <Controller
-                          name={`destinations.${index}.bearer_token` as const}
-                          control={control}
-                          render={({ field }) => (
-                            <Input
-                              {...field}
-                              type="password"
-                              disabled={!streamEnabled}
+
+                    {/* HTTP fields */}
+                    {dest.type === "http" && (
+                      <div className="grid grid-cols-3 gap-4">
+                        <Field className="col-span-2">
+                          <FieldLabel>Endpoint *</FieldLabel>
+                          <Controller
+                            name={`destinations.${index}.endpoint` as const}
+                            control={control}
+                            render={({ field }) => (
+                              <Input {...field} disabled={!streamEnabled} />
+                            )}
+                          />
+                          <FieldError
+                            errors={[errors.destinations?.[index]?.endpoint]}
+                          />
+                        </Field>
+                        <Field>
+                          <FieldLabel>Bearer Token</FieldLabel>
+                          <Controller
+                            name={`destinations.${index}.bearer_token` as const}
+                            control={control}
+                            render={({ field }) => (
+                              <Input
+                                {...field}
+                                type="password"
+                                disabled={!streamEnabled}
+                              />
+                            )}
+                          />
+                        </Field>
+                      </div>
+                    )}
+
+                    {/* EventBridge fields */}
+                    {dest.type === "eventbridge" && (
+                      <div className="space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                          <Field>
+                            <FieldLabel>Region *</FieldLabel>
+                            <Controller
+                              name={`destinations.${index}.region` as const}
+                              control={control}
+                              render={({ field }) => (
+                                <Input
+                                  {...field}
+                                  placeholder="us-east-1"
+                                  disabled={!streamEnabled}
+                                />
+                              )}
                             />
-                          )}
-                        />
-                      </Field>
-                    </div>
+                          </Field>
+                          <Field>
+                            <FieldLabel>Event Bus Name *</FieldLabel>
+                            <Controller
+                              name={`destinations.${index}.event_bus_name` as const}
+                              control={control}
+                              render={({ field }) => (
+                                <Input
+                                  {...field}
+                                  placeholder="my-event-bus"
+                                  disabled={!streamEnabled}
+                                />
+                              )}
+                            />
+                          </Field>
+                        </div>
+                        <Field>
+                          <FieldLabel>Source</FieldLabel>
+                          <Controller
+                            name={`destinations.${index}.source` as const}
+                            control={control}
+                            render={({ field }) => (
+                              <Input
+                                {...field}
+                                placeholder="relay-mongodb"
+                                disabled={!streamEnabled}
+                              />
+                            )}
+                          />
+                        </Field>
+                      </div>
+                    )}
+
+                    {/* Meilisearch fields */}
+                    {dest.type === "meilisearch" && (
+                      <div className="space-y-4">
+                        <div className="grid grid-cols-3 gap-4">
+                          <Field className="col-span-2">
+                            <FieldLabel>Host *</FieldLabel>
+                            <Controller
+                              name={`destinations.${index}.endpoint` as const}
+                              control={control}
+                              render={({ field }) => (
+                                <Input
+                                  {...field}
+                                  placeholder="http://localhost:7700"
+                                  disabled={!streamEnabled}
+                                />
+                              )}
+                            />
+                            <FieldError
+                              errors={[errors.destinations?.[index]?.endpoint]}
+                            />
+                          </Field>
+                          <Field>
+                            <FieldLabel>API Key</FieldLabel>
+                            <Controller
+                              name={`destinations.${index}.bearer_token` as const}
+                              control={control}
+                              render={({ field }) => (
+                                <Input
+                                  {...field}
+                                  type="password"
+                                  disabled={!streamEnabled}
+                                />
+                              )}
+                            />
+                          </Field>
+                        </div>
+                        <Field>
+                          <FieldLabel>Index Name</FieldLabel>
+                          <Controller
+                            name={`destinations.${index}.index_name` as const}
+                            control={control}
+                            render={({ field }) => (
+                              <Input
+                                {...field}
+                                placeholder="Defaults to table name"
+                                disabled={!streamEnabled}
+                              />
+                            )}
+                          />
+                        </Field>
+                      </div>
+                    )}
                     <Field>
                       <FieldLabel>Event Types *</FieldLabel>
                       <Controller

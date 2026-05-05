@@ -1,40 +1,27 @@
 package dispatch
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"fmt"
 	"log"
-	"net/http"
 	"sync"
-	"time"
 
 	"github.com/sergiors/relay/internal/streams"
-	"github.com/sergiors/relay/internal/tables"
 )
 
-// Destination defines the interface for event destinations
-type Destination interface {
-	Send(ctx context.Context, record streams.StreamRecord) error
-	Close() error
-	Name() string
-}
-
-// Dispatcher routes stream records to configured destinations
+// Dispatcher routes stream records to configured destinations.
 type Dispatcher struct {
 	destinations map[string][]Destination
 	mu           sync.RWMutex
 }
 
-// NewDispatcher creates a new event dispatcher
+// NewDispatcher creates a new event dispatcher.
 func NewDispatcher() *Dispatcher {
 	return &Dispatcher{
 		destinations: make(map[string][]Destination),
 	}
 }
 
-// Register adds a destination for a table
+// Register adds a destination for a table.
 func (d *Dispatcher) Register(table string, dest Destination) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -45,7 +32,7 @@ func (d *Dispatcher) Register(table string, dest Destination) {
 	d.destinations[table] = append(d.destinations[table], dest)
 }
 
-// Dispatch sends a stream record to all configured destinations
+// Dispatch sends a stream record to all configured destinations.
 func (d *Dispatcher) Dispatch(ctx context.Context, table string, record streams.StreamRecord) error {
 	d.mu.RLock()
 	dests, ok := d.destinations[table]
@@ -66,7 +53,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, table string, record streams.
 	return lastErr
 }
 
-// Close all destinations
+// Close all destinations.
 func (d *Dispatcher) Close() error {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
@@ -82,7 +69,7 @@ func (d *Dispatcher) Close() error {
 	return lastErr
 }
 
-// Remove removes a single destination by name, closing it first
+// Remove removes a single destination by name, closing it first.
 func (d *Dispatcher) Remove(table, name string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -104,7 +91,7 @@ func (d *Dispatcher) Remove(table, name string) {
 	}
 }
 
-// Clear removes all destinations for a table (used when config changes)
+// Clear removes all destinations for a table (used when config changes).
 func (d *Dispatcher) Clear(table string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -115,128 +102,4 @@ func (d *Dispatcher) Clear(table string) {
 		}
 		delete(d.destinations, table)
 	}
-}
-
-// HTTPDestination sends records to an HTTP endpoint via POST
-type HTTPDestination struct {
-	name           string
-	client         *http.Client
-	endpoint       string
-	eventTypes     map[string]bool
-	bearerToken    string
-	filterCriteria tables.FilterCriteria
-}
-
-// NewHTTPDestination creates an HTTP destination
-func NewHTTPDestination(endpoint string, bearerToken string, eventTypes []string, filterCriteria tables.FilterCriteria) (*HTTPDestination, error) {
-	if endpoint == "" {
-		return nil, fmt.Errorf("endpoint is required")
-	}
-
-	// Build event type filter
-	eventTypeFilter := make(map[string]bool)
-	for _, et := range eventTypes {
-		eventTypeFilter[et] = true
-	}
-
-	// Default to all types if none specified
-	if len(eventTypeFilter) == 0 {
-		eventTypeFilter["INSERT"] = true
-		eventTypeFilter["MODIFY"] = true
-		eventTypeFilter["REMOVE"] = true
-	}
-
-	return &HTTPDestination{
-		name:           "http:" + endpoint,
-		client:         &http.Client{Timeout: 30 * time.Second},
-		endpoint:       endpoint,
-		bearerToken:    bearerToken,
-		eventTypes:     eventTypeFilter,
-		filterCriteria: filterCriteria,
-	}, nil
-}
-
-func (h *HTTPDestination) Name() string {
-	return h.name
-}
-
-func (h *HTTPDestination) Send(ctx context.Context, record streams.StreamRecord) error {
-	// Filter by event type
-	if !h.eventTypes[string(record.RecordType)] {
-		log.Printf("Skipping event type %s for HTTP destination", record.RecordType)
-		return nil
-	}
-
-	if !tables.MatchImage(record.NewImage, h.filterCriteria.NewImage) || !tables.MatchImage(record.OldImage, h.filterCriteria.OldImage) {
-		log.Printf("Event filtered out by image criteria for %s", h.name)
-		return nil
-	}
-
-	data, err := json.Marshal(record)
-	if err != nil {
-		return fmt.Errorf("marshal record: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, h.endpoint, bytes.NewReader(data))
-	if err != nil {
-		return fmt.Errorf("create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-
-	// Add bearer token if configured
-	if h.bearerToken != "" {
-		req.Header.Set("Authorization", "Bearer "+h.bearerToken)
-	}
-
-	resp, err := h.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-
-	log.Printf("Sent event to HTTP endpoint %s (status: %d)", h.endpoint, resp.StatusCode)
-	return nil
-}
-
-func (h *HTTPDestination) Close() error {
-	return nil
-}
-
-// EventBridgeDestination sends records to AWS EventBridge
-type EventBridgeDestination struct {
-	name         string
-	eventBusName string
-	// TODO: Add EventBridge client when integration is configured
-}
-
-// NewEventBridgeDestination creates an EventBridge destination
-func NewEventBridgeDestination(eventBusName string) (*EventBridgeDestination, error) {
-	return &EventBridgeDestination{
-		name:         "eventbridge:" + eventBusName,
-		eventBusName: eventBusName,
-	}, nil
-}
-
-func (e *EventBridgeDestination) Name() string {
-	return e.name
-}
-
-func (e *EventBridgeDestination) Send(ctx context.Context, record streams.StreamRecord) error {
-	// TODO: Put events to EventBridge
-	// Example structure:
-	// source: "relay-mongodb"
-	// detail-type: record.RecordType
-	// detail: { tableName, newImage, oldImage, timestamp }
-
-	log.Printf("Would send to EventBridge %s: %+v", e.eventBusName, record)
-	return nil
-}
-
-func (e *EventBridgeDestination) Close() error {
-	return nil
 }

@@ -7,7 +7,7 @@ MongoDB Change Data Capture (CDC) control plane + data plane system built in Go.
 
 ## 📋 Overview
 
-Relay manages MongoDB collections ("tables") and enables CDC (Change Data Capture) to external systems like Redis Streams or AWS EventBridge. The design follows **DynamoDB concepts** and naming conventions.
+Relay manages MongoDB collections ("tables") and enables CDC (Change Data Capture) to external systems like HTTP endpoints, AWS EventBridge, or Meilisearch. The design follows **DynamoDB concepts** and naming conventions.
 
 ```
 ┌─────────────────┐     ┌──────────────┐     ┌─────────────────┐
@@ -33,7 +33,7 @@ Relay manages MongoDB collections ("tables") and enables CDC (Change Data Captur
 - **Idempotency**: Duplicate event prevention with TTL-based keys
 - **Retry with Backoff**: Exponential backoff (1s → 5m), max 5 retries
 - **Dead Letter Queue**: Failed events after max retries
-- **Pluggable Destinations**: HTTP endpoints, EventBridge, custom sinks
+- **Pluggable Destinations**: HTTP endpoints, EventBridge, Meilisearch, custom sinks
 
 ## 🏗 Architecture
 
@@ -237,14 +237,34 @@ curl -X POST http://localhost:8080/api/tables \
 
 **Destination Configuration:**
 
-| Field          | Type     | Description                                  |
-| -------------- | -------- | -------------------------------------------- |
-| `type`         | string   | Destination type: `http`, `eventbridge`      |
-| `endpoint`     | string   | HTTP endpoint URL (required for `http` type) |
-| `bearer_token` | string   | Optional bearer token for authentication     |
-| `event_types`  | []string | Events to send: `INSERT`, `MODIFY`, `REMOVE` |
+| Field            | Type     | Required | Description                                          |
+| ---------------- | -------- | -------- | ---------------------------------------------------- |
+| `type`           | string   | Yes      | Destination type: `http`, `eventbridge`, `meilisearch` |
+| `event_types`    | []string | No       | Events to send: `INSERT`, `MODIFY`, `REMOVE` (default: all) |
+| `filter_criteria`| object   | No       | Per-destination filtering on `old_image` / `new_image` |
 
-If `event_types` is not specified, all event types are sent by default.
+**HTTP-specific fields:**
+
+| Field          | Type   | Required | Description                              |
+| -------------- | ------ | -------- | ---------------------------------------- |
+| `endpoint`     | string | Yes      | HTTP endpoint URL                        |
+| `bearer_token` | string | No       | Optional bearer token for authentication   |
+
+**EventBridge-specific fields:**
+
+| Field            | Type   | Required | Description                              |
+| ---------------- | ------ | -------- | ---------------------------------------- |
+| `region`         | string | Yes      | AWS region (e.g. `us-east-1`)            |
+| `event_bus_name` | string | Yes      | EventBridge event bus name               |
+| `source`         | string | No       | Event source (default: `relay-mongodb`)  |
+
+**Meilisearch-specific fields:**
+
+| Field          | Type   | Required | Description                              |
+| -------------- | ------ | -------- | ---------------------------------------- |
+| `endpoint`     | string | Yes      | Meilisearch host (e.g. `http://localhost:7700`) |
+| `bearer_token` | string | No       | Meilisearch API key                      |
+| `index_name`   | string | No       | Target index (default: `table_name`)     |
 
 **HTTP Request:**
 
