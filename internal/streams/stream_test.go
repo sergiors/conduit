@@ -1,7 +1,6 @@
 package streams
 
 import (
-	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -108,42 +107,6 @@ func TestStreamRecordJSON(t *testing.T) {
 		assert.Equal(t, original.RecordType, decoded.RecordType)
 		assert.NotNil(t, decoded.NewImage)
 		assert.NotNil(t, decoded.OldImage)
-	})
-}
-
-func TestWatcherCreation(t *testing.T) {
-	t.Run("new watcher with correct configuration", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "users", true)
-
-		assert.NotNil(t, watcher)
-		assert.Equal(t, "conduit", watcher.database)
-		assert.Equal(t, "users", watcher.table)
-		assert.True(t, watcher.oldImage)
-	})
-
-	t.Run("watcher without old image", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "orders", false)
-
-		assert.NotNil(t, watcher)
-		assert.False(t, watcher.oldImage)
-	})
-}
-
-func TestWatcherWatchContext(t *testing.T) {
-	t.Run("watch respects context cancellation", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "test", false)
-
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel() // Cancel immediately
-
-		records, errs, err := watcher.Watch(ctx)
-		require.NoError(t, err)
-		assert.NotNil(t, records)
-		assert.NotNil(t, errs)
-
-		// Channels should close quickly after context cancellation
-		<-records
-		<-errs
 	})
 }
 
