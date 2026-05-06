@@ -91,10 +91,10 @@ func main() {
 
 	// Table items CRUD (data plane)
 	router.GET("/api/tables/:name/items", server.listItems)
-	router.GET("/api/tables/:name/items/:id", server.getItem)
+	router.GET("/api/tables/:name/items", server.getItem)
 	router.POST("/api/tables/:name/items", server.createItem)
-	router.PUT("/api/tables/:name/items/:id", server.updateItem)
-	router.DELETE("/api/tables/:name/items/:id", server.deleteItem)
+	router.PUT("/api/tables/:name/items", server.updateItem)
+	router.DELETE("/api/tables/:name/items", server.deleteItem)
 
 	router.GET("/health", server.handleHealth)
 
@@ -339,11 +339,11 @@ func (s *Server) listItems(c *gin.Context) {
 func (s *Server) getItem(c *gin.Context) {
 	ctx := c.Request.Context()
 	tableName := c.Param("name")
-	id := c.Param("id")
 
-	// Check if query string params are provided (pk/sk)
+	// Get query params
 	pk := c.Query("pk")
 	sk := c.Query("sk")
+	id := c.Query("id")
 
 	store := tables.NewItem(s.mongoClient.Client, s.mongoClient.Database(), tableName)
 
@@ -352,8 +352,11 @@ func (s *Server) getItem(c *gin.Context) {
 
 	if pk != "" {
 		item, err = store.GetByKeys(ctx, pk, sk)
-	} else {
+	} else if id != "" {
 		item, err = store.Get(ctx, id)
+	} else {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "pk, sk, or id query param is required"})
+		return
 	}
 
 	if err != nil {
@@ -392,7 +395,11 @@ func (s *Server) createItem(c *gin.Context) {
 func (s *Server) updateItem(c *gin.Context) {
 	ctx := c.Request.Context()
 	tableName := c.Param("name")
-	id := c.Param("id")
+
+	// Get query params for identifying the item
+	pk := c.Query("pk")
+	sk := c.Query("sk")
+	id := c.Query("id")
 
 	var data bson.M
 	if err := c.ShouldBindJSON(&data); err != nil {
@@ -402,7 +409,32 @@ func (s *Server) updateItem(c *gin.Context) {
 
 	store := tables.NewItem(s.mongoClient.Client, s.mongoClient.Database(), tableName)
 
-	result, err := store.Update(ctx, id, data)
+	// Determine ID to update: pk/sk composite or _id
+	var targetID string
+	if pk != "" {
+		// Build composite ID from pk/sk
+		if sk != "" {
+			targetID = pk + "#" + sk
+		} else {
+			targetID = pk
+		}
+		// Also allow body to override
+		if bodyPK, ok := data["pk"].(string); ok && bodyPK != "" {
+			targetID = bodyPK
+			if bodySK, ok := data["sk"].(string); ok && bodySK != "" {
+				targetID = bodyPK + "#" + bodySK
+			}
+		}
+	} else if id != "" {
+		targetID = id
+	} else if bodyID, ok := data["_id"].(string); ok && bodyID != "" {
+		targetID = bodyID
+	} else {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "pk, sk, id query param or _id in body is required"})
+		return
+	}
+
+	result, err := store.Update(ctx, targetID, data)
 	if err != nil {
 		if err.Error() == "document not found" || strings.Contains(err.Error(), "not found") {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Item not found"})
@@ -418,11 +450,11 @@ func (s *Server) updateItem(c *gin.Context) {
 func (s *Server) deleteItem(c *gin.Context) {
 	ctx := c.Request.Context()
 	tableName := c.Param("name")
-	id := c.Param("id")
 
-	// Check if query string params are provided (pk/sk)
+	// Get query params
 	pk := c.Query("pk")
 	sk := c.Query("sk")
+	id := c.Query("id")
 
 	store := tables.NewItem(s.mongoClient.Client, s.mongoClient.Database(), tableName)
 
@@ -430,8 +462,11 @@ func (s *Server) deleteItem(c *gin.Context) {
 
 	if pk != "" {
 		err = store.DeleteByKeys(ctx, pk, sk)
-	} else {
+	} else if id != "" {
 		err = store.Delete(ctx, id)
+	} else {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "pk, sk, or id query param is required"})
+		return
 	}
 
 	if err != nil {
