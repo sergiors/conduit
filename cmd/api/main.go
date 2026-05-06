@@ -2,13 +2,17 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"go.mongodb.org/mongo-driver/bson"
 	"github.com/sergiors/conduit/internal/mongo"
 	"github.com/sergiors/conduit/internal/redis"
 	"github.com/sergiors/conduit/internal/tables"
@@ -78,11 +82,20 @@ func main() {
 	router.Use(gin.Recovery())
 	router.Use(gin.Logger())
 
+	// Table configuration (control plane)
 	router.GET("/api/tables", server.listTables)
 	router.POST("/api/tables", server.createTable)
 	router.GET("/api/tables/:name", server.getTable)
 	router.PUT("/api/tables/:name", server.updateTable)
 	router.DELETE("/api/tables/:name", server.deleteTable)
+
+	// Table items CRUD (data plane)
+	router.GET("/api/tables/:name/items", server.listItems)
+	router.GET("/api/tables/:name/items/:id", server.getItem)
+	router.POST("/api/tables/:name/items", server.createItem)
+	router.PUT("/api/tables/:name/items/:id", server.updateItem)
+	router.DELETE("/api/tables/:name/items/:id", server.deleteItem)
+
 	router.GET("/health", server.handleHealth)
 
 	port := getEnv("PORT", "8080")
@@ -266,6 +279,171 @@ func (s *Server) deleteTable(c *gin.Context) {
 
 func (s *Server) handleHealth(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+// Item handlers (data plane CRUD)
+
+func (s *Server) listItems(c *gin.Context) {
+	ctx := c.Request.Context()
+	tableName := c.Param("name")
+
+	// Parse query params
+	page := int64(1)
+	limit := int64(20)
+
+	if p := c.Query("page"); p != "" {
+		if parsed, err := strconv.ParseInt(p, 10, 64); err == nil && parsed > 0 {
+			page = parsed
+		}
+	}
+	if l := c.Query("limit"); l != "" {
+		if parsed, err := strconv.ParseInt(l, 10, 64); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+
+	// Parse filter JSON
+	var filter bson.M
+	if f := c.Query("filter"); f != "" {
+		if err := json.Unmarshal([]byte(f), &filter); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid filter JSON"})
+			return
+		}
+	}
+
+	// Parse sort JSON
+	var sort bson.M
+	if so := c.Query("sort"); so != "" {
+		if err := json.Unmarshal([]byte(so), &sort); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid sort JSON"})
+			return
+		}
+	}
+
+	store := tables.NewItem(s.mongoClient.Client, s.mongoClient.Database(), tableName)
+
+	result, err := store.List(ctx, tables.ItemQuery{
+		Page:   page,
+		Limit:  limit,
+		Filter: filter,
+		Sort:   sort,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+func (s *Server) getItem(c *gin.Context) {
+	ctx := c.Request.Context()
+	tableName := c.Param("name")
+	id := c.Param("id")
+
+	// Check if query string params are provided (pk/sk)
+	pk := c.Query("pk")
+	sk := c.Query("sk")
+
+	store := tables.NewItem(s.mongoClient.Client, s.mongoClient.Database(), tableName)
+
+	var item bson.M
+	var err error
+
+	if pk != "" {
+		item, err = store.GetByKeys(ctx, pk, sk)
+	} else {
+		item, err = store.Get(ctx, id)
+	}
+
+	if err != nil {
+		if err.Error() == "document not found" || strings.Contains(err.Error(), "not found") {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Item not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, item)
+}
+
+func (s *Server) createItem(c *gin.Context) {
+	ctx := c.Request.Context()
+	tableName := c.Param("name")
+
+	var data bson.M
+	if err := c.ShouldBindJSON(&data); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		return
+	}
+
+	store := tables.NewItem(s.mongoClient.Client, s.mongoClient.Database(), tableName)
+
+	result, err := store.Create(ctx, data)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, result)
+}
+
+func (s *Server) updateItem(c *gin.Context) {
+	ctx := c.Request.Context()
+	tableName := c.Param("name")
+	id := c.Param("id")
+
+	var data bson.M
+	if err := c.ShouldBindJSON(&data); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		return
+	}
+
+	store := tables.NewItem(s.mongoClient.Client, s.mongoClient.Database(), tableName)
+
+	result, err := store.Update(ctx, id, data)
+	if err != nil {
+		if err.Error() == "document not found" || strings.Contains(err.Error(), "not found") {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Item not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+func (s *Server) deleteItem(c *gin.Context) {
+	ctx := c.Request.Context()
+	tableName := c.Param("name")
+	id := c.Param("id")
+
+	// Check if query string params are provided (pk/sk)
+	pk := c.Query("pk")
+	sk := c.Query("sk")
+
+	store := tables.NewItem(s.mongoClient.Client, s.mongoClient.Database(), tableName)
+
+	var err error
+
+	if pk != "" {
+		err = store.DeleteByKeys(ctx, pk, sk)
+	} else {
+		err = store.Delete(ctx, id)
+	}
+
+	if err != nil {
+		if err.Error() == "document not found" || strings.Contains(err.Error(), "not found") {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Item not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.Status(http.StatusNoContent)
 }
 
 // getRequiredEnv gets a required environment variable or exits
