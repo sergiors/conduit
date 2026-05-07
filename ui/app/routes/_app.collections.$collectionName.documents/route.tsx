@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router";
+import Editor from "@monaco-editor/react";
 
 import { Button } from "~/components/ui/button";
 import { Card, CardContent } from "~/components/ui/card";
@@ -386,12 +387,22 @@ export default function DocumentsRoute() {
           </DialogHeader>
           <Field>
             <FieldLabel>Document JSON</FieldLabel>
-            <textarea
-              className="w-full min-h-[300px] p-3 border rounded-md font-mono text-sm bg-background"
-              value={jsonValue}
-              onChange={(e) => setJsonValue(e.target.value)}
-              placeholder='{"field1": "value1", "field2": "value2"}'
-            />
+            <div className="border rounded-md overflow-hidden">
+              <Editor
+                height="300px"
+                language="json"
+                value={jsonValue}
+                onChange={(value) => setJsonValue(value || "{}")}
+                theme="vs-dark"
+                options={{
+                  minimap: { enabled: false },
+                  fontSize: 13,
+                  lineNumbers: "on",
+                  automaticLayout: true,
+                  tabSize: 2,
+                }}
+              />
+            </div>
           </Field>
           <div className="flex justify-end gap-2 mt-4">
             <Button variant="outline" onClick={() => setCreatingDoc(false)}>
@@ -421,11 +432,22 @@ export default function DocumentsRoute() {
               PK/SK fields ({collection.primary_key || "_id"}
               {collection.sort_key ? `, ${collection.sort_key}` : ""}) are read-only
             </p>
-            <textarea
-              className="w-full min-h-[300px] p-3 border rounded-md font-mono text-sm bg-background"
-              value={jsonValue}
-              onChange={(e) => setJsonValue(e.target.value)}
-            />
+            <div className="border rounded-md overflow-hidden">
+              <Editor
+                height="300px"
+                language="json"
+                value={jsonValue}
+                onChange={(value) => setJsonValue(value || "{}")}
+                theme="vs-dark"
+                options={{
+                  minimap: { enabled: false },
+                  fontSize: 13,
+                  lineNumbers: "on",
+                  automaticLayout: true,
+                  tabSize: 2,
+                }}
+              />
+            </div>
           </Field>
           <div className="flex justify-end gap-2 mt-4">
             <Button
