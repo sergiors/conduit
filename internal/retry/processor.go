@@ -20,7 +20,7 @@ type Processor struct {
 	maxRetries  int
 	baseDelay   time.Duration
 	maxDelay    time.Duration
-	tables      map[string]bool
+	collections      map[string]bool
 	mu          sync.RWMutex
 }
 
@@ -55,7 +55,7 @@ func NewProcessor(
 		maxRetries:  cfg.MaxRetries,
 		baseDelay:   cfg.BaseDelay,
 		maxDelay:    cfg.MaxDelay,
-		tables:      make(map[string]bool),
+		collections:      make(map[string]bool),
 	}
 }
 
@@ -84,74 +84,74 @@ func (p *Processor) processLoop(ctx context.Context) {
 	}
 }
 
-// processQueue processes all tables' retry queues
+// processQueue processes all collections' retry queues
 func (p *Processor) processQueue(ctx context.Context) {
-	// Get all tables with retry queues
-	tables := p.getKnownTables(ctx)
-	for _, table := range tables {
-		p.processTableQueue(ctx, table)
+	// Get all collections with retry queues
+	collections := p.getKnownCollections(ctx)
+	for _, collection := range collections {
+		p.processCollectionQueue(ctx, collection)
 	}
 }
 
-// getKnownTables returns tables that have retry queues
-func (p *Processor) getKnownTables(ctx context.Context) []string {
+// getKnownCollections returns collections that have retry queues
+func (p *Processor) getKnownCollections(ctx context.Context) []string {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	tables := make([]string, 0, len(p.tables))
-	for table := range p.tables {
-		tables = append(tables, table)
+	collections := make([]string, 0, len(p.collections))
+	for collection := range p.collections {
+		collections = append(collections, collection)
 	}
-	return tables
+	return collections
 }
 
-// RegisterTable adds a table to the known tables list
-func (p *Processor) RegisterTable(tableName string) {
+// RegisterCollection adds a collection to the known collections list
+func (p *Processor) RegisterCollection(collectionName string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.tables[tableName] = true
+	p.collections[collectionName] = true
 }
 
-// UnregisterTable removes a table from the known tables list
-func (p *Processor) UnregisterTable(tableName string) {
+// UnregisterCollection removes a collection from the known collections list
+func (p *Processor) UnregisterCollection(collectionName string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	delete(p.tables, tableName)
+	delete(p.collections, collectionName)
 }
 
-// ProcessTableQueue processes retry queue for a specific table
-func (p *Processor) ProcessTableQueue(ctx context.Context, tableName string) {
-	p.processTableQueue(ctx, tableName)
+// ProcessCollectionQueue processes retry queue for a specific collection
+func (p *Processor) ProcessCollectionQueue(ctx context.Context, collectionName string) {
+	p.processCollectionQueue(ctx, collectionName)
 }
 
-func (p *Processor) processTableQueue(ctx context.Context, tableName string) {
+func (p *Processor) processCollectionQueue(ctx context.Context, collectionName string) {
 	// Get events ready for retry
-	events, err := p.redisClient.DequeueRetry(ctx, tableName, 10)
+	events, err := p.redisClient.DequeueRetry(ctx, collectionName, 10)
 	if err != nil {
-		log.Printf("Failed to dequeue retry events for %s: %v", tableName, err)
+		log.Printf("Failed to dequeue retry events for %s: %v", collectionName, err)
 		return
 	}
 
 	for _, event := range events {
-		p.processRetryEvent(ctx, tableName, event)
+		p.processRetryEvent(ctx, collectionName, event)
 	}
 }
 
 // processRetryEvent processes a single retry event
-func (p *Processor) processRetryEvent(ctx context.Context, tableName string, event redis.RetryEvent) {
+func (p *Processor) processRetryEvent(ctx context.Context, collectionName string, event redis.RetryEvent) {
 	// Check if max retries exceeded
 	if event.RetryCount >= event.MaxRetries {
-		log.Printf("Event exceeded max retries (%d), sending to DLQ: %s", event.MaxRetries, tableName)
+		log.Printf("Event exceeded max retries (%d), sending to DLQ: %s", event.MaxRetries, collectionName)
 		if p.redisClient != nil {
-			if err := p.redisClient.SendToDLQ(ctx, tableName, event.EventData); err != nil {
+			if err := p.redisClient.SendToDLQ(ctx, collectionName, event.EventData); err != nil {
 				log.Printf("Failed to send to DLQ: %v", err)
 			}
 			// Remove from retry queue after sending to DLQ
-			if err := p.redisClient.RemoveRetryEvent(ctx, tableName, event); err != nil {
+			if err := p.redisClient.RemoveRetryEvent(ctx, collectionName, event); err != nil {
 				log.Printf("Failed to remove event from retry queue: %v", err)
 			}
 		} else {
-			log.Printf("DLQ not available (nil redis client), event lost: %s", tableName)
+			log.Printf("DLQ not available (nil redis client), event lost: %s", collectionName)
 		}
 		return
 	}
@@ -162,19 +162,19 @@ func (p *Processor) processRetryEvent(ctx context.Context, tableName string, eve
 		log.Printf("Failed to parse stream record from retry queue: %v", err)
 		// Remove invalid event from queue
 		if p.redisClient != nil {
-			if err := p.redisClient.RemoveRetryEvent(ctx, tableName, event); err != nil {
+			if err := p.redisClient.RemoveRetryEvent(ctx, collectionName, event); err != nil {
 				log.Printf("Failed to remove invalid event from retry queue: %v", err)
 			}
 		}
 		return
 	}
 
-	if err := p.dispatcher.Dispatch(ctx, tableName, *record); err != nil {
-		log.Printf("Retry %d/%d failed for %s: %v", event.RetryCount+1, event.MaxRetries, tableName, err)
+	if err := p.dispatcher.Dispatch(ctx, collectionName, *record); err != nil {
+		log.Printf("Retry %d/%d failed for %s: %v", event.RetryCount+1, event.MaxRetries, collectionName, err)
 
 		// Re-queue with exponential backoff - remove old, add new
 		if p.redisClient != nil {
-			if err := p.redisClient.RemoveRetryEvent(ctx, tableName, event); err != nil {
+			if err := p.redisClient.RemoveRetryEvent(ctx, collectionName, event); err != nil {
 				log.Printf("Failed to remove old retry event: %v", err)
 			}
 			event.RetryCount++
@@ -187,9 +187,9 @@ func (p *Processor) processRetryEvent(ctx context.Context, tableName string, eve
 	}
 
 	// Success - event processed, remove from retry queue
-	log.Printf("Retry succeeded for %s after %d attempts", tableName, event.RetryCount+1)
+	log.Printf("Retry succeeded for %s after %d attempts", collectionName, event.RetryCount+1)
 	if p.redisClient != nil {
-		if err := p.redisClient.RemoveRetryEvent(ctx, tableName, event); err != nil {
+		if err := p.redisClient.RemoveRetryEvent(ctx, collectionName, event); err != nil {
 			log.Printf("Failed to remove event from retry queue: %v", err)
 		}
 	}
@@ -208,18 +208,18 @@ func (p *Processor) calculateNextRetry(retryCount int) time.Time {
 	return time.Now().Add(time.Duration(delay))
 }
 
-// GetRetryQueueLength returns the total retry queue length for a table
-func (p *Processor) GetRetryQueueLength(ctx context.Context, tableName string) (int64, error) {
+// GetRetryQueueLength returns the total retry queue length for a collection
+func (p *Processor) GetRetryQueueLength(ctx context.Context, collectionName string) (int64, error) {
 	if p.redisClient == nil {
 		return 0, nil
 	}
-	return p.redisClient.GetRetryQueueLength(ctx, tableName)
+	return p.redisClient.GetRetryQueueLength(ctx, collectionName)
 }
 
-// GetDLQLength returns the DLQ length for a table
-func (p *Processor) GetDLQLength(ctx context.Context, tableName string) (int64, error) {
+// GetDLQLength returns the DLQ length for a collection
+func (p *Processor) GetDLQLength(ctx context.Context, collectionName string) (int64, error) {
 	if p.redisClient == nil {
 		return 0, nil
 	}
-	return p.redisClient.GetDLQLength(ctx, tableName)
+	return p.redisClient.GetDLQLength(ctx, collectionName)
 }

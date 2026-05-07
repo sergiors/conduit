@@ -36,14 +36,14 @@ func TestRetryEvent(t *testing.T) {
 	t.Run("retry event structure", func(t *testing.T) {
 		event := RetryEvent{
 			ID:          "users-123",
-			TableName:   "users",
+			CollectionName: "users",
 			EventData:   []byte(`{"id": "123"}`),
 			RetryCount:  0,
 			MaxRetries:  5,
 			NextRetryAt: time.Now().Add(time.Second),
 		}
 
-		assert.Equal(t, "users", event.TableName)
+		assert.Equal(t, "users", event.CollectionName)
 		assert.Equal(t, "users-123", event.ID)
 		assert.Equal(t, 0, event.RetryCount)
 		assert.Equal(t, 5, event.MaxRetries)
@@ -53,7 +53,7 @@ func TestRetryEvent(t *testing.T) {
 	t.Run("retry event with max retries exceeded", func(t *testing.T) {
 		event := RetryEvent{
 			ID:          "orders-456",
-			TableName:   "orders",
+			CollectionName: "orders",
 			EventData:   []byte(`{"id": "456"}`),
 			RetryCount:  5,
 			MaxRetries:  5,
@@ -140,12 +140,12 @@ func TestClientIntegration(t *testing.T) {
 
 		// Enqueue retry event
 		event := RetryEvent{
-			ID:          tableName + "-123",
-			TableName:   tableName,
-			EventData:   []byte(`{"id": "123"}`),
-			RetryCount:  0,
-			MaxRetries:  5,
-			NextRetryAt: time.Now().Add(-1 * time.Second), // Ready for retry
+			ID:             tableName + "-123",
+			CollectionName: tableName,
+			EventData:      []byte(`{"id": "123"}`),
+			RetryCount:     0,
+			MaxRetries:     5,
+			NextRetryAt:    time.Now().Add(-1 * time.Second), // Ready for retry
 		}
 
 		err = client.EnqueueRetry(ctx, event)
@@ -160,7 +160,7 @@ func TestClientIntegration(t *testing.T) {
 		events, err := client.DequeueRetry(ctx, tableName, 10)
 		require.NoError(t, err)
 		assert.Len(t, events, 1)
-		assert.Equal(t, tableName, events[0].TableName)
+		assert.Equal(t, tableName, events[0].CollectionName)
 	})
 
 	t.Run("DLQ operations", func(t *testing.T) {

@@ -14,20 +14,20 @@ import (
 	redisclient "github.com/sergiors/conduit/internal/redis"
 	"github.com/sergiors/conduit/internal/retry"
 	"github.com/sergiors/conduit/internal/streams"
-	"github.com/sergiors/conduit/internal/tables"
+	"github.com/sergiors/conduit/internal/collections"
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
-// Manager manages CDC watchers for all enabled tables
+// Manager manages CDC watchers for all enabled collections
 type Manager struct {
 	mongoClient    *mongo.Client
 	database       string
-	tableStore     *tables.Store
+	collectionStore     *collections.Store
 	redisClient    *redisclient.Client
 	dispatcher     Dispatcher
 	retryProcessor *retry.Processor
 	watchers             map[string]*Watcher
-	currentDestinations  map[string][]tables.DestinationConfig
+	currentDestinations  map[string][]collections.DestinationConfig
 	mu                   sync.RWMutex
 	syncInterval         time.Duration
 	pubsub         *redis.PubSub
@@ -36,12 +36,12 @@ type Manager struct {
 
 // Dispatcher interface for decoupling
 type Dispatcher interface {
-	Dispatch(ctx context.Context, tableName string, record streams.StreamRecord) error
+	Dispatch(ctx context.Context, collectioName string, record streams.StreamRecord) error
 }
 
 // Config holds watcher manager configuration
 type Config struct {
-	SyncInterval time.Duration // How often to sync with system.tables
+	SyncInterval time.Duration // How often to sync with config.collections
 	HTTPEndpoint string        // HTTP endpoint for creating destinations
 }
 
@@ -56,7 +56,7 @@ func DefaultConfig() Config {
 func NewManager(
 	mongoClient *mongo.Client,
 	database string,
-	tableStore *tables.Store,
+	collectionStore *collections.Store,
 	redisClient *redisclient.Client,
 	dispatcher Dispatcher,
 	retryProcessor *retry.Processor,
@@ -65,12 +65,12 @@ func NewManager(
 	return &Manager{
 		mongoClient:  mongoClient,
 		database:     database,
-		tableStore:   tableStore,
+		collectionStore:   collectionStore,
 		redisClient:  redisClient,
 		dispatcher:   dispatcher,
 		retryProcessor: retryProcessor,
 		watchers:            make(map[string]*Watcher),
-		currentDestinations: make(map[string][]tables.DestinationConfig),
+		currentDestinations: make(map[string][]collections.DestinationConfig),
 		syncInterval:        cfg.SyncInterval,
 	}
 }
@@ -79,18 +79,18 @@ func NewManager(
 func (m *Manager) Start(ctx context.Context) error {
 	log.Println("Watcher manager starting...")
 
-	// Initial load of stream-enabled tables
-	tables, err := m.tableStore.ListStreamEnabled(ctx)
+	// Initial load of stream-enabled collections
+	collections, err := m.collectionStore.ListStreamEnabled(ctx)
 	if err != nil {
-		return fmt.Errorf("load tables: %w", err)
+		return fmt.Errorf("load collections: %w", err)
 	}
 
-	log.Printf("Found %d stream-enabled tables", len(tables))
+	log.Printf("Found %d stream-enabled collections", len(collections))
 
-	// Start watcher for each enabled table
-	for _, table := range tables {
-		if err := m.startWatcher(ctx, table); err != nil {
-			log.Printf("Failed to start watcher for %s: %v", table.TableName, err)
+	// Start watcher for each enabled collection
+	for _, collection := range collections {
+		if err := m.startWatcher(ctx, collection); err != nil {
+			log.Printf("Failed to start watcher for %s: %v", collection.CollectionName, err)
 		}
 	}
 
@@ -118,12 +118,12 @@ func (m *Manager) Stop(ctx context.Context) error {
 	defer m.mu.Unlock()
 
 	var lastErr error
-	for tableName, watcher := range m.watchers {
+	for collectionName, watcher := range m.watchers {
 		if err := watcher.Stop(ctx); err != nil {
-			log.Printf("Failed to stop watcher for %s: %v", tableName, err)
+			log.Printf("Failed to stop watcher for %s: %v", collectionName, err)
 			lastErr = err
 		}
-		delete(m.watchers, tableName)
+		delete(m.watchers, collectionName)
 	}
 
 	// Close Pub/Sub subscription
@@ -137,105 +137,107 @@ func (m *Manager) Stop(ctx context.Context) error {
 	return lastErr
 }
 
-// startWatcher creates and starts a watcher for a table
-func (m *Manager) startWatcher(ctx context.Context, table tables.Table) error {
+// startWatcher creates and starts a watcher for a collection
+func (m *Manager) startWatcher(ctx context.Context, collection collections.Collection) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	// Check if already running
-	if _, exists := m.watchers[table.TableName]; exists {
-		log.Printf("Watcher for %s already running", table.TableName)
+	if _, exists := m.watchers[collection.CollectionName]; exists {
+		log.Printf("Watcher for %s already running", collection.CollectionName)
 		return nil
 	}
 
-	log.Printf("Starting watcher for table: %s", table.TableName)
+	log.Printf("Starting watcher for collection: %s", collection.CollectionName)
 
-	// Register destinations for this table
-	if err := m.registerDestinations(ctx, table.TableName, table.Destinations); err != nil {
-		log.Printf("Failed to register destinations for %s: %v", table.TableName, err)
+	// Register destinations for this collection
+	if err := m.registerDestinations(ctx, collection.CollectionName, collection.Destinations); err != nil {
+		log.Printf("Failed to register destinations for %s: %v", collection.CollectionName, err)
 	}
-	m.currentDestinations[table.TableName] = table.Destinations
+	m.currentDestinations[collection.CollectionName] = collection.Destinations
 
 	// Get resume token from Redis
-	resumeToken, err := m.redisClient.GetResumeToken(ctx, table.TableName)
+	resumeToken, err := m.redisClient.GetResumeToken(ctx, collection.CollectionName)
 	if err != nil {
-		log.Printf("Failed to get resume token for %s: %v", table.TableName, err)
+		log.Printf("Failed to get resume token for %s: %v", collection.CollectionName, err)
 	}
 
 	// Create watcher
 	watcher := NewWatcher(
 		m.mongoClient,
 		m.database,
-		table.TableName,
-		table.OldImage,
+		collection.CollectionName,
+		collection.PrimaryKey,
+		collection.SortKey,
+		collection.OldImage,
 		resumeToken,
 		m.redisClient,
 	)
 
 	// Start watcher with event handler
 	if err := watcher.Start(ctx, func(record streams.StreamRecord) error {
-		return m.handleEvent(ctx, table.TableName, record)
+		return m.handleEvent(ctx, collection.CollectionName, record)
 	}); err != nil {
 		return fmt.Errorf("start watcher: %w", err)
 	}
 
-	m.watchers[table.TableName] = watcher
+	m.watchers[collection.CollectionName] = watcher
 
-	// Register table with retry processor
+	// Register collection with retry processor
 	if m.retryProcessor != nil {
-		m.retryProcessor.RegisterTable(table.TableName)
+		m.retryProcessor.RegisterCollection(collection.CollectionName)
 	}
 
 	return nil
 }
 
 // stopWatcher stops and removes a watcher
-func (m *Manager) stopWatcher(ctx context.Context, tableName string) error {
+func (m *Manager) stopWatcher(ctx context.Context, collectionName string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	watcher, exists := m.watchers[tableName]
+	watcher, exists := m.watchers[collectionName]
 	if !exists {
 		return nil
 	}
 
-	log.Printf("Stopping watcher for table: %s", tableName)
+	log.Printf("Stopping watcher for collection: %s", collectionName)
 
 	if err := watcher.Stop(ctx); err != nil {
 		return err
 	}
 
-	delete(m.watchers, tableName)
-	delete(m.currentDestinations, tableName)
+	delete(m.watchers, collectionName)
+	delete(m.currentDestinations, collectionName)
 
 	// Clear destinations from dispatcher
 	if d, ok := m.dispatcher.(*dispatch.Dispatcher); ok {
-		d.Clear(tableName)
+		d.Clear(collectionName)
 	}
 
-	// Unregister table from retry processor
+	// Unregister collection from retry processor
 	if m.retryProcessor != nil {
-		m.retryProcessor.UnregisterTable(tableName)
+		m.retryProcessor.UnregisterCollection(collectionName)
 	}
 
 	return nil
 }
 
 // restartWatcher stops and restarts a watcher with updated config
-func (m *Manager) restartWatcher(ctx context.Context, table tables.Table) error {
+func (m *Manager) restartWatcher(ctx context.Context, collection collections.Collection) error {
 	// Stop existing watcher
-	if err := m.stopWatcher(ctx, table.TableName); err != nil {
+	if err := m.stopWatcher(ctx, collection.CollectionName); err != nil {
 		return err
 	}
 
 	// Start new watcher with updated config
-	return m.startWatcher(ctx, table)
+	return m.startWatcher(ctx, collection)
 }
 
 // handleEvent processes an event with idempotency and retry logic
-func (m *Manager) handleEvent(ctx context.Context, tableName string, record streams.StreamRecord) error {
-	// Generate event ID: {table}:{type}:{timestamp}
-	eventID := fmt.Sprintf("%s:%s:%d", tableName, record.RecordType, record.Timestamp.UnixNano())
+func (m *Manager) handleEvent(ctx context.Context, collectionName string, record streams.StreamRecord) error {
+	// Generate event ID: {collection}:{type}:{timestamp}
+	eventID := fmt.Sprintf("%s:%s:%d", collectionName, record.RecordType, record.Timestamp.UnixNano())
 
 	// Check idempotency
 	processed, err := m.redisClient.IsProcessed(ctx, eventID)
@@ -249,10 +251,10 @@ func (m *Manager) handleEvent(ctx context.Context, tableName string, record stre
 	}
 
 	// Dispatch to destinations
-	if err := m.dispatcher.Dispatch(ctx, tableName, record); err != nil {
+	if err := m.dispatcher.Dispatch(ctx, collectionName, record); err != nil {
 		log.Printf("Dispatch failed for %s: %v", eventID, err)
 		// Queue for retry
-		return m.queueRetry(ctx, tableName, record, eventID)
+		return m.queueRetry(ctx, collectionName, record, eventID)
 	}
 
 	// Mark as processed
@@ -265,8 +267,8 @@ func (m *Manager) handleEvent(ctx context.Context, tableName string, record stre
 }
 
 // queueRetry adds failed event to retry queue with exponential backoff
-func (m *Manager) queueRetry(ctx context.Context, tableName string, record streams.StreamRecord, eventID string) error {
-	retryID := fmt.Sprintf("%s:%s", tableName, eventID)
+func (m *Manager) queueRetry(ctx context.Context, collectionName string, record streams.StreamRecord, eventID string) error {
+	retryID := fmt.Sprintf("%s:%s", collectionName, eventID)
 
 	// Marshal the stream record to JSON
 	eventData, err := json.Marshal(record)
@@ -275,12 +277,12 @@ func (m *Manager) queueRetry(ctx context.Context, tableName string, record strea
 	}
 
 	retryEvent := redisclient.RetryEvent{
-		ID:          retryID,
-		TableName:   tableName,
-		EventData:   eventData,
-		RetryCount:  0,
-		MaxRetries:  5,
-		NextRetryAt: time.Now().Add(time.Second), // First retry after 1s
+		ID:             retryID,
+		CollectionName: collectionName,
+		EventData:      eventData,
+		RetryCount:     0,
+		MaxRetries:     5,
+		NextRetryAt:    time.Now().Add(time.Second), // First retry after 1s
 	}
 
 	return m.redisClient.EnqueueRetry(ctx, retryEvent)
@@ -296,16 +298,16 @@ func (m *Manager) configChangeLoop(ctx context.Context) {
 			if !ok {
 				return
 			}
-			tableName := msg.Payload
-			log.Printf("Config change detected for table: %s", tableName)
-			m.syncWithTables(ctx)
-			// Clear and re-register destinations for the changed table
-			m.refreshDestinations(ctx, tableName)
+			collectionName := msg.Payload
+			log.Printf("Config change detected for collection: %s", collectionName)
+			m.syncWithCollections(ctx)
+			// Clear and re-register destinations for the changed collection
+			m.refreshDestinations(ctx, collectionName)
 		}
 	}
 }
 
-// syncLoop periodically syncs watchers with config.tables
+// syncLoop periodically syncs watchers with config.collections
 func (m *Manager) syncLoop(ctx context.Context) {
 	ticker := time.NewTicker(m.syncInterval)
 	defer ticker.Stop()
@@ -315,64 +317,64 @@ func (m *Manager) syncLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			m.syncWithTables(ctx)
+			m.syncWithCollections(ctx)
 		}
 	}
 }
 
-// syncWithTables diffs current watchers with config.tables
-func (m *Manager) syncWithTables(ctx context.Context) {
-	log.Println("Syncing watchers with config.tables...")
+// syncWithCollections diffs current watchers with config.collections
+func (m *Manager) syncWithCollections(ctx context.Context) {
+	log.Println("Syncing watchers with config.collections...")
 
-	// Fetch current stream-enabled tables
-	tableList, err := m.tableStore.ListStreamEnabled(ctx)
+	// Fetch current stream-enabled collections
+	collectionList, err := m.collectionStore.ListStreamEnabled(ctx)
 	if err != nil {
-		log.Printf("Failed to list tables: %v", err)
+		log.Printf("Failed to list collections: %v", err)
 		return
 	}
 
-	// Build set of enabled table names
-	enabledSet := make(map[string]tables.Table)
-	for _, table := range tableList {
-		enabledSet[table.TableName] = table
+	// Build set of enabled collection names
+	enabledSet := make(map[string]collections.Collection)
+	for _, collection := range collectionList {
+		enabledSet[collection.CollectionName] = collection
 	}
 
 	// Get current watchers
 	m.mu.RLock()
 	currentWatchers := make(map[string]*Watcher)
-	for tableName, watcher := range m.watchers {
-		currentWatchers[tableName] = watcher
+	for collectionName, watcher := range m.watchers {
+		currentWatchers[collectionName] = watcher
 	}
 	m.mu.RUnlock()
 
-	// Start watchers for new tables and register destinations
-	for tableName, table := range enabledSet {
-		existingWatcher, exists := currentWatchers[tableName]
+	// Start watchers for new collections and register destinations
+	for collectionName, collection := range enabledSet {
+		existingWatcher, exists := currentWatchers[collectionName]
 		if !exists {
-			// New table - register destinations and start watcher
-			if err := m.registerDestinations(ctx, tableName, table.Destinations); err != nil {
-				log.Printf("Failed to register destinations for %s: %v", tableName, err)
+			// New collection - register destinations and start watcher
+			if err := m.registerDestinations(ctx, collectionName, collection.Destinations); err != nil {
+				log.Printf("Failed to register destinations for %s: %v", collectionName, err)
 			}
 
-			if err := m.startWatcher(ctx, table); err != nil {
-				log.Printf("Failed to start watcher for %s: %v", tableName, err)
+			if err := m.startWatcher(ctx, collection); err != nil {
+				log.Printf("Failed to start watcher for %s: %v", collectionName, err)
 			}
 		} else {
-			// Existing table - check if oldImage config changed
-			if existingWatcher.OldImage() != table.OldImage {
-				log.Printf("oldImage config changed for %s (old=%v, new=%v), restarting watcher", tableName, existingWatcher.OldImage(), table.OldImage)
-				if err := m.restartWatcher(ctx, table); err != nil {
-					log.Printf("Failed to restart watcher for %s: %v", tableName, err)
+			// Existing collection - check if oldImage config changed
+			if existingWatcher.OldImage() != collection.OldImage {
+				log.Printf("oldImage config changed for %s (old=%v, new=%v), restarting watcher", collectionName, existingWatcher.OldImage(), collection.OldImage)
+				if err := m.restartWatcher(ctx, collection); err != nil {
+					log.Printf("Failed to restart watcher for %s: %v", collectionName, err)
 				}
 			}
 		}
 	}
 
-	// Stop watchers for disabled tables
-	for tableName := range currentWatchers {
-		if _, exists := enabledSet[tableName]; !exists {
-			if err := m.stopWatcher(ctx, tableName); err != nil {
-				log.Printf("Failed to stop watcher for %s: %v", tableName, err)
+	// Stop watchers for disabled collections
+	for collectionName := range currentWatchers {
+		if _, exists := enabledSet[collectionName]; !exists {
+			if err := m.stopWatcher(ctx, collectionName); err != nil {
+				log.Printf("Failed to stop watcher for %s: %v", collectionName, err)
 			}
 		}
 	}
@@ -381,10 +383,10 @@ func (m *Manager) syncWithTables(ctx context.Context) {
 }
 
 // refreshDestinations diffs current vs desired destinations and only updates what changed
-func (m *Manager) refreshDestinations(ctx context.Context, tableName string) error {
-	table, err := m.tableStore.Get(ctx, tableName)
+func (m *Manager) refreshDestinations(ctx context.Context, collectionName string) error {
+	collection, err := m.collectionStore.Get(ctx, collectionName)
 	if err != nil {
-		log.Printf("Failed to fetch table %s for refresh: %v", tableName, err)
+		log.Printf("Failed to fetch collection %s for refresh: %v", collectionName, err)
 		return err
 	}
 
@@ -394,36 +396,36 @@ func (m *Manager) refreshDestinations(ctx context.Context, tableName string) err
 	}
 
 	m.mu.RLock()
-	current := m.currentDestinations[tableName]
+	current := m.currentDestinations[collectionName]
 	m.mu.RUnlock()
 
-	desired := table.Destinations
+	desired := collection.Destinations
 	toAdd, toRemove := diffDestinations(current, desired)
 
 	for _, dest := range toRemove {
 		name := destinationName(dest)
-		d.Remove(tableName, name)
-		log.Printf("Removed destination %s for table %s", name, tableName)
+		d.Remove(collectionName, name)
+		log.Printf("Removed destination %s for collection %s", name, collectionName)
 	}
 
 	for _, dest := range toAdd {
-		m.registerSingleDestination(ctx, tableName, dest, d)
+		m.registerSingleDestination(ctx, collectionName, dest, d)
 	}
 
 	m.mu.Lock()
-	m.currentDestinations[tableName] = desired
+	m.currentDestinations[collectionName] = desired
 	m.mu.Unlock()
 
-	log.Printf("Refreshed destinations for table %s (%d added, %d removed)", tableName, len(toAdd), len(toRemove))
+	log.Printf("Refreshed destinations for collection %s (%d added, %d removed)", collectionName, len(toAdd), len(toRemove))
 	return nil
 }
 
 // registerSingleDestination creates and registers a single destination
-func (m *Manager) registerSingleDestination(ctx context.Context, tableName string, dest tables.DestinationConfig, d *dispatch.Dispatcher) {
+func (m *Manager) registerSingleDestination(ctx context.Context, collectionName string, dest collections.DestinationConfig, d *dispatch.Dispatcher) {
 	switch dest.Type {
 	case "http":
 		if dest.Endpoint == "" {
-			log.Printf("HTTP destination requested but endpoint not set for table %s", tableName)
+			log.Printf("HTTP destination requested but endpoint not set for collection %s", collectionName)
 			return
 		}
 		eventTypes := dest.EventTypes
@@ -432,15 +434,15 @@ func (m *Manager) registerSingleDestination(ctx context.Context, tableName strin
 		}
 		httpDest, err := dispatch.NewHTTPDestination(dest.Endpoint, dest.BearerToken, eventTypes, dest.FilterCriteria)
 		if err != nil {
-			log.Printf("Failed to create HTTP destination for %s: %v", tableName, err)
+			log.Printf("Failed to create HTTP destination for %s: %v", collectionName, err)
 			return
 		}
-		d.Register(tableName, httpDest)
-		log.Printf("Registered HTTP destination for table %s -> %s", tableName, dest.Endpoint)
+		d.Register(collectionName, httpDest)
+		log.Printf("Registered HTTP destination for collection %s -> %s", collectionName, dest.Endpoint)
 	case "eventbridge":
 		region := dest.Region
 		if region == "" {
-			log.Printf("EventBridge destination for %s missing required 'region'", tableName)
+			log.Printf("EventBridge destination for %s missing required 'region'", collectionName)
 			return
 		}
 		busName := dest.EventBusName
@@ -448,45 +450,45 @@ func (m *Manager) registerSingleDestination(ctx context.Context, tableName strin
 			busName = dest.Endpoint
 		}
 		if busName == "" {
-			log.Printf("EventBridge destination for %s missing required 'event_bus_name' or 'endpoint'", tableName)
+			log.Printf("EventBridge destination for %s missing required 'event_bus_name' or 'endpoint'", collectionName)
 			return
 		}
 		ebDest, err := dispatch.NewEventBridgeDestination(region, busName, dest.Source, "")
 		if err != nil {
-			log.Printf("Failed to create EventBridge destination for %s: %v", tableName, err)
+			log.Printf("Failed to create EventBridge destination for %s: %v", collectionName, err)
 			return
 		}
-		d.Register(tableName, ebDest)
-		log.Printf("Registered EventBridge destination for table %s -> %s@%s", tableName, busName, region)
+		d.Register(collectionName, ebDest)
+		log.Printf("Registered EventBridge destination for collection %s -> %s@%s", collectionName, busName, region)
 	case "meilisearch":
 		host := dest.Endpoint
 		if host == "" {
-			log.Printf("Meilisearch destination for %s missing required 'endpoint' (host)", tableName)
+			log.Printf("Meilisearch destination for %s missing required 'endpoint' (host)", collectionName)
 			return
 		}
 		indexName := dest.IndexName
 		if indexName == "" {
-			indexName = tableName
+			indexName = collectionName
 		}
 		meiliDest, err := dispatch.NewMeilisearchDestination(host, dest.BearerToken, indexName)
 		if err != nil {
-			log.Printf("Failed to create Meilisearch destination for %s: %v", tableName, err)
+			log.Printf("Failed to create Meilisearch destination for %s: %v", collectionName, err)
 			return
 		}
-		d.Register(tableName, meiliDest)
-		log.Printf("Registered Meilisearch destination for table %s -> %s/%s", tableName, host, indexName)
+		d.Register(collectionName, meiliDest)
+		log.Printf("Registered Meilisearch destination for collection %s -> %s/%s", collectionName, host, indexName)
 	default:
-		log.Printf("Unknown destination type: %s for table %s", dest.Type, tableName)
+		log.Printf("Unknown destination type: %s for collection %s", dest.Type, collectionName)
 	}
 }
 
-// registerDestinations registers event destinations for a table
-func (m *Manager) registerDestinations(ctx context.Context, tableName string, destinations []tables.DestinationConfig) error {
+// registerDestinations registers event destinations for a collection
+func (m *Manager) registerDestinations(ctx context.Context, collectionName string, destinations []collections.DestinationConfig) error {
 	for _, dest := range destinations {
 		switch dest.Type {
 		case "http":
 			if dest.Endpoint == "" {
-				log.Printf("HTTP destination requested but endpoint not set for table %s", tableName)
+				log.Printf("HTTP destination requested but endpoint not set for collection %s", collectionName)
 				continue
 			}
 			// Default to all event types if not specified
@@ -496,18 +498,18 @@ func (m *Manager) registerDestinations(ctx context.Context, tableName string, de
 			}
 			httpDest, err := dispatch.NewHTTPDestination(dest.Endpoint, dest.BearerToken, eventTypes, dest.FilterCriteria)
 			if err != nil {
-				log.Printf("Failed to create HTTP destination for %s: %v", tableName, err)
+				log.Printf("Failed to create HTTP destination for %s: %v", collectionName, err)
 				continue
 			}
 			// Cast to Dispatcher interface to access Register method
 			if d, ok := m.dispatcher.(*dispatch.Dispatcher); ok {
-				d.Register(tableName, httpDest)
-				log.Printf("Registered HTTP destination for table %s -> %s", tableName, dest.Endpoint)
+				d.Register(collectionName, httpDest)
+				log.Printf("Registered HTTP destination for collection %s -> %s", collectionName, dest.Endpoint)
 			}
 		case "eventbridge":
 			region := dest.Region
 			if region == "" {
-				log.Printf("EventBridge destination for %s missing required 'region'", tableName)
+				log.Printf("EventBridge destination for %s missing required 'region'", collectionName)
 				continue
 			}
 			busName := dest.EventBusName
@@ -515,39 +517,39 @@ func (m *Manager) registerDestinations(ctx context.Context, tableName string, de
 				busName = dest.Endpoint
 			}
 			if busName == "" {
-				log.Printf("EventBridge destination for %s missing required 'event_bus_name' or 'endpoint'", tableName)
+				log.Printf("EventBridge destination for %s missing required 'event_bus_name' or 'endpoint'", collectionName)
 				continue
 			}
 			ebDest, err := dispatch.NewEventBridgeDestination(region, busName, dest.Source, "")
 			if err != nil {
-				log.Printf("Failed to create EventBridge destination for %s: %v", tableName, err)
+				log.Printf("Failed to create EventBridge destination for %s: %v", collectionName, err)
 				continue
 			}
 			if d, ok := m.dispatcher.(*dispatch.Dispatcher); ok {
-				d.Register(tableName, ebDest)
-				log.Printf("Registered EventBridge destination for table %s -> %s@%s", tableName, busName, region)
+				d.Register(collectionName, ebDest)
+				log.Printf("Registered EventBridge destination for collection %s -> %s@%s", collectionName, busName, region)
 			}
 		case "meilisearch":
 			host := dest.Endpoint
 			if host == "" {
-				log.Printf("Meilisearch destination for %s missing required 'endpoint' (host)", tableName)
+				log.Printf("Meilisearch destination for %s missing required 'endpoint' (host)", collectionName)
 				continue
 			}
 			indexName := dest.IndexName
 			if indexName == "" {
-				indexName = tableName
+				indexName = collectionName
 			}
 			meiliDest, err := dispatch.NewMeilisearchDestination(host, dest.BearerToken, indexName)
 			if err != nil {
-				log.Printf("Failed to create Meilisearch destination for %s: %v", tableName, err)
+				log.Printf("Failed to create Meilisearch destination for %s: %v", collectionName, err)
 				continue
 			}
 			if d, ok := m.dispatcher.(*dispatch.Dispatcher); ok {
-				d.Register(tableName, meiliDest)
-				log.Printf("Registered Meilisearch destination for table %s -> %s/%s", tableName, host, indexName)
+				d.Register(collectionName, meiliDest)
+				log.Printf("Registered Meilisearch destination for collection %s -> %s/%s", collectionName, host, indexName)
 			}
 		default:
-			log.Printf("Unknown destination type: %s for table %s", dest.Type, tableName)
+			log.Printf("Unknown destination type: %s for collection %s", dest.Type, collectionName)
 		}
 	}
 	return nil
@@ -561,11 +563,11 @@ func (m *Manager) GetActiveWatchers() int {
 }
 
 // GetWatcherStats returns stats for a specific watcher
-func (m *Manager) GetWatcherStats(tableName string) (WatcherStats, bool) {
+func (m *Manager) GetWatcherStats(collectioName string) (WatcherStats, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	watcher, exists := m.watchers[tableName]
+	watcher, exists := m.watchers[collectioName]
 	if !exists {
 		return WatcherStats{}, false
 	}
@@ -582,13 +584,13 @@ type WatcherStats struct {
 }
 
 // diffDestinations compares current and desired destination configs, returning which to add/remove
-func diffDestinations(current, desired []tables.DestinationConfig) (toAdd, toRemove []tables.DestinationConfig) {
-	currentByKey := make(map[string]tables.DestinationConfig, len(current))
+func diffDestinations(current, desired []collections.DestinationConfig) (toAdd, toRemove []collections.DestinationConfig) {
+	currentByKey := make(map[string]collections.DestinationConfig, len(current))
 	for _, c := range current {
 		currentByKey[destinationName(c)] = c
 	}
 
-	desiredByKey := make(map[string]tables.DestinationConfig, len(desired))
+	desiredByKey := make(map[string]collections.DestinationConfig, len(desired))
 	for _, d := range desired {
 		desiredByKey[destinationName(d)] = d
 	}
@@ -615,7 +617,7 @@ func diffDestinations(current, desired []tables.DestinationConfig) (toAdd, toRem
 // destinationName builds the internal name for a destination config.
 // It includes type-specific identifiers so that two destinations of the same
 // type but with different configs are treated as distinct.
-func destinationName(dest tables.DestinationConfig) string {
+func destinationName(dest collections.DestinationConfig) string {
 	switch dest.Type {
 	case "eventbridge":
 		return dest.Type + ":" + dest.Region + ":" + dest.EventBusName
@@ -628,7 +630,7 @@ func destinationName(dest tables.DestinationConfig) string {
 
 // configEqual compares two destination configs ignoring event type order.
 // It checks both common fields and type-specific fields.
-func configEqual(a, b tables.DestinationConfig) bool {
+func configEqual(a, b collections.DestinationConfig) bool {
 	if a.Type != b.Type || a.Endpoint != b.Endpoint || a.BearerToken != b.BearerToken {
 		return false
 	}
@@ -651,7 +653,7 @@ func configEqual(a, b tables.DestinationConfig) bool {
 		imageFilterEqual(a.FilterCriteria.NewImage, b.FilterCriteria.NewImage)
 }
 
-func filterConditionEqual(a, b tables.FilterCondition) bool {
+func filterConditionEqual(a, b collections.FilterCondition) bool {
 	if !ptrStrEqual(a.Prefix, b.Prefix) || !ptrStrEqual(a.Suffix, b.Suffix) || !ptrBoolEqual(a.Exists, b.Exists) {
 		return false
 	}
@@ -681,7 +683,7 @@ func ptrBoolEqual(a, b *bool) bool {
 	return *a == *b
 }
 
-func imageFilterEqual(a, b tables.ImageFilter) bool {
+func imageFilterEqual(a, b collections.ImageFilter) bool {
 	if len(a) != len(b) {
 		return false
 	}

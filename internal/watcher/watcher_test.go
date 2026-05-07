@@ -11,18 +11,18 @@ import (
 
 func TestWatcherCreation(t *testing.T) {
 	t.Run("new watcher with correct configuration", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "users", true, "", nil)
+		watcher := NewWatcher(nil, "conduit", "users", "pk", "sk", true, "", nil)
 
 		assert.NotNil(t, watcher)
 		assert.Equal(t, "conduit", watcher.database)
-		assert.Equal(t, "users", watcher.tableName)
+		assert.Equal(t, "users", watcher.collectionName)
 		assert.True(t, watcher.oldImage)
 		assert.Equal(t, "", watcher.resumeToken)
 	})
 
 	t.Run("watcher with resume token", func(t *testing.T) {
 		token := "test-resume-token"
-		watcher := NewWatcher(nil, "conduit", "orders", false, token, nil)
+		watcher := NewWatcher(nil, "conduit", "orders", "pk", "sk", false, token, nil)
 
 		assert.NotNil(t, watcher)
 		assert.Equal(t, token, watcher.resumeToken)
@@ -31,7 +31,7 @@ func TestWatcherCreation(t *testing.T) {
 
 func TestWatcherStats(t *testing.T) {
 	t.Run("initial stats are correct", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "test", false, "", nil)
+		watcher := NewWatcher(nil, "conduit", "test", "pk", "sk", false, "", nil)
 
 		stats := watcher.GetStats()
 		assert.Zero(t, stats.EventsProcessed)
@@ -40,14 +40,14 @@ func TestWatcherStats(t *testing.T) {
 	})
 
 	t.Run("IsRunning returns false before start", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "test", false, "", nil)
+		watcher := NewWatcher(nil, "conduit", "test", "pk", "sk", false, "", nil)
 		assert.False(t, watcher.IsRunning())
 	})
 }
 
 func TestParseChange(t *testing.T) {
 	t.Run("parse insert operation", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "users", false, "", nil)
+		watcher := NewWatcher(nil, "conduit", "users", "pk", "sk", false, "", nil)
 
 		change := bson.M{
 			"operationType": "insert",
@@ -67,7 +67,7 @@ func TestParseChange(t *testing.T) {
 	})
 
 	t.Run("parse update operation with old image", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "orders", true, "", nil)
+		watcher := NewWatcher(nil, "conduit", "orders", "pk", "sk", true, "", nil)
 
 		change := bson.M{
 			"operationType": "update",
@@ -89,7 +89,7 @@ func TestParseChange(t *testing.T) {
 	})
 
 	t.Run("parse delete operation", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "sessions", true, "", nil)
+		watcher := NewWatcher(nil, "conduit", "sessions", "pk", "sk", true, "", nil)
 
 		change := bson.M{
 			"operationType": "delete",
@@ -107,7 +107,7 @@ func TestParseChange(t *testing.T) {
 	})
 
 	t.Run("parse unknown operation type", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "test", false, "", nil)
+		watcher := NewWatcher(nil, "conduit", "test", "pk", "sk", false, "", nil)
 
 		change := bson.M{
 			"operationType": "unknown",
@@ -119,7 +119,7 @@ func TestParseChange(t *testing.T) {
 	})
 
 	t.Run("parse missing operation type", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "test", false, "", nil)
+		watcher := NewWatcher(nil, "conduit", "test", "pk", "sk", false, "", nil)
 
 		change := bson.M{}
 

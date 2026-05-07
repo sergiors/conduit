@@ -87,7 +87,7 @@ func TestProcessRetryEvent(t *testing.T) {
 
 		event := redis.RetryEvent{
 			ID:          "users-123",
-			TableName:   "users",
+			CollectionName: "users",
 			EventData:   eventData,
 			RetryCount:  0,
 			MaxRetries:  5,
@@ -109,7 +109,7 @@ func TestProcessRetryEvent(t *testing.T) {
 
 		event := redis.RetryEvent{
 			ID:          "users-456",
-			TableName:   "users",
+			CollectionName: "users",
 			EventData:   eventData,
 			RetryCount:  5, // Already at max
 			MaxRetries:  5,
@@ -124,15 +124,15 @@ func TestProcessRetryEvent(t *testing.T) {
 func TestRetryEventStructure(t *testing.T) {
 	t.Run("retry event has all required fields", func(t *testing.T) {
 		event := redis.RetryEvent{
-			ID:          "orders-789",
-			TableName:   "orders",
-			EventData:   []byte(`{}`),
-			RetryCount:  2,
-			MaxRetries:  5,
-			NextRetryAt: time.Now(),
+			ID:             "orders-789",
+			CollectionName: "orders",
+			EventData:      []byte(`{}`),
+			RetryCount:     2,
+			MaxRetries:     5,
+			NextRetryAt:    time.Now(),
 		}
 
-		assert.Equal(t, "orders", event.TableName)
+		assert.Equal(t, "orders", event.CollectionName)
 		assert.Equal(t, "orders-789", event.ID)
 		assert.Equal(t, 2, event.RetryCount)
 		assert.Equal(t, 5, event.MaxRetries)

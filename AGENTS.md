@@ -2,16 +2,17 @@
 
 ## Project
 
-This project is a control plane + data plane system built in Go.  
-It manages MongoDB collections ("tables") and enables CDC (Change Data Capture)
-to external systems like HTTP, EventBridge or Meilisearch.
+This project is a control plane + data plane system built in Go.
+
+It manages MongoDB collections and enables CDC (Change Data Capture)
+to external systems like HTTP, EventBridge, Redis Streams, or Meilisearch.
 
 Main components:
 
 - API (control plane)
 - Worker (data plane)
 - MongoDB (storage + change streams)
-- Redis (state store for worker)
+- Redis (worker state store)
 
 ---
 
@@ -31,56 +32,179 @@ Main components:
 
 ### DynamoDB-aligned Design (IMPORTANT)
 
-All data structures, naming, and APIs MUST follow DynamoDB concepts as closely as possible.
+All data structures, APIs, and behaviors MUST follow DynamoDB concepts
+as closely as possible.
+
+Compatibility model:
+
+- DynamoDB-compatible mode: collection defines key schema (`primary_key` and optional `sort_key`)
+- MongoDB-native mode: collection defines no key schema and uses default MongoDB behavior (`_id`)
+
+The system operates with DynamoDB semantics:
+
+- partition key
+- sort key
+- item
+- table
+- stream
+- new image
+- old image
+- TTL
+
+However, physical field names are configurable per collection.
 
 ---
 
-### Naming Conventions
+## Naming Conventions
 
-| Concept     | Use This Name |
-| ----------- | ------------- |
-| Primary Key | `pk`          |
-| Sort Key    | `sk`          |
-| Table       | `table`       |
-| Item        | `item`        |
-| Stream      | `stream`      |
-| TTL field   | `expiresAt`   |
-| New image   | `newImage`    |
-| Old image   | `oldImage`    |
+The system uses DynamoDB terminology internally.
+
+### Default Field Names
+
+| Concept       | Default Name |
+| ------------- | ------------ |
+| Partition Key | `pk`         |
+| Sort Key      | `sk`         |
+| Table         | `table`      |
+| Item          | `item`       |
+| Stream        | `stream`     |
+| TTL Field     | `expiresAt`  |
+| New Image     | `newImage`   |
+| Old Image     | `oldImage`   |
+
+These field names are defaults only.
+
+Tables MAY customize key field names.
 
 ---
 
-### Keys (PK + SK)
+## Keys (Partition Key + Sort Key)
 
+The system supports DynamoDB-style composite keys.
+
+### Configurable Key Fields (IMPORTANT)
+
+Partition key and sort key field names MUST be configurable per collection.
+
+Example:
+
+```json
 {
-"pk": "USER#1",
-"sk": "EMAIL#test@gmail.com"
+  "partitionKey": "id",
+  "sortKey": "sort"
 }
+```
 
-Rules:
+Stored document:
 
-- Support pk-only and pk+sk
-- `_id` may be generated as `pk#sk`
-- Always store pk and sk explicitly
-- Always create index `{ pk: 1, sk: 1 }`
+```json
+{
+  "id": "USER#1",
+  "sort": "EMAIL#test@gmail.com"
+}
+```
+
+Another example:
+
+```json
+{
+  "partitionKey": "tenantId",
+  "sortKey": "createdAt"
+}
+```
+
+### Rules
+
+- Support collections with no key schema (MongoDB-native mode)
+- Support partition-key-only tables
+- Support partition+sort-key tables
+- `_id` is managed by MongoDB and MUST NOT be derived from key fields
+- Key fields MUST always be explicitly stored
+- APIs MUST NOT assume `pk` and `sk`
+- Query builders MUST use configured key field names
+- CDC logic MUST use configured key field names
+- Indexes MUST use configured key field names
+- Internal logic MUST operate on logical concepts rather than physical field names
+
+### Indexing
+
+If a collection defines key schema, the system MUST create indexes using configured key fields.
+If a collection has no key schema, no DynamoDB-style key index is required.
+
+Example:
+
+```js
+{ id: 1, sort: 1 }
+```
+
+---
+
+## CDC Event Model
+
+CDC payloads MUST expose logical key concepts instead of physical storage field names.
+
+### Example
+
+❌ Incorrect:
+
+```json
+{
+  "pk": "USER#1",
+  "sk": "EMAIL#test@gmail.com"
+}
+```
+
+✅ Correct:
+
+```json
+{
+  "keys": {
+    "partitionKey": "USER#1",
+    "sortKey": "EMAIL#test@gmail.com"
+  }
+}
+```
+
+This abstraction allows field customization without affecting downstream consumers.
 
 ---
 
 ## 🚨 Stream Activation Rules (CRITICAL)
 
-Streaming (CDC) MUST be explicitly enabled per table.
+Streaming (CDC) MUST be explicitly enabled per collection.
 
 ### Behavior
 
-- If `streamSpecification.enabled = false`:
+If:
 
-  - Worker MUST NOT create watcher
-  - Worker MUST ignore table
+```json
+{
+  "streamSpecification": {
+    "enabled": false
+  }
+}
+```
 
-- If `streamSpecification.enabled = true`:
-  - Worker MUST create watcher
-  - Worker MUST process events
-  - Worker MUST dispatch events
+Then:
+
+- Worker MUST NOT create watcher
+- Worker MUST ignore collection
+
+If:
+
+```json
+{
+  "streamSpecification": {
+    "enabled": true
+  }
+}
+```
+
+Then:
+
+- Worker MUST create watcher
+- Worker MUST process events
+- Worker MUST dispatch events
 
 ---
 
@@ -88,10 +212,11 @@ Streaming (CDC) MUST be explicitly enabled per table.
 
 ### Requirements
 
-- One watcher per table
-- No duplicates
-- Must be stoppable
+- One watcher per collection
+- No duplicate watchers
+- Watchers MUST be stoppable
 - No goroutine leaks
+- Watchers MUST be context-driven
 
 ---
 
@@ -100,62 +225,83 @@ Streaming (CDC) MUST be explicitly enabled per table.
 The worker MUST implement a centralized Watcher Manager responsible for:
 
 - Managing active watchers
-- Synchronizing with `config.tables`
-- Starting/stopping watchers dynamically
+- Synchronizing with `config.collections`
+- Starting watchers dynamically
+- Stopping watchers dynamically
+- Restarting failed watchers safely
 
 ### Watcher Registry
 
-map[string]\*Watcher
+```go
+map[string]*Watcher
+```
 
-### Resume Token (IMPORTANT)
+The Watcher Manager is the source of truth for active watchers.
 
-- Resume token MUST be per table
-- Key format:
+---
 
-  cdc:resume_token:<tableName>
+## Resume Token Management (IMPORTANT)
 
+Resume tokens MUST be isolated per collection.
+
+### Redis Key Format
+
+```txt
+cdc:resume_token:<collectionName>
+```
+
+### Rules
+
+- Resume token MUST be per collection
 - Each watcher MUST manage its own resume token
-- Resume tokens MUST NOT be shared across tables
+- Resume tokens MUST NOT be shared across collections
+- Resume token updates MUST happen only after successful processing
+- Failed events MUST NOT advance the resume token
 
 ---
 
-### Lifecycle Flow
+## Watcher Lifecycle Flow
 
-Initial Load:
+### Initial Load
 
-1. Load tables
-2. Start watcher for each enabled table
+1. Load collections from configuration
+2. Start watchers for enabled collections
 
-Sync Loop:
+### Sync Loop
 
-1. Fetch tables
-2. Diff with current watchers
-3. Start/stop accordingly
+1. Fetch latest collection configuration
+2. Diff desired state vs active watchers
+3. Start missing watchers
+4. Stop removed or disabled watchers
 
 ---
 
-### Resume Failure Handling
+## Resume Failure Handling
 
-If resume token becomes invalid:
+If a resume token becomes invalid:
 
 - Restart stream from latest position
 - Log warning
+- Preserve worker availability
 - System MUST NOT crash
 
 ---
 
 ## Worker Responsibilities
 
-Worker ONLY operates on tables with streaming enabled.
+Worker ONLY operates on collections with streaming enabled.
 
 Responsibilities:
 
-- Read change streams
+- Read MongoDB change streams
 - Transform events
-- Dispatch to sinks
-- Handle retry, DLQ, offsets
+- Dispatch events to sinks
+- Handle retries
+- Handle DLQ
+- Handle idempotency
+- Manage resume tokens and offsets
 
-Worker MUST be stateless except for Redis.
+Worker MUST remain stateless except for Redis state.
 
 ---
 
@@ -163,39 +309,49 @@ Worker MUST be stateless except for Redis.
 
 ### Resume Token
 
-cdc:resume_token:<tableName>
+```txt
+cdc:resume_token:<collectionName>
+```
 
 ---
 
 ### Retry Queue
 
-cdc:retry:<tableName>
+```txt
+cdc:retry:<collectionName>
+```
 
 ---
 
 ### Event Payload
 
+```txt
 cdc:event:<id>
+```
 
 ---
 
 ### DLQ
 
-cdc:dlq:<tableName>
+```txt
+cdc:dlq:<collectionName>
+```
 
 ---
 
 ### Idempotency
 
-cdc:processed:<tableName>:<id>
+```txt
+cdc:processed:<collectionName>:<id>
+```
 
 ---
 
 ## Retry Rules
 
 - Max retries: 5
-- Exponential backoff
-- After 5 → DLQ
+- Exponential backoff REQUIRED
+- After 5 failures → send to DLQ
 
 ---
 
@@ -203,80 +359,119 @@ cdc:processed:<tableName>:<id>
 
 ### Resume Token
 
-- Only update after success
+- Only update resume token after successful processing
 - Never skip failed events
+- Never acknowledge partially processed events
 
 ### Idempotency
 
-- Required for all processing
+- Required for all event processing
 
 ### Ordering
 
-- Not guaranteed
-- Must support eventual consistency
+- Ordering is NOT guaranteed
+- Consumers MUST support eventual consistency
 
 ---
 
 ## Backpressure
 
-Worker MUST handle overload:
+Worker MUST tolerate overload conditions.
 
-- Retry queue growth must be monitored
-- System MUST not crash under load
+Requirements:
+
+- Retry queue growth MUST be monitored
+- System MUST degrade gracefully
+- Worker MUST NOT crash under load
+- Memory usage MUST remain bounded
 
 ---
 
 ## Destinations
 
+Supported sinks:
+
 - Redis Streams
 - EventBridge
+- HTTP Webhooks
+- Meilisearch
+
+The destination architecture MUST remain pluggable.
 
 ---
 
 ## Code Style
 
 - Small packages
-- No global state
+- Explicit dependencies
+- No global mutable state
 - Use context everywhere
 - Explicit error handling
 - No panic in production
+- Prefer composition over inheritance-like abstractions
+- Favor simple concurrency patterns
 
 ---
 
 ## Testing Strategy
 
-System MUST include:
+The system MUST include:
 
 - CDC tests
 - Retry tests
+- DLQ tests
 - Idempotency tests
+- Resume token recovery tests
 - Watcher lifecycle tests
+- Dynamic watcher synchronization tests
+- Backpressure tests
 
-### Critical
+### Critical Guarantees
 
 - No event loss
 - No duplicate processing
 - No goroutine leaks
+- No duplicate watchers
 
 ---
 
 ## Git
 
-- Use conventional commits: `feat:`, `fix:`, `chore:`, `test:`, `docs:`, `refactor:`.
-- Do not add attribution trailers such as `Co-Authored-By` or generated-by messages.
-- Prefer worktrees for parallel work to avoid conflicts.
+- Use conventional commits:
+  - `feat:`
+  - `fix:`
+  - `chore:`
+  - `test:`
+  - `docs:`
+  - `refactor:`
+- Do not add attribution trailers
+- Do not add generated-by messages
+- Prefer worktrees for parallel work to avoid conflicts
 
 ---
 
 ## Commands
 
-go run ./cmd/api  
+### API
+
+```bash
+go run ./cmd/api
+```
+
+### Worker
+
+```bash
 go run ./cmd/worker
+```
 
 ---
 
 ## Notes
 
-- Always read `config.tables`
+- Always read `config.collections`
 - Watcher Manager is the source of truth
-- System MUST never lose events
+- Workers MUST dynamically reconcile watcher state
+- Streaming is opt-in per collection
+- Internal semantics MUST remain DynamoDB-aligned
+- The system MUST support configurable key field names
+- The system MUST never lose events
