@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useRevalidator } from "react-router";
 
-import { clientLoader, type TableConfig } from "./loader.client";
+import { clientLoader, type CollectionConfig } from "./loader.client";
 
 import {
   AlertDialog,
@@ -51,66 +51,66 @@ export function meta() {
 export default function Route({
   loaderData,
 }: {
-  loaderData: { tables: TableConfig[] };
+  loaderData: { collections: CollectionConfig[] };
 }) {
-  const { tables } = loaderData;
+  const { collections } = loaderData;
   const revalidator = useRevalidator();
 
-  const [deletingTable, setDeletingTable] = useState<TableConfig | null>(null);
+  const [deletingCollection, setDeletingCollection] = useState<CollectionConfig | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const handleDelete = async () => {
-    if (!deletingTable?.table_name) return;
+    if (!deletingCollection?.collection_name) return;
 
     setIsSubmitting(true);
     setDeleteError(null);
     try {
-      const res = await fetch(`/api/tables/${deletingTable.table_name}`, {
+      const res = await fetch(`/api/collections/${deletingCollection.collection_name}`, {
         method: "DELETE",
       });
 
       if (res.ok) {
-        setDeletingTable(null);
+        setDeletingCollection(null);
         revalidator.revalidate();
       } else {
         const error = await res.json();
-        setDeleteError(error.error || "Failed to delete table");
+        setDeleteError(error.error || "Failed to delete collection");
       }
     } catch (err) {
-      setDeleteError("Failed to delete table");
-      console.error("Failed to delete table:", err);
+      setDeleteError("Failed to delete collection");
+      console.error("Failed to delete collection:", err);
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const openDeleteDialog = (table: TableConfig) => {
-    if (table.deletion_protection) return;
-    setDeletingTable(table);
+  const openDeleteDialog = (collection: CollectionConfig) => {
+    if (collection.deletion_protection) return;
+    setDeletingCollection(collection);
   };
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
-        <h1 className="text-2xl font-bold">Tables</h1>
+        <h1 className="text-2xl font-bold">Collections</h1>
         <Link to="/tables/new">
-          <Button>New Table</Button>
+          <Button>New Collection</Button>
         </Link>
       </div>
 
       {/* Delete Confirmation Dialog */}
       <AlertDialog
-        open={!!deletingTable}
-        onOpenChange={(open) => !open && setDeletingTable(null)}
+        open={!!deletingCollection}
+        onOpenChange={(open) => !open && setDeletingCollection(null)}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Table</AlertDialogTitle>
+            <AlertDialogTitle>Delete Collection</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete the table{" "}
+              Are you sure you want to delete the collection{" "}
               <span className="font-medium text-foreground">
-                {deletingTable?.table_name}
+                {deletingCollection?.collection_name}
               </span>
               ? This action cannot be undone.
             </AlertDialogDescription>
@@ -135,8 +135,8 @@ export default function Route({
 
       <Card>
         <CardContent>
-          {tables.length === 0 ? (
-            <p className="text-muted-foreground">No tables configured.</p>
+          {collections.length === 0 ? (
+            <p className="text-muted-foreground">No collections configured.</p>
           ) : (
             <Table>
               <TableHeader className="pointer-events-none">
@@ -151,48 +151,48 @@ export default function Route({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {tables.map((table: TableConfig) => (
-                  <TableRow key={table._id || table.table_name}>
+                {collections.map((collection: CollectionConfig) => (
+                  <TableRow key={collection._id || collection.collection_name}>
                     <TableCell className="font-medium">
-                      {table.table_name}
+                      {collection.collection_name}
                     </TableCell>
                     <TableCell>
                       <span
                         className={`text-sm ${
-                          table.stream_enabled
+                          collection.stream_enabled
                             ? "text-green-600"
                             : "text-muted-foreground"
                         }`}
                       >
-                        {table.stream_enabled ? "Yes" : "No"}
+                        {collection.stream_enabled ? "Yes" : "No"}
                       </span>
                     </TableCell>
                     <TableCell>
                       <span
                         className={`text-sm ${
-                          table.old_image
+                          collection.old_image
                             ? "text-green-600"
                             : "text-muted-foreground"
                         }`}
                       >
-                        {table.old_image ? "Yes" : "No"}
+                        {collection.old_image ? "Yes" : "No"}
                       </span>
                     </TableCell>
                     <TableCell className="text-muted-foreground">
-                      {table.ttl_attribute || "-"}
+                      {collection.ttl_attribute || "-"}
                     </TableCell>
                     <TableCell>
-                      <DestinationsCell destinations={table.destinations} />
+                      <DestinationsCell destinations={collection.destinations} />
                     </TableCell>
                     <TableCell>
                       <span
                         className={`text-sm ${
-                          table.deletion_protection
+                          collection.deletion_protection
                             ? "text-green-600"
                             : "text-red-600"
                         }`}
                       >
-                        {table.deletion_protection ? "Enabled" : "Disabled"}
+                        {collection.deletion_protection ? "Enabled" : "Disabled"}
                       </span>
                     </TableCell>
                     <TableCell>
@@ -208,13 +208,13 @@ export default function Route({
                           className="[&_[role='menuitem']]:cursor-pointer"
                         >
                           <DropdownMenuItem asChild>
-                            <Link to={`/tables/${table.table_name}/edit`}>
+                            <Link to={`/tables/${collection.collection_name}/edit`}>
                               Edit
                             </Link>
                           </DropdownMenuItem>
                           <DropdownMenuItem
-                            onClick={() => openDeleteDialog(table)}
-                            disabled={table.deletion_protection}
+                            onClick={() => openDeleteDialog(collection)}
+                            disabled={collection.deletion_protection}
                             className="text-destructive focus:text-destructive"
                           >
                             Delete
@@ -236,7 +236,7 @@ export default function Route({
 function DestinationsCell({
   destinations,
 }: {
-  destinations: TableConfig["destinations"];
+  destinations: CollectionConfig["destinations"];
 }) {
   const [open, setOpen] = useState(false);
 

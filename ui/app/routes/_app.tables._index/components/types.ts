@@ -44,9 +44,9 @@ const destinationSchema = z
     },
   );
 
-export const tableSchema = z
+export const collectionSchema = z
   .object({
-    table_name: z.string().min(1, "Table name is required"),
+    collection_name: z.string().min(1, "Collection name is required"),
     stream_enabled: z.boolean(),
     old_image: z.boolean(),
     ttl_attribute: z.string().optional(),
@@ -58,6 +58,6 @@ export const tableSchema = z
     path: ["destinations"],
   });
 
-export type TableForm = z.infer<typeof tableSchema>;
+export type CollectionForm = z.infer<typeof collectionSchema>;
 export type FieldFilter = z.infer<typeof fieldFilterSchema>;
 export type Condition = z.infer<typeof conditionSchema>;

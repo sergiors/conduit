@@ -12,7 +12,7 @@ import {
 } from "~/components/ui/select";
 import { Separator } from "~/components/ui/separator";
 
-import type { TableForm } from "./types";
+import type { CollectionForm } from "./types";
 
 // Condition types
 type ConditionType =
@@ -41,7 +41,7 @@ const numericOperators = [
 interface FilterCriteriaEditorProps {
   imageType: "old_image" | "new_image";
   destIndex: number;
-  control: Control<TableForm>;
+  control: Control<CollectionForm>;
 }
 
 export function FilterCriteriaEditor({

@@ -55,23 +55,18 @@ func (d *DestinationConfig) ValidateEventTypes() error {
 }
 
 
-// StreamSpecification configures CDC streaming for a collection
-type StreamSpecification struct {
-	Enabled bool `bson:"enabled" json:"enabled"`
-}
-
 type Collection struct {
-	ID                   string                `bson:"_id,omitempty" json:"_id,omitempty"`
-	CollectionName       string                `bson:"collection_name,omitempty" json:"collection_name,omitempty"`
-	PrimaryKey           string                `bson:"primary_key,omitempty" json:"primary_key,omitempty"`
-	SortKey              string                `bson:"sort_key,omitempty" json:"sort_key,omitempty"`
-	StreamSpecification  StreamSpecification   `bson:"stream_specification" json:"stream_specification"`
-	OldImage             bool                  `bson:"old_image" json:"old_image"`
-	TTLAttribute         string                `bson:"ttl_attribute,omitempty" json:"ttl_attribute,omitempty"`
-	Destinations         []DestinationConfig   `bson:"destinations" json:"destinations"`
-	DeletionProtection   bool                  `bson:"deletion_protection" json:"deletion_protection"`
-	CreatedAt            time.Time             `bson:"created_at" json:"created_at"`
-	UpdatedAt            time.Time             `bson:"updated_at" json:"updated_at"`
+	ID                   string              `bson:"_id,omitempty" json:"_id,omitempty"`
+	CollectionName       string              `bson:"collection_name,omitempty" json:"collection_name,omitempty"`
+	PrimaryKey           string              `bson:"primary_key,omitempty" json:"primary_key,omitempty"`
+	SortKey              string              `bson:"sort_key,omitempty" json:"sort_key,omitempty"`
+	StreamEnabled        bool                `bson:"stream_enabled" json:"stream_enabled"`
+	OldImage             bool                `bson:"old_image" json:"old_image"`
+	TTLAttribute         string              `bson:"ttl_attribute,omitempty" json:"ttl_attribute,omitempty"`
+	Destinations         []DestinationConfig `bson:"destinations" json:"destinations"`
+	DeletionProtection   bool                `bson:"deletion_protection" json:"deletion_protection"`
+	CreatedAt            time.Time           `bson:"created_at" json:"created_at"`
+	UpdatedAt            time.Time           `bson:"updated_at" json:"updated_at"`
 }
 
 // Store manages collection configurations in MongoDB
@@ -275,7 +270,7 @@ func (s *Store) Update(ctx context.Context, collection *Collection) error {
 		"collection_name":     collection.CollectionName,
 		"primary_key":         collection.PrimaryKey,
 		"sort_key":            collection.SortKey,
-		"stream_specification":  collection.StreamSpecification,
+		"stream_enabled":      collection.StreamEnabled,
 		"old_image":           collection.OldImage,
 		"ttl_attribute":       collection.TTLAttribute,
 		"destinations":        collection.Destinations,
@@ -313,7 +308,7 @@ func (s *Store) Delete(ctx context.Context, name string) error {
 
 // ListStreamEnabled returns collections with streams enabled
 func (s *Store) ListStreamEnabled(ctx context.Context) ([]Collection, error) {
-	cursor, err := s.collection.Find(ctx, bson.M{"stream_specification.enabled": true})
+	cursor, err := s.collection.Find(ctx, bson.M{"stream_enabled": true})
 	if err != nil {
 		return nil, err
 	}

@@ -171,7 +171,7 @@ This abstraction allows field customization without affecting downstream consume
 
 ## 🚨 Stream Activation Rules (CRITICAL)
 
-Streaming (CDC) MUST be explicitly enabled per collection.
+Streaming (CDC) MUST be explicitly enabled per collection via the `stream_enabled` boolean field.
 
 ### Behavior
 
@@ -179,9 +179,7 @@ If:
 
 ```json
 {
-  "streamSpecification": {
-    "enabled": false
-  }
+  "stream_enabled": false
 }
 ```
 
@@ -194,9 +192,7 @@ If:
 
 ```json
 {
-  "streamSpecification": {
-    "enabled": true
-  }
+  "stream_enabled": true
 }
 ```
 

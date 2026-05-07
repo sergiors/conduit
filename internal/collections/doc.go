@@ -16,7 +16,7 @@
 //
 //	{
 //	  "collection_name": "users",
-//	  "stream_specification": { "enabled": true },
+//	  "stream_enabled": true,
 //	  "old_image": true,
 //	  "ttl_attribute": "expiresAt",
 //	  "deletion_protection": true,
@@ -29,15 +29,15 @@
 //
 //	// Create collection
 //	collection := collections.Collection{
-//	    CollectionName:       "users",
-//	    StreamSpecification: collections.StreamSpecification{Enabled: true},
-//	    OldImage:        true,
-//	    Destinations:    []collections.DestinationConfig{...},
+//	    CollectionName:    "users",
+//	    StreamEnabled:     true,
+//	    OldImage:          true,
+//	    Destinations:      []collections.DestinationConfig{...},
 //	}
 //	if err := store.Create(ctx, collection); err != nil {
 //	    log.Fatal(err)
 //	}
 //
-//	// List enabled tables
-//	tables, err := store.ListStreamEnabled(ctx)
+//	// List enabled collections
+//	collections, err := store.ListStreamEnabled(ctx)
 package collections

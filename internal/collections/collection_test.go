@@ -23,7 +23,7 @@ func TestTableValidation(t *testing.T) {
 			CollectionName: "users",
 			PrimaryKey:     "id",
 			SortKey:        "email",
-			StreamSpecification: StreamSpecification{Enabled: true},
+			StreamEnabled:  true,
 			OldImage:       false,
 			Destinations:   []DestinationConfig{{Type: "http", Endpoint: "http://localhost:3000/events"}},
 		}
@@ -31,7 +31,7 @@ func TestTableValidation(t *testing.T) {
 		assert.Equal(t, "users", table.CollectionName)
 		assert.Equal(t, "id", table.PrimaryKey)
 		assert.Equal(t, "email", table.SortKey)
-		assert.True(t, table.StreamSpecification.Enabled)
+		assert.True(t, table.StreamEnabled)
 		assert.False(t, table.OldImage)
 		assert.Len(t, table.Destinations, 1)
 	})
@@ -39,7 +39,7 @@ func TestTableValidation(t *testing.T) {
 	t.Run("table with old image enabled", func(t *testing.T) {
 		table := Collection{
 			CollectionName: "orders",
-			StreamSpecification: StreamSpecification{Enabled: true},
+			StreamEnabled:  true,
 			OldImage:       true,
 			Destinations:   []DestinationConfig{{Type: "http", Endpoint: "http://localhost:3000/events"}, {Type: "eventbridge"}},
 		}
@@ -51,18 +51,18 @@ func TestTableValidation(t *testing.T) {
 	t.Run("table with TTL field", func(t *testing.T) {
 		table := Collection{
 			CollectionName: "sessions",
-			StreamSpecification: StreamSpecification{Enabled: false},
+			StreamEnabled:  false,
 			TTLAttribute:   "expiresAt",
 		}
 
 		assert.Equal(t, "expiresAt", table.TTLAttribute)
-		assert.False(t, table.StreamSpecification.Enabled)
+		assert.False(t, table.StreamEnabled)
 	})
 
 	t.Run("table with deletion protection enabled by default", func(t *testing.T) {
 		table := Collection{
 			CollectionName: "users",
-			StreamSpecification: StreamSpecification{Enabled: true},
+			StreamEnabled:  true,
 		}
 
 		assert.False(t, table.DeletionProtection, "DeletionProtection should be false when not explicitly set")
@@ -71,7 +71,7 @@ func TestTableValidation(t *testing.T) {
 	t.Run("table with deletion protection explicitly enabled", func(t *testing.T) {
 		table := Collection{
 			CollectionName:     "users",
-			StreamSpecification: StreamSpecification{Enabled: true},
+			StreamEnabled:      true,
 			DeletionProtection: true,
 		}
 
@@ -152,7 +152,7 @@ func TestStoreCRUD(t *testing.T) {
 			CollectionName: "test_table",
 			PrimaryKey:     "primaryKey",
 			SortKey:        "sortKey",
-			StreamSpecification: StreamSpecification{Enabled: true},
+			StreamEnabled:  true,
 			OldImage:       true,
 			Destinations:   []DestinationConfig{{Type: "http", Endpoint: "http://localhost:3000/events"}},
 		}
@@ -179,7 +179,7 @@ func TestStoreCRUD(t *testing.T) {
 		table, err := store.Get(ctx, "test_table")
 		require.NoError(t, err)
 		assert.Equal(t, "test_table", table.CollectionName)
-		assert.True(t, table.StreamSpecification.Enabled)
+		assert.True(t, table.StreamEnabled)
 		assert.True(t, table.OldImage)
 	})
 
@@ -193,14 +193,14 @@ func TestStoreCRUD(t *testing.T) {
 		table, err := store.Get(ctx, "test_table")
 		require.NoError(t, err)
 
-		table.StreamSpecification.Enabled = false
+		table.StreamEnabled = false
 		table.Destinations = []DestinationConfig{{Type: "http", Endpoint: "http://localhost:3001/audit"}}
 
 		err = store.Update(ctx, table)
 		require.NoError(t, err)
 
 		updated, _ := store.Get(ctx, "test_table")
-		assert.False(t, updated.StreamSpecification.Enabled)
+		assert.False(t, updated.StreamEnabled)
 		assert.Equal(t, []DestinationConfig{{Type: "http", Endpoint: "http://localhost:3001/audit"}}, updated.Destinations)
 		assert.True(t, updated.UpdatedAt.After(table.UpdatedAt))
 	})
@@ -209,7 +209,7 @@ func TestStoreCRUD(t *testing.T) {
 		// Create a fresh table for this test
 		freshTable := &Collection{
 			CollectionName:     "fresh_table",
-			StreamSpecification: StreamSpecification{Enabled: true},
+			StreamEnabled:      true,
 			DeletionProtection: false,
 			Destinations:       []DestinationConfig{{Type: "http", Endpoint: "http://localhost:3000/events"}},
 		}
@@ -243,7 +243,7 @@ func TestStoreCRUD(t *testing.T) {
 		// Create table with deletion protection enabled
 		protectedTable := &Collection{
 			CollectionName:     "protected_table",
-			StreamSpecification: StreamSpecification{Enabled: true},
+			StreamEnabled:      true,
 			DeletionProtection: true,
 			Destinations:       []DestinationConfig{{Type: "http", Endpoint: "http://localhost:3000/events"}},
 		}
@@ -272,7 +272,7 @@ func TestStoreCRUD(t *testing.T) {
 		// Create table with deletion protection disabled
 		tableWithCollection := &Collection{
 			CollectionName:     "collection_table",
-			StreamSpecification: StreamSpecification{Enabled: true},
+			StreamEnabled:      true,
 			DeletionProtection: false,
 		}
 		err := store.Create(ctx, tableWithCollection)
@@ -334,14 +334,14 @@ func TestStoreListStreamEnabled(t *testing.T) {
 	// Create stream-enabled table
 	streamTable := &Collection{
 		CollectionName: "stream_table",
-		StreamSpecification: StreamSpecification{Enabled: true},
+		StreamEnabled:  true,
 	}
 	_ = store.Create(ctx, streamTable)
 
 	// Create non-stream table
 	nonStreamTable := &Collection{
 		CollectionName: "no_stream_table",
-		StreamSpecification: StreamSpecification{Enabled: false},
+		StreamEnabled:  false,
 	}
 	_ = store.Create(ctx, nonStreamTable)
 
@@ -352,7 +352,7 @@ func TestStoreListStreamEnabled(t *testing.T) {
 	for _, table := range tables {
 		if table.CollectionName == "stream_table" {
 			found = true
-			assert.True(t, table.StreamSpecification.Enabled)
+			assert.True(t, table.StreamEnabled)
 		}
 		if table.CollectionName == "no_stream_table" {
 			assert.Fail(t, "non-stream table should not be in list")
@@ -369,7 +369,7 @@ func TestTableBSONTags(t *testing.T) {
 	t.Run("BSON tags are correctly defined", func(t *testing.T) {
 		table := Collection{
 			CollectionName: "test",
-			StreamSpecification: StreamSpecification{Enabled: true},
+			StreamEnabled:  true,
 			OldImage:       true,
 			TTLAttribute:   "expiresAt",
 			Destinations:   []DestinationConfig{{Type: "http", Endpoint: "http://localhost:3000/events"}},
@@ -383,9 +383,7 @@ func TestTableBSONTags(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Equal(t, "test", decoded["collection_name"])
-		streamSpec, ok := decoded["stream_specification"].(map[string]interface{})
-		require.True(t, ok, "stream_specification should be a map")
-		assert.Equal(t, true, streamSpec["enabled"])
+		assert.Equal(t, true, decoded["stream_enabled"])
 		assert.Equal(t, true, decoded["old_image"])
 		assert.Equal(t, "expiresAt", decoded["ttl_attribute"])
 	})

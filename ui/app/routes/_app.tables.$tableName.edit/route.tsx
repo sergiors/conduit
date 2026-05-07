@@ -1,42 +1,42 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 
-import { TableForm } from "../_app.tables._index/components/table-form";
-import type { TableConfig } from "../_app.tables._index/loader.client";
+import { CollectionForm } from "../_app.tables._index/components/table-form";
+import type { CollectionConfig } from "../_app.tables._index/loader.client";
 
 import { Card, CardContent } from "~/components/ui/card";
 
-export default function EditTableRoute() {
+export default function EditCollectionRoute() {
   const { tableName } = useParams<{ tableName: string }>();
   const navigate = useNavigate();
-  const [table, setTable] = useState<TableConfig | null>(null);
+  const [collection, setCollection] = useState<CollectionConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const fetchTable = async () => {
+    const fetchCollection = async () => {
       try {
-        const res = await fetch(`/api/tables/${tableName}`);
-        if (!res.ok) throw new Error("Failed to fetch table");
-        const data: TableConfig = await res.json();
-        setTable(data);
+        const res = await fetch(`/api/collections/${tableName}`);
+        if (!res.ok) throw new Error("Failed to fetch collection");
+        const data: CollectionConfig = await res.json();
+        setCollection(data);
       } catch (err) {
-        setError("Failed to load table");
+        setError("Failed to load collection");
         console.error(err);
       } finally {
         setLoading(false);
       }
     };
 
-    fetchTable();
+    fetchCollection();
   }, [tableName]);
 
-  const handleSubmit = async (data: TableConfig) => {
+  const handleSubmit = async (data: CollectionConfig) => {
     setIsSubmitting(true);
     setError(null);
     try {
-      const res = await fetch(`/api/tables/${tableName}`, {
+      const res = await fetch(`/api/collections/${tableName}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
@@ -46,11 +46,11 @@ export default function EditTableRoute() {
         navigate("/tables");
       } else {
         const error = await res.json();
-        setError(error.error || "Failed to update table");
+        setError(error.error || "Failed to update collection");
       }
     } catch (err) {
-      setError("Failed to update table");
-      console.error("Failed to update table:", err);
+      setError("Failed to update collection");
+      console.error("Failed to update collection:", err);
     } finally {
       setIsSubmitting(false);
     }
@@ -64,22 +64,22 @@ export default function EditTableRoute() {
     );
   }
 
-  if (!table) {
+  if (!collection) {
     return (
       <div className="p-4 md:p-8">
-        <p className="text-destructive">Table not found</p>
+        <p className="text-destructive">Collection not found</p>
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Edit Table</h1>
+      <h1 className="text-2xl font-bold">Edit Collection</h1>
 
       <Card>
         <CardContent className="pt-6">
-          <TableForm
-            initialData={table}
+          <CollectionForm
+            initialData={collection}
             onSubmit={handleSubmit}
             onCancel={() => navigate("/tables")}
             isSubmitting={isSubmitting}

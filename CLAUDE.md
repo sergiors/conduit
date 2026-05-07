@@ -74,6 +74,6 @@ cdc:config-change                    # Pub/Sub channel for config changes
 
 - Use `collection` terminology (not `table`) throughout the codebase
 - Exception: `streams.StreamRecord` uses `TableName` field (DynamoDB-compatible)
-- Streaming is opt-in per collection via `stream_specification.enabled`
+- Streaming is opt-in per collection via `stream_enabled` boolean field
 - Watchers are managed centrally by `WatcherManager` with no goroutine leaks
 - Resume tokens are per-collection and updated only after successful processing

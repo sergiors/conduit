@@ -1,12 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { filterCriteriaSchema, tableSchema } from "./types";
+import { filterCriteriaSchema, collectionSchema } from "./types";
 import type { FilterCondition, FilterCriteria } from "../loader.client";
 
 describe("Filter Criteria Schemas", () => {
-  describe("tableSchema", () => {
-    it("validates a complete table config", () => {
+  describe("collectionSchema", () => {
+    it("validates a complete collection config", () => {
       const data = {
-        table_name: "test_table",
+        collection_name: "test_collection",
         stream_enabled: true,
         old_image: true,
         ttl_attribute: "expires_at",
@@ -32,46 +32,46 @@ describe("Filter Criteria Schemas", () => {
         deletion_protection: false,
       };
 
-      const result = tableSchema.safeParse(data);
+      const result = collectionSchema.safeParse(data);
       expect(result.success).toBe(true);
     });
 
-    it("fails validation without table name", () => {
+    it("fails validation without collection name", () => {
       const data = {
-        table_name: "",
+        collection_name: "",
         stream_enabled: false,
         old_image: false,
         destinations: [],
         deletion_protection: true,
       };
 
-      const result = tableSchema.safeParse(data);
+      const result = collectionSchema.safeParse(data);
       expect(result.success).toBe(false);
     });
 
     it("requires destinations when stream_enabled is true", () => {
       const data = {
-        table_name: "test",
+        collection_name: "test",
         stream_enabled: true,
         old_image: false,
         destinations: [],
         deletion_protection: true,
       };
 
-      const result = tableSchema.safeParse(data);
+      const result = collectionSchema.safeParse(data);
       expect(result.success).toBe(false);
     });
 
     it("allows empty destinations when stream_enabled is false", () => {
       const data = {
-        table_name: "test",
+        collection_name: "test",
         stream_enabled: false,
         old_image: false,
         destinations: [],
         deletion_protection: true,
       };
 
-      const result = tableSchema.safeParse(data);
+      const result = collectionSchema.safeParse(data);
       expect(result.success).toBe(true);
     });
   });
@@ -153,8 +153,8 @@ describe("Criteria Conversion", () => {
 
   it("schema types are correctly inferred", () => {
     // Basic type check - if this compiles, types are working
-    type TableForm = {
-      table_name: string;
+    type CollectionForm = {
+      collection_name: string;
       stream_enabled: boolean;
       old_image: boolean;
       ttl_attribute?: string;
@@ -186,8 +186,8 @@ describe("Criteria Conversion", () => {
     };
 
     // This is a compile-time check
-    const _typeCheck: TableForm = {
-      table_name: "test",
+    const _typeCheck: CollectionForm = {
+      collection_name: "test",
       stream_enabled: false,
       old_image: false,
       destinations: [],

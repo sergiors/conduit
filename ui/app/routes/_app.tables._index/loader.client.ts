@@ -1,4 +1,3 @@
-
 export interface FilterCondition {
   prefix?: string;
   suffix?: string;
@@ -28,9 +27,9 @@ export interface DestinationConfig {
   index_name?: string;
 }
 
-export interface TableConfig {
+export interface CollectionConfig {
   _id?: string;
-  table_name: string;
+  collection_name: string;
   stream_enabled: boolean;
   old_image: boolean;
   ttl_attribute?: string;
@@ -41,8 +40,8 @@ export interface TableConfig {
 }
 
 export async function clientLoader() {
-  const res = await fetch("/api/tables");
-  if (!res.ok) throw new Error("Failed to fetch tables");
-  const data: TableConfig[] = await res.json();
-  return { tables: data };
+  const res = await fetch("/api/collections");
+  if (!res.ok) throw new Error("Failed to fetch collections");
+  const data: CollectionConfig[] = await res.json();
+  return { collections: data };
 }

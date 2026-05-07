@@ -31,10 +31,10 @@ import { Separator } from "~/components/ui/separator";
 import type {
   FilterCondition,
   FilterCriteria,
-  TableConfig,
+  CollectionConfig,
 } from "../loader.client";
 import { FilterCriteriaEditor } from "./filter-criteria-editor";
-import { tableSchema, type FieldFilter, type TableForm } from "./types";
+import { collectionSchema, type FieldFilter, type CollectionForm } from "./types";
 
 // --- Conversions (form ↔ API) ---
 
@@ -135,29 +135,29 @@ function apiToFormCriteria(criteria: FilterCriteria | undefined): {
 
 // --- Component ---
 
-interface TableFormProps {
-  initialData?: TableConfig;
-  onSubmit: (data: TableConfig) => Promise<void>;
+interface CollectionFormProps {
+  initialData?: CollectionConfig;
+  onSubmit: (data: CollectionConfig) => Promise<void>;
   onCancel: () => void;
   isSubmitting?: boolean;
 }
 
-export function TableForm({
+export function CollectionForm({
   initialData,
   onSubmit,
   onCancel,
   isSubmitting,
-}: TableFormProps) {
+}: CollectionFormProps) {
   const {
     control,
     handleSubmit,
     formState: { errors },
     watch,
     setValue,
-  } = useForm<TableForm>({
-    resolver: zodResolver(tableSchema),
+  } = useForm<CollectionForm>({
+    resolver: zodResolver(collectionSchema),
     defaultValues: {
-      table_name: initialData?.table_name ?? "",
+      collection_name: initialData?.collection_name ?? "",
       stream_enabled: initialData?.stream_enabled ?? false,
       old_image: initialData?.old_image ?? false,
       ttl_attribute: initialData?.ttl_attribute ?? "",
@@ -195,12 +195,12 @@ export function TableForm({
     }
   }, [streamEnabled]);
 
-  const submitHandler = async (data: TableForm) => {
+  const submitHandler = async (data: CollectionForm) => {
     if (!data.stream_enabled) {
       data.destinations = [];
     }
-    const apiData: TableConfig = {
-      table_name: data.table_name,
+    const apiData: CollectionConfig = {
+      collection_name: data.collection_name,
       stream_enabled: data.stream_enabled,
       old_image: data.old_image,
       ttl_attribute: data.ttl_attribute,
@@ -249,15 +249,15 @@ export function TableForm({
       <FieldGroup>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Field>
-            <FieldLabel>Table Name *</FieldLabel>
+            <FieldLabel>Collection Name *</FieldLabel>
             <Controller
-              name="table_name"
+              name="collection_name"
               control={control}
               render={({ field }) => (
                 <Input {...field} disabled={!!initialData} />
               )}
             />
-            <FieldError errors={[errors.table_name]} />
+            <FieldError errors={[errors.collection_name]} />
           </Field>
 
           <Field>
