@@ -1,6 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { XIcon } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Controller, useForm } from "react-hook-form";
 
 import { Button } from "~/components/ui/button";
@@ -147,7 +147,7 @@ export function CollectionForm({
   const {
     control,
     handleSubmit,
-    formState: { errors },
+    formState: { errors, isSubmitting },
     watch,
     setValue,
   } = useForm<CollectionForm>({
@@ -178,9 +178,10 @@ export function CollectionForm({
 
   const destinations = watch("destinations");
   const streamEnabled = watch("stream_enabled");
+  const addedInitialRef = useRef(false);
 
   useEffect(() => {
-    if (streamEnabled && destinations.length === 0) {
+    if (streamEnabled && destinations.length === 0 && !addedInitialRef.current) {
       setValue("destinations", [
         {
           type: "http" as const,
@@ -190,8 +191,9 @@ export function CollectionForm({
           filter_criteria: { old_image: [], new_image: [] },
         },
       ]);
+      addedInitialRef.current = true;
     }
-  }, [streamEnabled]);
+  }, [streamEnabled, destinations.length, setValue]);
 
   const submitHandler = async (data: CollectionForm) => {
     if (!data.stream_enabled) {
