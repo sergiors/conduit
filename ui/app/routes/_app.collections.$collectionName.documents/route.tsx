@@ -264,6 +264,14 @@ export default function DocumentsRoute() {
     return fields;
   };
 
+  const safeParse = (str: string) => {
+    try {
+      return JSON.parse(str);
+    } catch {
+      return {};
+    }
+  };
+
   if (!collection) {
     return (
       <div className="p-4 md:p-8">
@@ -383,7 +391,7 @@ export default function DocumentsRoute() {
             <FieldLabel>Document JSON</FieldLabel>
             <div className="border rounded-md overflow-hidden">
               <JsonEditor
-                data={JSON.parse(jsonValue)}
+                data={safeParse(jsonValue)}
                 setData={(data) => setJsonValue(JSON.stringify(data, null, 2))}
                 maxEditingDepth={10}
                 indent={2}
@@ -424,7 +432,7 @@ export default function DocumentsRoute() {
             </p>
             <div className="border rounded-md overflow-hidden max-h-[500px] overflow-y-auto">
               <JsonEditor
-                data={JSON.parse(jsonValue)}
+                data={safeParse(jsonValue)}
                 setData={(data) => setJsonValue(JSON.stringify(data, null, 2))}
                 maxEditingDepth={10}
                 indent={2}
