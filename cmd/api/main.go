@@ -351,11 +351,13 @@ func (s *Server) getItem(c *gin.Context) {
 	var err error
 
 	if pk != "" {
+		// pk is always required when using key-based lookup, sk is optional
 		item, err = store.GetByKeys(ctx, pk, sk)
 	} else if id != "" {
+		// Or use MongoDB _id directly
 		item, err = store.Get(ctx, id)
 	} else {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "pk, sk, or id query param is required"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "pk query param is required (sk optional), or use id for MongoDB _id"})
 		return
 	}
 
@@ -412,25 +414,18 @@ func (s *Server) updateItem(c *gin.Context) {
 	// Determine ID to update: pk/sk composite or _id
 	var targetID string
 	if pk != "" {
-		// Build composite ID from pk/sk
+		// pk is required, sk is optional (DynamoDB-style)
 		if sk != "" {
 			targetID = pk + "#" + sk
 		} else {
 			targetID = pk
-		}
-		// Also allow body to override
-		if bodyPK, ok := data["pk"].(string); ok && bodyPK != "" {
-			targetID = bodyPK
-			if bodySK, ok := data["sk"].(string); ok && bodySK != "" {
-				targetID = bodyPK + "#" + bodySK
-			}
 		}
 	} else if id != "" {
 		targetID = id
 	} else if bodyID, ok := data["_id"].(string); ok && bodyID != "" {
 		targetID = bodyID
 	} else {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "pk, sk, id query param or _id in body is required"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "pk query param is required (sk optional), or use id/_id for MongoDB _id"})
 		return
 	}
 
@@ -461,11 +456,12 @@ func (s *Server) deleteItem(c *gin.Context) {
 	var err error
 
 	if pk != "" {
+		// pk is required, sk is optional (DynamoDB-style)
 		err = store.DeleteByKeys(ctx, pk, sk)
 	} else if id != "" {
 		err = store.Delete(ctx, id)
 	} else {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "pk, sk, or id query param is required"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "pk query param is required (sk optional), or use id for MongoDB _id"})
 		return
 	}
 
