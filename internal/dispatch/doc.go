@@ -1,12 +1,12 @@
 // Package dispatch implements event dispatching to configured destinations.
 //
 // This package handles routing CDC events to external systems:
-//   - Dispatcher: Central event router with per-table destination registration
+//   - Dispatcher: Central event router with per-collection destination registration
 //   - HTTPDestination: Sends events to HTTP endpoints with optional bearer token
 //   - EventBridgeDestination: Sends events to AWS EventBridge
 //
 // Key Features:
-//   - Multiple destinations per table
+//   - Multiple destinations per collection
 //   - Event type filtering (INSERT, MODIFY, REMOVE)
 //   - Bearer token authentication for HTTP endpoints
 //   - Graceful failure handling (one destination failure doesn't block others)
@@ -15,7 +15,7 @@
 //
 //	dispatcher := dispatch.NewDispatcher()
 //
-//	// Register HTTP destination for a table
+//	// Register HTTP destination for a collection
 //	httpDest, err := dispatch.NewHTTPDestination(
 //	    "http://localhost:3000/events",
 //	    "my-secret-token",

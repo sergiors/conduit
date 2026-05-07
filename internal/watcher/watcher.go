@@ -17,12 +17,14 @@ import (
 
 // Watcher watches a single MongoDB collection for changes
 type Watcher struct {
-	mongoClient *mongo.Client
-	database    string
-	tableName   string
-	oldImage    bool
-	resumeToken string
-	redisClient *redis.Client
+	mongoClient    *mongo.Client
+	database       string
+	collectionName string
+	pkField        string
+	skField        string
+	oldImage       bool
+	resumeToken    string
+	redisClient    *redis.Client
 
 	// Runtime state
 	ctx       context.Context
@@ -35,22 +37,26 @@ type Watcher struct {
 	mu    sync.RWMutex
 }
 
-// NewWatcher creates a new watcher for a table
+// NewWatcher creates a new watcher for a collection
 func NewWatcher(
 	mongoClient *mongo.Client,
 	database string,
-	tableName string,
+	collectionName string,
+	pkField string,
+	skField string,
 	oldImage bool,
 	resumeToken string,
 	redisClient *redis.Client,
 ) *Watcher {
 	return &Watcher{
-		mongoClient: mongoClient,
-		database:    database,
-		tableName:   tableName,
-		oldImage:    oldImage,
-		resumeToken: resumeToken,
-		redisClient: redisClient,
+		mongoClient:    mongoClient,
+		database:       database,
+		collectionName: collectionName,
+		pkField:        pkField,
+		skField:        skField,
+		oldImage:       oldImage,
+		resumeToken:    resumeToken,
+		redisClient:    redisClient,
 		stats: WatcherStats{
 			StartTime: time.Now(),
 		},
@@ -72,7 +78,7 @@ func (w *Watcher) Start(ctx context.Context, handler func(streams.StreamRecord) 
 		w.watchLoop(handler)
 	}()
 
-	log.Printf("Watcher started for table: %s", w.tableName)
+	log.Printf("Watcher started for collection: %s", w.collectionName)
 	return nil
 }
 
@@ -82,7 +88,7 @@ func (w *Watcher) Stop(ctx context.Context) error {
 		return nil
 	}
 
-	log.Printf("Stopping watcher for table: %s", w.tableName)
+	log.Printf("Stopping watcher for collection: %s", w.collectionName)
 	w.cancel()
 
 	// Wait for goroutine to finish with timeout
@@ -113,7 +119,7 @@ func (w *Watcher) watchLoop(handler func(streams.StreamRecord) error) {
 			if err := w.watchOnce(handler); err != nil {
 				// Check if this is a drop/invalidate error (expected when collection is removed)
 				if err.Error() == "collection dropped" || err.Error() == "change stream invalidated" {
-					log.Printf("Stopping watcher for %s: %v", w.tableName, err)
+					log.Printf("Stopping watcher for %s: %v", w.collectionName, err)
 					return
 				}
 
@@ -122,7 +128,7 @@ func (w *Watcher) watchLoop(handler func(streams.StreamRecord) error) {
 				// Skip token cleanup if context is already cancelled (watcher is stopping)
 				if w.ctx.Err() == nil {
 					// Invalidate resume token on error
-					if delErr := w.redisClient.DeleteResumeToken(w.ctx, w.tableName); delErr != nil {
+					if delErr := w.redisClient.DeleteResumeToken(w.ctx, w.collectionName); delErr != nil {
 						log.Printf("Failed to delete resume token: %v", delErr)
 					}
 
@@ -159,7 +165,7 @@ func (w *Watcher) watchOnce(handler func(streams.StreamRecord) error) error {
 	}
 
 	// Get collection
-	coll := w.mongoClient.Database(w.database).Collection(w.tableName)
+	coll := w.mongoClient.Database(w.database).Collection(w.collectionName)
 
 	// Start change stream
 	cursor, err := coll.Watch(w.ctx, mongo.Pipeline{}, opts)
@@ -194,7 +200,7 @@ func (w *Watcher) watchOnce(handler func(streams.StreamRecord) error) error {
 			tokenData, err := bson.Marshal(cursor.ResumeToken())
 			if err == nil {
 				w.resumeToken = string(tokenData)
-				if err := w.redisClient.SetResumeToken(w.ctx, w.tableName, w.resumeToken); err != nil {
+				if err := w.redisClient.SetResumeToken(w.ctx, w.collectionName, w.resumeToken); err != nil {
 					log.Printf("Failed to save resume token: %v", err)
 				}
 			}
@@ -224,7 +230,7 @@ func (w *Watcher) parseChange(change bson.M) (streams.StreamRecord, error) {
 	}
 
 	record := streams.StreamRecord{
-		TableName: w.tableName,
+		TableName: w.collectionName,
 		Timestamp: time.Now(),
 	}
 
@@ -257,12 +263,12 @@ func (w *Watcher) parseChange(change bson.M) (streams.StreamRecord, error) {
 		}
 	case "drop":
 		// Collection was dropped - stop watcher
-		log.Printf("Collection %s was dropped, stopping watcher", w.tableName)
+		log.Printf("Collection %s was dropped, stopping watcher", w.collectionName)
 		w.cancel()
 		return streams.StreamRecord{}, fmt.Errorf("collection dropped")
 	case "invalidate":
 		// Change stream invalidated - collection likely dropped or renamed
-		log.Printf("Change stream for %s invalidated, stopping watcher", w.tableName)
+		log.Printf("Change stream for %s invalidated, stopping watcher", w.collectionName)
 		w.cancel()
 		return streams.StreamRecord{}, fmt.Errorf("change stream invalidated")
 	default:
@@ -279,7 +285,7 @@ func (w *Watcher) recordError(err error) {
 	defer w.mu.Unlock()
 	w.stats.LastError = err
 	w.stats.LastErrorTime = time.Now()
-	log.Printf("Watcher error for %s: %v", w.tableName, err)
+	log.Printf("Watcher error for %s: %v", w.collectionName, err)
 }
 
 // GetStats returns current watcher statistics

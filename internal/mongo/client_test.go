@@ -176,7 +176,7 @@ func TestClientCreateTTLIndex(t *testing.T) {
 	})
 }
 
-func TestClientEnableTableStreams(t *testing.T) {
+func TestClientEnableStreams(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
@@ -202,7 +202,7 @@ func TestClientEnableTableStreams(t *testing.T) {
 		_, err := client.Collection(collection).InsertOne(ctx, bson.M{"_id": "1"})
 		require.NoError(t, err)
 
-		err = client.EnableTableStreams(ctx, collection, false)
+		err = client.EnableStreams(ctx, collection, false)
 		require.NoError(t, err)
 
 		// Cleanup
@@ -216,7 +216,7 @@ func TestClientEnableTableStreams(t *testing.T) {
 		_, err := client.Collection(collection).InsertOne(ctx, bson.M{"_id": "1"})
 		require.NoError(t, err)
 
-		err = client.EnableTableStreams(ctx, collection, true)
+		err = client.EnableStreams(ctx, collection, true)
 		require.NoError(t, err)
 
 		// Cleanup

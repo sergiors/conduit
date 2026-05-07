@@ -1,4 +1,4 @@
-package tables
+package collections
 
 import (
 	"context"
@@ -11,41 +11,60 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-// Item provides CRUD operations for items in a MongoDB collection
-type Item struct {
+// Document provides CRUD operations for documents in a MongoDB collection
+type Document struct {
 	client     *mongo.Client
 	database   string
 	collection string
 }
 
-// NewItem creates a new item handler for a specific collection
-func NewItem(client *mongo.Client, database, collection string) *Item {
-	return &Item{
+// NewDocument creates a new document handler for a specific collection
+func NewDocument(client *mongo.Client, database, collection string) *Document {
+	return &Document{
 		client:     client,
 		database:   database,
 		collection: collection,
 	}
 }
 
-// ItemQuery represents query parameters for scanning items
-type ItemQuery struct {
+func buildKeyQuery(pkField, skField, pkValue, skValue string) (bson.M, error) {
+	if pkField == "" {
+		return nil, fmt.Errorf("partition key field is required")
+	}
+	if pkValue == "" {
+		return nil, fmt.Errorf("partition key value is required")
+	}
+
+	query := bson.M{pkField: pkValue}
+	if skField != "" {
+		if skValue == "" {
+			return nil, fmt.Errorf("sort key value is required")
+		}
+		query[skField] = skValue
+	}
+
+	return query, nil
+}
+
+// DocumentQuery represents query parameters for scanning items
+type DocumentQuery struct {
 	Page   int64  `json:"page"`
 	Limit  int64  `json:"limit"`
 	Filter bson.M `json:"filter"`
 	Sort   bson.M `json:"sort"`
 }
 
-// ItemListResult represents the result of a scan operation
-type ItemListResult struct {
-	Items      []bson.M `json:"items"`
+// DocumentListResult represents the result of a scan operation
+type DocumentListResult struct {
+	Documents []bson.M `json:"documents"`
 	Total      int64    `json:"total"`
 	Page       int64    `json:"page"`
 	Limit      int64    `json:"limit"`
 	TotalPages int64    `json:"totalPages"`
 }
 
-// List returns items with pagination
-func (i *Item) List(ctx context.Context, query ItemQuery) (*ItemListResult, error) {
+// List returns documents with pagination
+func (d *Document) List(ctx context.Context, query DocumentQuery) (*DocumentListResult, error) {
 	// Defaults
 	if query.Page <= 0 {
 		query.Page = 1
@@ -63,7 +82,7 @@ func (i *Item) List(ctx context.Context, query ItemQuery) (*ItemListResult, erro
 		query.Sort = bson.M{"_id": 1}
 	}
 
-	coll := i.client.Database(i.database).Collection(i.collection)
+	coll := d.client.Database(d.database).Collection(d.collection)
 
 	// Count total
 	total, err := coll.CountDocuments(ctx, query.Filter)
@@ -78,7 +97,7 @@ func (i *Item) List(ctx context.Context, query ItemQuery) (*ItemListResult, erro
 		totalPages = 1
 	}
 
-	// Find items
+	// Find documents
 	opts := options.Find().
 		SetSkip(skip).
 		SetLimit(query.Limit).
@@ -90,17 +109,17 @@ func (i *Item) List(ctx context.Context, query ItemQuery) (*ItemListResult, erro
 	}
 	defer cursor.Close(ctx)
 
-	var items []bson.M
-	if err := cursor.All(ctx, &items); err != nil {
+	var documents []bson.M
+	if err := cursor.All(ctx, &documents); err != nil {
 		return nil, fmt.Errorf("decode documents: %w", err)
 	}
 
-	if items == nil {
-		items = []bson.M{}
+	if documents == nil {
+		documents = []bson.M{}
 	}
 
-	return &ItemListResult{
-		Items:      items,
+	return &DocumentListResult{
+		Documents: documents,
 		Total:      total,
 		Page:       query.Page,
 		Limit:      query.Limit,
@@ -108,58 +127,58 @@ func (i *Item) List(ctx context.Context, query ItemQuery) (*ItemListResult, erro
 	}, nil
 }
 
-// Get retrieves an item by ID
-func (i *Item) Get(ctx context.Context, id string) (bson.M, error) {
-	coll := i.client.Database(i.database).Collection(i.collection)
+// Get retrieves a document by ID
+func (d *Document) Get(ctx context.Context, id string) (bson.M, error) {
+	coll := d.client.Database(d.database).Collection(d.collection)
 
 	objectID, err := primitive.ObjectIDFromHex(id)
 	if err != nil {
 		// Try querying by string ID (pk/sk composite)
 		result := coll.FindOne(ctx, bson.M{"_id": id})
-		var item bson.M
-		if err := result.Decode(&item); err != nil {
+		var doc bson.M
+		if err := result.Decode(&doc); err != nil {
 			if err == mongo.ErrNoDocuments {
 				return nil, fmt.Errorf("document not found")
 			}
 			return nil, fmt.Errorf("find document: %w", err)
 		}
-		return item, nil
+		return doc, nil
 	}
 
 	result := coll.FindOne(ctx, bson.M{"_id": objectID})
-	var item bson.M
-	if err := result.Decode(&item); err != nil {
+	var doc bson.M
+	if err := result.Decode(&doc); err != nil {
 		if err == mongo.ErrNoDocuments {
 			return nil, fmt.Errorf("document not found")
 		}
 		return nil, fmt.Errorf("find document: %w", err)
 	}
-	return item, nil
+	return doc, nil
 }
 
-// GetByKeys retrieves an item by pk and sk
-func (i *Item) GetByKeys(ctx context.Context, pk, sk string) (bson.M, error) {
-	coll := i.client.Database(i.database).Collection(i.collection)
+// GetByKeys retrieves an item by configured key schema fields.
+func (d *Document) GetByKeys(ctx context.Context, pkField, skField, pkValue, skValue string) (bson.M, error) {
+	coll := d.client.Database(d.database).Collection(d.collection)
 
-	query := bson.M{"pk": pk}
-	if sk != "" {
-		query["sk"] = sk
+	query, err := buildKeyQuery(pkField, skField, pkValue, skValue)
+	if err != nil {
+		return nil, err
 	}
 
 	result := coll.FindOne(ctx, query)
-	var item bson.M
-	if err := result.Decode(&item); err != nil {
+	var doc bson.M
+	if err := result.Decode(&doc); err != nil {
 		if err == mongo.ErrNoDocuments {
 			return nil, fmt.Errorf("document not found")
 		}
 		return nil, fmt.Errorf("find document: %w", err)
 	}
-	return item, nil
+	return doc, nil
 }
 
 // Create inserts a new item
-func (i *Item) Create(ctx context.Context, data bson.M) (bson.M, error) {
-	coll := i.client.Database(i.database).Collection(i.collection)
+func (d *Document) Create(ctx context.Context, data bson.M) (bson.M, error) {
+	coll := d.client.Database(d.database).Collection(d.collection)
 
 	// Set created_at if not present
 	if _, ok := data["created_at"]; !ok {
@@ -181,9 +200,51 @@ func (i *Item) Create(ctx context.Context, data bson.M) (bson.M, error) {
 	return data, nil
 }
 
+// UpdateByKeys updates an existing item by configured key schema fields.
+func (d *Document) UpdateByKeys(ctx context.Context, pkField, skField, pkValue, skValue string, data bson.M) (bson.M, error) {
+	coll := d.client.Database(d.database).Collection(d.collection)
+
+	// Keys are immutable.
+	delete(data, "_id")
+	delete(data, pkField)
+	if skField != "" {
+		delete(data, skField)
+	}
+	data["updated_at"] = time.Now()
+
+	query, err := buildKeyQuery(pkField, skField, pkValue, skValue)
+	if err != nil {
+		return nil, err
+	}
+
+	result, err := coll.UpdateOne(
+		ctx,
+		query,
+		bson.M{"$set": data},
+		options.Update().SetUpsert(false),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("update document: %w", err)
+	}
+
+	if result.MatchedCount == 0 {
+		return nil, fmt.Errorf("document not found")
+	}
+
+	var doc bson.M
+	if err := coll.FindOne(ctx, query).Decode(&doc); err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, fmt.Errorf("document not found")
+		}
+		return nil, fmt.Errorf("find document: %w", err)
+	}
+
+	return doc, nil
+}
+
 // Update updates an existing item by ID
-func (i *Item) Update(ctx context.Context, id string, data bson.M) (bson.M, error) {
-	coll := i.client.Database(i.database).Collection(i.collection)
+func (d *Document) Update(ctx context.Context, id string, data bson.M) (bson.M, error) {
+	coll := d.client.Database(d.database).Collection(d.collection)
 
 	// Set updated_at
 	data["updated_at"] = time.Now()
@@ -217,8 +278,8 @@ func (i *Item) Update(ctx context.Context, id string, data bson.M) (bson.M, erro
 }
 
 // Delete removes an item by ID
-func (i *Item) Delete(ctx context.Context, id string) error {
-	coll := i.client.Database(i.database).Collection(i.collection)
+func (d *Document) Delete(ctx context.Context, id string) error {
+	coll := d.client.Database(d.database).Collection(d.collection)
 
 	// Try to parse as ObjectID first, otherwise use string ID
 	var idQuery interface{} = id
@@ -237,13 +298,13 @@ func (i *Item) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-// DeleteByKeys removes an item by pk and sk
-func (i *Item) DeleteByKeys(ctx context.Context, pk, sk string) error {
-	coll := i.client.Database(i.database).Collection(i.collection)
+// DeleteByKeys removes an item by configured key schema fields.
+func (d *Document) DeleteByKeys(ctx context.Context, pkField, skField, pkValue, skValue string) error {
+	coll := d.client.Database(d.database).Collection(d.collection)
 
-	query := bson.M{"pk": pk}
-	if sk != "" {
-		query["sk"] = sk
+	query, err := buildKeyQuery(pkField, skField, pkValue, skValue)
+	if err != nil {
+		return err
 	}
 
 	result, err := coll.DeleteOne(ctx, query)

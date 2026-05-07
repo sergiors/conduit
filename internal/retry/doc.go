@@ -7,7 +7,7 @@
 //
 // Key Features:
 //   - Configurable retry interval (default: 5s)
-//   - Per-table retry queues
+//   - Per-collection retry queues
 //   - DLQ monitoring support
 //
 // Usage:

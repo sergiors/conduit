@@ -12,14 +12,14 @@ import (
 	"github.com/sergiors/conduit/internal/mongo"
 	"github.com/sergiors/conduit/internal/redis"
 	"github.com/sergiors/conduit/internal/retry"
-	"github.com/sergiors/conduit/internal/tables"
+	"github.com/sergiors/conduit/internal/collections"
 	"github.com/sergiors/conduit/internal/watcher"
 )
 
 type Worker struct {
 	mongoClient    *mongo.Client
 	redisClient    *redis.Client
-	tableStore     *tables.Store
+	collectionStore     *collections.Store
 	dispatcher     *dispatch.Dispatcher
 	watcherManager *watcher.Manager
 	retryProcessor *retry.Processor
@@ -59,8 +59,8 @@ func NewWorker() (*Worker, error) {
 		return nil, err
 	}
 
-	// Initialize table store
-	store := tables.NewStore(mongoClient.Client, mongoDatabase)
+	// Initialize collection store
+	store := collections.NewStore(mongoClient.Client, mongoDatabase)
 
 	// Initialize dispatcher
 	dispatcher := dispatch.NewDispatcher()
@@ -88,7 +88,7 @@ func NewWorker() (*Worker, error) {
 	return &Worker{
 		mongoClient:    mongoClient,
 		redisClient:    redisClient,
-		tableStore:     store,
+		collectionStore:     store,
 		dispatcher:     dispatcher,
 		watcherManager: watcherManager,
 		retryProcessor: retryProcessor,

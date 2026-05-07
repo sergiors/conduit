@@ -1,4 +1,4 @@
-package tables
+package collections
 
 import (
 	"testing"

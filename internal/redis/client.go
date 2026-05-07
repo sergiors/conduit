@@ -74,16 +74,16 @@ func (c *Client) Close() error {
 }
 
 // Key helpers
-func (c *Client) resumeTokenKey(tableName string) string {
-	return "cdc:resume:" + tableName
+func (c *Client) resumeTokenKey(collectionName string) string {
+	return "cdc:resume:" + collectionName
 }
 
-func (c *Client) retryQueueKey(tableName string) string {
-	return "cdc:retry:" + tableName
+func (c *Client) retryQueueKey(collectionName string) string {
+	return "cdc:retry:" + collectionName
 }
 
-func (c *Client) dlqKey(tableName string) string {
-	return "cdc:dlq:" + tableName
+func (c *Client) dlqKey(collectionName string) string {
+	return "cdc:dlq:" + collectionName
 }
 
 func (c *Client) processedKey(id string) string {
@@ -91,9 +91,9 @@ func (c *Client) processedKey(id string) string {
 }
 
 // ResumeToken operations
-// GetResumeToken retrieves the resume token for a table
-func (c *Client) GetResumeToken(ctx context.Context, tableName string) (string, error) {
-	key := c.resumeTokenKey(tableName)
+// GetResumeToken retrieves the resume token for a collection
+func (c *Client) GetResumeToken(ctx context.Context, collectionName string) (string, error) {
+	key := c.resumeTokenKey(collectionName)
 	token, err := c.client.Get(ctx, key).Result()
 	if err == redis.Nil {
 		return "", nil // No token exists
@@ -104,16 +104,16 @@ func (c *Client) GetResumeToken(ctx context.Context, tableName string) (string, 
 	return token, nil
 }
 
-// SetResumeToken sets the resume token for a table
+// SetResumeToken sets the resume token for a collection
 // Only call this after successful event processing
-func (c *Client) SetResumeToken(ctx context.Context, tableName, token string) error {
-	key := c.resumeTokenKey(tableName)
+func (c *Client) SetResumeToken(ctx context.Context, collectionName, token string) error {
+	key := c.resumeTokenKey(collectionName)
 	return c.client.Set(ctx, key, token, 0).Err()
 }
 
-// DeleteResumeToken removes the resume token for a table
-func (c *Client) DeleteResumeToken(ctx context.Context, tableName string) error {
-	key := c.resumeTokenKey(tableName)
+// DeleteResumeToken removes the resume token for a collection
+func (c *Client) DeleteResumeToken(ctx context.Context, collectionName string) error {
+	key := c.resumeTokenKey(collectionName)
 	return c.client.Del(ctx, key).Err()
 }
 
@@ -137,18 +137,18 @@ func (c *Client) MarkProcessed(ctx context.Context, id string, ttl time.Duration
 // RetryQueue operations
 // RetryEvent adds an event to the retry queue with retry count
 type RetryEvent struct {
-	ID          string          `json:"id"`
-	TableName   string          `json:"tableName"`
-	EventData   json.RawMessage `json:"eventData"` // Raw JSON of the stream record
-	RetryCount  int             `json:"retryCount"`
-	MaxRetries  int             `json:"maxRetries"`
-	NextRetryAt time.Time       `json:"nextRetryAt"`
-}
+	ID               string          `json:"id"`
+	CollectionName   string          `json:"collectionName"`
+	EventData        json.RawMessage `json:"eventData"` // Raw JSON of the stream record
+	RetryCount       int             `json:"retryCount"`
+	MaxRetries       int             `json:"maxRetries"`
+	NextRetryAt      time.Time       `json:"nextRetryAt"`
+} 
 
 // EnqueueRetry adds an event to the retry queue with exponential backoff
 // The event JSON is stored directly as the member in the sorted set
 func (c *Client) EnqueueRetry(ctx context.Context, event RetryEvent) error {
-	key := c.retryQueueKey(event.TableName)
+	key := c.retryQueueKey(event.CollectionName)
 
 	data, err := json.Marshal(event)
 	if err != nil {
@@ -165,8 +165,8 @@ func (c *Client) EnqueueRetry(ctx context.Context, event RetryEvent) error {
 
 // DequeueRetry gets events ready for retry (nextRetryAt <= now)
 // Events are NOT removed from queue - caller must remove after processing
-func (c *Client) DequeueRetry(ctx context.Context, tableName string, limit int64) ([]RetryEvent, error) {
-	key := c.retryQueueKey(tableName)
+func (c *Client) DequeueRetry(ctx context.Context, collectionName string, limit int64) ([]RetryEvent, error) {
+	key := c.retryQueueKey(collectionName)
 	now := time.Now().UnixNano()
 
 	// Get events with score <= now
@@ -192,8 +192,8 @@ func (c *Client) DequeueRetry(ctx context.Context, tableName string, limit int64
 }
 
 // RemoveRetryEvent removes a processed event from the retry queue
-func (c *Client) RemoveRetryEvent(ctx context.Context, tableName string, event RetryEvent) error {
-	key := c.retryQueueKey(tableName)
+func (c *Client) RemoveRetryEvent(ctx context.Context, collectionName string, event RetryEvent) error {
+	key := c.retryQueueKey(collectionName)
 	data, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("marshal retry event: %w", err)
@@ -203,8 +203,8 @@ func (c *Client) RemoveRetryEvent(ctx context.Context, tableName string, event R
 
 // DLQ operations
 // SendToDLQ adds an event to the dead letter queue
-func (c *Client) SendToDLQ(ctx context.Context, tableName string, event interface{}) error {
-	key := c.dlqKey(tableName)
+func (c *Client) SendToDLQ(ctx context.Context, collectionName string, event interface{}) error {
+	key := c.dlqKey(collectionName)
 	data, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("marshal DLQ event: %w", err)
@@ -215,15 +215,15 @@ func (c *Client) SendToDLQ(ctx context.Context, tableName string, event interfac
 }
 
 // GetDLQLength returns the number of events in the DLQ
-func (c *Client) GetDLQLength(ctx context.Context, tableName string) (int64, error) {
-	key := c.dlqKey(tableName)
+func (c *Client) GetDLQLength(ctx context.Context, collectionName string) (int64, error) {
+	key := c.dlqKey(collectionName)
 	return c.client.LLen(ctx, key).Result()
 }
 
 // Monitor operations
 // GetRetryQueueLength returns the number of events in the retry queue
-func (c *Client) GetRetryQueueLength(ctx context.Context, tableName string) (int64, error) {
-	key := c.retryQueueKey(tableName)
+func (c *Client) GetRetryQueueLength(ctx context.Context, collectionName string) (int64, error) {
+	key := c.retryQueueKey(collectionName)
 	return c.client.ZCard(ctx, key).Result()
 }
 
@@ -233,14 +233,14 @@ func (c *Client) Ping(ctx context.Context) error {
 }
 
 // Pub/Sub operations
-// PublishConfigChange publishes a table change notification
-// payload can be tableName or tableID - receiver decides how to interpret
-func (c *Client) PublishConfigChange(ctx context.Context, tableName string) error {
+// PublishConfigChange publishes a collection change notification
+// payload can be collectionName or collectionID - receiver decides how to interpret
+func (c *Client) PublishConfigChange(ctx context.Context, collectionName string) error {
 	channel := "cdc:config-change"
-	return c.client.Publish(ctx, channel, tableName).Err()
+	return c.client.Publish(ctx, channel, collectionName).Err()
 }
 
-// SubscribeConfigChanges subscribes to table change notifications
+// SubscribeConfigChanges subscribes to collection change notifications
 func (c *Client) SubscribeConfigChanges(ctx context.Context) (*redis.PubSub, error) {
 	channel := "cdc:config-change"
 	pubsub := c.client.Subscribe(ctx, channel)

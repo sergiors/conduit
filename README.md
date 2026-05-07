@@ -12,7 +12,12 @@ MongoDB Change Data Capture (CDC) control plane + data plane system built in Go.
 
 ## 📋 Overview
 
-Conduit manages MongoDB collections ("tables") and enables CDC (Change Data Capture) to external systems like HTTP endpoints, AWS EventBridge, or Meilisearch. The design follows **DynamoDB concepts** and naming conventions.
+Conduit manages MongoDB collections and enables CDC (Change Data Capture) to external systems like HTTP endpoints, AWS EventBridge, or Meilisearch.
+
+The project supports two operation modes:
+
+- **DynamoDB-compatible mode**: collection defines `primary_key` and optional `sort_key`
+- **MongoDB-native mode**: collection defines no key schema and uses default MongoDB behavior (`_id`)
 
 ```
 ┌─────────────────┐     ┌──────────────┐     ┌─────────────────┐
@@ -31,8 +36,9 @@ Conduit manages MongoDB collections ("tables") and enables CDC (Change Data Capt
 
 ## ✨ Features
 
-- **DynamoDB-aligned Design**: PK/SK patterns, stream records, TTL fields
-- **Per-table Streaming**: Enable/disable CDC per table configuration
+- **Dual Compatibility**: DynamoDB-compatible key schema or pure MongoDB mode
+- **DynamoDB-aligned Design**: logical key semantics, stream records, TTL fields
+- **Per-collection Streaming**: Enable/disable CDC per collection configuration
 - **Watcher Manager**: Centralized lifecycle management with no goroutine leaks
 - **Resume Tokens**: Per-table resume positions stored in Redis
 - **Idempotency**: Duplicate event prevention with TTL-based keys
@@ -46,14 +52,14 @@ Conduit manages MongoDB collections ("tables") and enables CDC (Change Data Capt
 
 | Component           | Package             | Description                                |
 | ------------------- | ------------------- | ------------------------------------------ |
-| **API**             | `cmd/api`           | REST control plane for table management    |
+| **API**             | `cmd/api`           | REST control plane for collection management    |
 | **Worker**          | `cmd/worker`        | CDC data plane with watchers               |
 | **Watcher Manager** | `internal/watcher`  | Centralized watcher lifecycle + Pub/Sub    |
 | **Dispatcher**      | `internal/dispatch` | Event routing to destinations              |
 | **Retry Processor** | `internal/retry`    | Backoff and DLQ handling                   |
 | **Redis Client**    | `internal/redis`    | State store + Pub/Sub operations           |
 | **Mongo Client**    | `internal/mongo`    | Database + change streams + replica set    |
-| **Tables Store**    | `internal/tables`   | Configuration management (`config.tables`) |
+| **Collections Store**    | `internal/tables`   | Configuration management (`config.collections`) |
 
 ### Redis Key Structure
 
@@ -178,13 +184,13 @@ make run-worker
 
 The API will automatically initialize the MongoDB replica set on first start.
 
-### 5. Create Your First Table
+### 5. Create Your First Collection
 
 ```bash
-curl -X POST http://localhost:8080/api/tables \
+curl -X POST http://localhost:8080/api/collections \
   -H "Content-Type: application/json" \
   -d '{
-    "table_name": "users",
+    "collection_name": "users",
     "stream_enabled": true,
     "old_image": true,
     "ttl_attribute": "expiresAt",
@@ -201,21 +207,23 @@ curl -X POST http://localhost:8080/api/tables \
 
 ## 📖 API Reference
 
-### Tables
+### Collections
 
 | Method   | Endpoint            | Description     |
 | -------- | ------------------- | --------------- |
-| `GET`    | `/api/tables`       | List all tables |
-| `POST`   | `/api/tables`       | Create table    |
-| `PUT`    | `/api/tables/:name` | Update table    |
-| `DELETE` | `/api/tables/:name` | Delete table    |
+| `GET`    | `/api/collections`       | List all collections |
+| `POST`   | `/api/collections`       | Create collection    |
+| `PUT`    | `/api/collections/:name` | Update collection    |
+| `DELETE` | `/api/collections/:name` | Delete collection    |
 | `GET`    | `/health`           | Health check    |
 
-### Table Schema
+### Collection Schema
 
 ```json
 {
-  "table_name": "users",
+  "collection_name": "users",
+  "primary_key": "id",
+  "sort_key": "email",
   "stream_enabled": true,
   "old_image": true,
   "ttl_attribute": "expiresAt",
@@ -230,16 +238,24 @@ curl -X POST http://localhost:8080/api/tables \
 }
 ```
 
-**Table Configuration:**
+**Collection Configuration:**
 
 | Field                 | Type   | Default | Description                                 |
 | --------------------- | ------ | ------- | ------------------------------------------- |
-| `table_name`          | string | -       | Name of the MongoDB collection              |
-| `stream_enabled`      | bool   | false   | Enable CDC streaming for this table         |
+| `collection_name`          | string | -       | Name of the MongoDB collection              |
+| `primary_key`         | string | -       | Optional partition key field name           |
+| `sort_key`            | string | -       | Optional sort key field name                |
+| `stream_enabled`      | bool   | false   | Enable CDC streaming for this collection         |
 | `old_image`           | bool   | false   | Include old document state in change events |
 | `ttl_attribute`       | string | -       | Field name for TTL expiration               |
 | `deletion_protection` | bool   | true    | Prevent accidental deletion (default: true) |
 | `destinations`        | array  | []      | List of event destinations                  |
+
+Key schema rules:
+
+- If `sort_key` is defined, `primary_key` is required
+- `primary_key` and `sort_key` can use any user-defined field names
+- If both are omitted, collection runs in MongoDB-native mode
 
 **Destination Configuration:**
 
@@ -270,7 +286,7 @@ curl -X POST http://localhost:8080/api/tables \
 | -------------- | ------ | -------- | ----------------------------------------------- |
 | `endpoint`     | string | Yes      | Meilisearch host (e.g. `http://localhost:7700`) |
 | `bearer_token` | string | No       | Meilisearch API key                             |
-| `index_name`   | string | No       | Target index (default: `table_name`)            |
+| `index_name`   | string | No       | Target index (default: `collection_name`)            |
 
 **HTTP Request:**
 
@@ -280,13 +296,13 @@ curl -X POST http://localhost:8080/api/tables \
 
 ### Example Requests
 
-**Create table with streaming (HTTP destination):**
+**Create collection with streaming (HTTP destination):**
 
 ```bash
-curl -X POST http://localhost:8080/api/tables \
+curl -X POST http://localhost:8080/api/collections \
   -H "Content-Type: application/json" \
   -d '{
-    "table_name": "orders",
+    "collection_name": "orders",
     "stream_enabled": true,
     "old_image": true,
     "ttl_attribute": "expiresAt",
@@ -301,13 +317,13 @@ curl -X POST http://localhost:8080/api/tables \
   }'
 ```
 
-**Create table with bearer token authentication:**
+**Create collection with bearer token authentication:**
 
 ```bash
-curl -X POST http://localhost:8080/api/tables \
+curl -X POST http://localhost:8080/api/collections \
   -H "Content-Type: application/json" \
   -d '{
-    "table_name": "orders",
+    "collection_name": "orders",
     "stream_enabled": true,
     "old_image": true,
     "ttl_attribute": "expiresAt",
@@ -323,13 +339,13 @@ curl -X POST http://localhost:8080/api/tables \
   }'
 ```
 
-**Create table with multiple destinations:**
+**Create collection with multiple destinations:**
 
 ```bash
-curl -X POST http://localhost:8080/api/tables \
+curl -X POST http://localhost:8080/api/collections \
   -H "Content-Type: application/json" \
   -d '{
-    "table_name": "orders",
+    "collection_name": "orders",
     "stream_enabled": true,
     "old_image": true,
     "ttl_attribute": "expiresAt",
@@ -349,13 +365,13 @@ curl -X POST http://localhost:8080/api/tables \
   }'
 ```
 
-**Update table:**
+**Update collection:**
 
 ```bash
-curl -X PUT http://localhost:8080/api/tables/orders \
+curl -X PUT http://localhost:8080/api/collections/orders \
   -H "Content-Type: application/json" \
   -d '{
-    "table_name": "orders",
+    "collection_name": "orders",
     "stream_enabled": true,
     "old_image": false,
     "ttl_attribute": "expiresAt",
@@ -370,14 +386,14 @@ curl -X PUT http://localhost:8080/api/tables/orders \
   }'
 ```
 
-**Disable deletion protection and delete table:**
+**Disable deletion protection and delete collection:**
 
 ```bash
 # First, disable deletion protection
-curl -X PUT http://localhost:8080/api/tables/orders \
+curl -X PUT http://localhost:8080/api/collections/orders \
   -H "Content-Type: application/json" \
   -d '{
-    "table_name": "orders",
+    "collection_name": "orders",
     "stream_enabled": true,
     "deletion_protection": false,
     "destinations": [
@@ -389,21 +405,21 @@ curl -X PUT http://localhost:8080/api/tables/orders \
     ]
   }'
 
-# Then delete the table
-curl -X DELETE "http://localhost:8080/api/tables/orders"
+# Then delete the collection
+curl -X DELETE "http://localhost:8080/api/collections/orders"
 ```
 
-**Delete table with protection enabled (fails):**
+**Delete collection with protection enabled (fails):**
 
 ```bash
-curl -X DELETE "http://localhost:8080/api/tables/orders"
-# Returns: 403 Forbidden - "Deletion protection is enabled. Disable it before deleting the table."
+curl -X DELETE "http://localhost:8080/api/collections/orders"
+# Returns: 403 Forbidden - "Deletion protection is enabled. Disable it before deleting the collection."
 ```
 
-**List tables:**
+**List collections:**
 
 ```bash
-curl http://localhost:8080/api/tables | jq .
+curl http://localhost:8080/api/collections | jq .
 ```
 
 ## ⚙️ Configuration
@@ -441,7 +457,16 @@ If a required variable is not set, the application will exit with a fatal error:
 FATAL: Required environment variable MONGODB_URI is not set
 ```
 
-### DynamoDB Naming Conventions
+### DynamoDB Compatibility and MongoDB Mode
+
+Conduit uses DynamoDB terminology internally, but physical key field names are user-defined.
+
+Modes:
+
+- DynamoDB-compatible mode: configure `primary_key` and optional `sort_key`
+- MongoDB-native mode: no key schema, use default MongoDB `_id` workflows
+
+Default DynamoDB-aligned names (optional):
 
 | Concept     | Field Name  |
 | ----------- | ----------- |
@@ -454,30 +479,50 @@ FATAL: Required environment variable MONGODB_URI is not set
 | New Image   | `newImage`  |
 | Old Image   | `oldImage`  |
 
-### Key Format Example
+### Key Schema Examples
+
+DynamoDB-compatible mode:
 
 ```json
 {
-  "pk": "USER#1",
-  "sk": "EMAIL#test@gmail.com"
+  "collection_name": "users",
+  "primary_key": "id",
+  "sort_key": "email"
+}
+```
+
+Item example:
+
+```json
+{
+  "id": "USER#1",
+  "email": "EMAIL#test@gmail.com"
+}
+```
+
+MongoDB-native mode:
+
+```json
+{
+  "collection_name": "logs"
 }
 ```
 
 ## 🔄 Stream Activation Rules
 
-Streaming is **explicitly enabled per table**:
+Streaming is **explicitly enabled per collection**:
 
 | `stream_enabled` | Worker Behavior                      |
 | ---------------- | ------------------------------------ |
-| `false`          | ❌ No watcher created, table ignored |
+| `false`          | ❌ No watcher created, collection ignored |
 | `true`           | ✅ Watcher created, events processed |
 
 ### Watcher Lifecycle
 
-1. **Initial Load**: Fetch all `stream_enabled=true` tables from `config.tables`
-2. **Start Watchers**: One watcher per enabled table
+1. **Initial Load**: Fetch all `stream_enabled=true` collections from `config.collections`
+2. **Start Watchers**: One watcher per enabled collection
 3. **Sync Loop**:
-   - Polling: Diff with `config.tables` every 15min (fallback)
+   - Polling: Diff with `config.collections` every 15min (fallback)
    - **Push notifications**: Immediate sync via Redis Pub/Sub when tables change
 4. **Resume Tokens**: Updated after each successful batch
 5. **Graceful Stop**: Context cancellation, no data loss
@@ -572,10 +617,10 @@ conduit/
 │   ├── redis/            # Redis client wrapper
 │   ├── retry/            # Retry processor with backoff
 │   ├── streams/          # Change stream watcher
-│   ├── tables/           # Table configuration store
+│   ├── tables/           # Collection configuration store
 │   └── watcher/          # Watcher manager + lifecycle
 ├── examples/
-│   ├── create_table.sh   # Example: Create table
+│   ├── create_table.sh   # Example: Create collection
 │   └── monitor_queues.sh # Example: Monitor queues
 ├── compose.yaml          # Docker Compose config
 ├── Makefile
@@ -590,8 +635,8 @@ conduit/
 ### Key Metrics
 
 - Active watchers count
-- Retry queue length per table
-- DLQ length per table
+- Retry queue length per collection
+- DLQ length per collection
 - Events processed per second
 - Last error time per watcher
 
@@ -606,7 +651,7 @@ redis-cli KEYS "cdc:retry:*"
 redis-cli KEYS "cdc:dlq:*"
 ```
 
-**Note:** Events are sent to HTTP endpoints configured per table. Monitor your HTTP service logs for incoming events.
+**Note:** Events are sent to HTTP endpoints configured per collection. Monitor your HTTP service logs for incoming events.
 
 ## 🔒 Critical Guarantees
 
@@ -615,7 +660,7 @@ redis-cli KEYS "cdc:dlq:*"
 | **No event loss**      | Retry queue + DLQ              |
 | **No duplicates**      | Idempotency keys (24h TTL)     |
 | **No goroutine leaks** | Proper watcher lifecycle       |
-| **Per-table resume**   | Individual tokens in Redis     |
+| **Per-collection resume**   | Individual tokens in Redis     |
 | **Graceful shutdown**  | Context cancellation + timeout |
 
 ## 🚨 Troubleshooting
@@ -634,9 +679,9 @@ export MONGODB_DATABASE=conduit
 export REDIS_URI=redis://localhost:6379
 ```
 
-### Worker Not Detecting New Tables Immediately
+### Worker Not Detecting New Collections Immediately
 
-New tables should be detected within ~1 second via Redis Pub/Sub. If not:
+New collections should be detected within ~1 second via Redis Pub/Sub. If not:
 
 1. Check Redis is running: `redis-cli ping` → should return `PONG`
 2. Check worker logs for Pub/Sub subscription: `docker logs conduit-mongodb-worker-1 | grep "config-change"`
@@ -681,7 +726,7 @@ redis-cli -h localhost -p 6379 ping
 
 ### Watcher Not Starting
 
-1. Verify `stream_enabled: true` in table config
+1. Verify `stream_enabled: true` in collection config
 2. Check MongoDB connection
 3. Check Redis connection
 4. Review worker logs for errors

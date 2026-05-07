@@ -8,9 +8,9 @@
 //
 // Key Naming Conventions:
 //
-//	cdc:resume:<tableName>        - Resume token for a table
-//	cdc:retry:<tableName>         - Retry queue (sorted set by nextRetryAt)
-//	cdc:dlq:<tableName>           - Dead letter queue (list)
+//	cdc:resume:<collectionName>        - Resume token for a table
+//	cdc:retry:<collectionName>         - Retry queue (sorted set by nextRetryAt)
+//	cdc:dlq:<collectionName>           - Dead letter queue (list)
 //	cdc:processed:<table>:<type>:<ts> - Idempotency key (TTL: 24h)
 //
 // Usage:

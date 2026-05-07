@@ -12,16 +12,16 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"go.mongodb.org/mongo-driver/bson"
 	"github.com/sergiors/conduit/internal/mongo"
 	"github.com/sergiors/conduit/internal/redis"
-	"github.com/sergiors/conduit/internal/tables"
+	"github.com/sergiors/conduit/internal/collections"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
 type Server struct {
-	tableStore   *tables.Store
-	mongoClient  *mongo.Client
-	redisClient  *redis.Client
+	collectionStore  *collections.Store
+	mongoClient *mongo.Client
+	redisClient *redis.Client
 }
 
 func NewServer() (*Server, error) {
@@ -42,7 +42,7 @@ func NewServer() (*Server, error) {
 		return nil, err
 	}
 
-	store := tables.NewStore(client.Client, database)
+	store := collections.NewStore(client.Client, database)
 	if err := store.CreateIndex(ctx); err != nil {
 		return nil, err
 	}
@@ -57,7 +57,7 @@ func NewServer() (*Server, error) {
 	}
 
 	return &Server{
-		tableStore:  store,
+		collectionStore:  store,
 		mongoClient: client,
 		redisClient: redisClient,
 	}, nil
@@ -82,19 +82,18 @@ func main() {
 	router.Use(gin.Recovery())
 	router.Use(gin.Logger())
 
-	// Table configuration (control plane)
-	router.GET("/api/tables", server.listTables)
-	router.POST("/api/tables", server.createTable)
-	router.GET("/api/tables/:name", server.getTable)
-	router.PUT("/api/tables/:name", server.updateTable)
-	router.DELETE("/api/tables/:name", server.deleteTable)
+	// Collection configuration (control plane)
+	router.GET("/api/collections", server.listCollections)
+	router.POST("/api/collections", server.createCollection)
+	router.GET("/api/collections/:name", server.getCollection)
+	router.PUT("/api/collections/:name", server.updateCollection)
+	router.DELETE("/api/collections/:name", server.deleteCollection)
 
-	// Table items CRUD (data plane)
-	router.GET("/api/tables/:name/items", server.listItems)
-	router.GET("/api/tables/:name/items", server.getItem)
-	router.POST("/api/tables/:name/items", server.createItem)
-	router.PUT("/api/tables/:name/items", server.updateItem)
-	router.DELETE("/api/tables/:name/items", server.deleteItem)
+	// Collection documents CRUD (data plane)
+	router.GET("/api/collections/:name/documents", server.listDocuments)
+	router.POST("/api/collections/:name/documents", server.createDocument)
+	router.PUT("/api/collections/:name/documents", server.updateDocument)
+	router.DELETE("/api/collections/:name/documents", server.deleteDocument)
 
 	router.GET("/health", server.handleHealth)
 
@@ -105,50 +104,59 @@ func main() {
 	}
 }
 
-func (s *Server) listTables(c *gin.Context) {
+func (s *Server) listCollections(c *gin.Context) {
 	ctx := c.Request.Context()
-	tableList, err := s.tableStore.List(ctx)
+	collectionList, err := s.collectionStore.List(ctx)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	if tableList == nil {
-		tableList = []tables.Table{}
+	if collectionList == nil {
+		collectionList = []collections.Collection{}
 	}
 
-	c.JSON(http.StatusOK, tableList)
+	c.JSON(http.StatusOK, collectionList)
 }
 
-func (s *Server) getTable(c *gin.Context) {
+func (s *Server) getCollection(c *gin.Context) {
 	ctx := c.Request.Context()
 	name := c.Param("name")
 
-	table, err := s.tableStore.Get(ctx, name)
+	collection, err := s.collectionStore.Get(ctx, name)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Table not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "Collection not found"})
 		return
 	}
 
-	c.JSON(http.StatusOK, table)
+	c.JSON(http.StatusOK, collection)
 }
 
-func (s *Server) createTable(c *gin.Context) {
+func (s *Server) createCollection(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	var table tables.Table
-	if err := c.ShouldBindJSON(&table); err != nil {
+	var collection collections.Collection
+	if err := c.ShouldBindJSON(&collection); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
 		return
 	}
-
-	if table.TableName == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Table name is required"})
+	collectionName := collection.CollectionName
+	if collectionName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Collection name is required"})
+		return
+	}
+	collection.CollectionName = collectionName
+	if collection.SortKey != "" && collection.PrimaryKey == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "primary_key is required when sort_key is defined"})
+		return
+	}
+	if collection.PrimaryKey != "" && collection.PrimaryKey == collection.SortKey {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "sort_key cannot be the same as primary_key"})
 		return
 	}
 
 	// Validate destinations
-	for i, dest := range table.Destinations {
+	for i, dest := range collection.Destinations {
 		if dest.Endpoint == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("destination[%d]: endpoint is required", i)})
 			return
@@ -164,51 +172,60 @@ func (s *Server) createTable(c *gin.Context) {
 	}
 
 	// Deletion protection is mandatory on create
-	table.DeletionProtection = true
+	collection.DeletionProtection = true
 
-	if err := s.tableStore.Create(ctx, &table); err != nil {
+	if err := s.collectionStore.Create(ctx, &collection); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	// Apply TTL index if configured
-	if table.TTLAttribute != "" {
-		if err := s.mongoClient.CreateTTLIndex(ctx, table.TableName, table.TTLAttribute); err != nil {
-			log.Printf("Failed to create TTL index for %s: %v", table.TableName, err)
+	if collection.TTLAttribute != "" {
+		if err := s.mongoClient.CreateTTLIndex(ctx, collectionName, collection.TTLAttribute); err != nil {
+			log.Printf("Failed to create TTL index for %s: %v", collectionName, err)
 		}
 	}
 
 	// Notify worker of config change
-	if err := s.redisClient.PublishConfigChange(ctx, table.TableName); err != nil {
+	if err := s.redisClient.PublishConfigChange(ctx, collectionName); err != nil {
 		log.Printf("Failed to publish config change: %v", err)
 	}
 
-	c.JSON(http.StatusCreated, table)
+	c.JSON(http.StatusCreated, collection)
 }
 
-func (s *Server) updateTable(c *gin.Context) {
+func (s *Server) updateCollection(c *gin.Context) {
 	ctx := c.Request.Context()
 	name := c.Param("name")
 
-	var table tables.Table
-	if err := c.ShouldBindJSON(&table); err != nil {
+	var collection collections.Collection
+	if err := c.ShouldBindJSON(&collection); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
 		return
 	}
-
-	if table.TableName == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Table name is required"})
+	collectionName := collection.CollectionName
+	if collectionName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Collection name is required"})
 		return
 	}
+	collection.CollectionName = collectionName
 
-	// Table name in path must match body
-	if table.TableName != name {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Table name in path must match body"})
+	// Collection name in path must match body
+	if collectionName != name {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Collection name in path must match body"})
+		return
+	}
+	if collection.SortKey != "" && collection.PrimaryKey == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "primary_key is required when sort_key is defined"})
+		return
+	}
+	if collection.PrimaryKey != "" && collection.PrimaryKey == collection.SortKey {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "sort_key cannot be the same as primary_key"})
 		return
 	}
 
 	// Validate destinations
-	for i, dest := range table.Destinations {
+	for i, dest := range collection.Destinations {
 		if dest.Endpoint == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("destination[%d]: endpoint is required", i)})
 			return
@@ -223,9 +240,9 @@ func (s *Server) updateTable(c *gin.Context) {
 		}
 	}
 
-	if err := s.tableStore.Update(ctx, &table); err != nil {
-		if err.Error() == "table not found" {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Table not found"})
+	if err := s.collectionStore.Update(ctx, &collection); err != nil {
+		if err.Error() == "collection not found" {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Collection not found"})
 			return
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -233,44 +250,44 @@ func (s *Server) updateTable(c *gin.Context) {
 	}
 
 	// Apply TTL index if configured (create or update)
-	if table.TTLAttribute != "" {
-		if err := s.mongoClient.CreateTTLIndex(ctx, table.TableName, table.TTLAttribute); err != nil {
-			log.Printf("Failed to create/update TTL index for %s: %v", table.TableName, err)
+	if collection.TTLAttribute != "" {
+		if err := s.mongoClient.CreateTTLIndex(ctx, collectionName, collection.TTLAttribute); err != nil {
+			log.Printf("Failed to create/update TTL index for %s: %v", collectionName, err)
 		}
 	}
 
 	// Notify worker of config change
-	if err := s.redisClient.PublishConfigChange(ctx, table.TableName); err != nil {
+	if err := s.redisClient.PublishConfigChange(ctx, collectionName); err != nil {
 		log.Printf("Failed to publish config change: %v", err)
 	}
 
-	c.JSON(http.StatusOK, table)
+	c.JSON(http.StatusOK, collection)
 }
 
-func (s *Server) deleteTable(c *gin.Context) {
+func (s *Server) deleteCollection(c *gin.Context) {
 	ctx := c.Request.Context()
 	name := c.Param("name")
 
-	// Get table to check deletion protection and get table name for notification
-	table, err := s.tableStore.Get(ctx, name)
+	// Get collection to check deletion protection and get collection name for notification
+	collection, err := s.collectionStore.Get(ctx, name)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Table not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "Collection not found"})
 		return
 	}
 
 	// Check deletion protection
-	if table.DeletionProtection {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Deletion protection is enabled. Disable it before deleting the table."})
+	if collection.DeletionProtection {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Deletion protection is enabled. Disable it before deleting the collection."})
 		return
 	}
 
-	if err := s.tableStore.Delete(ctx, name); err != nil {
+	if err := s.collectionStore.Delete(ctx, name); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	// Notify worker of config change
-	if err := s.redisClient.PublishConfigChange(ctx, table.TableName); err != nil {
+	if err := s.redisClient.PublishConfigChange(ctx, collection.CollectionName); err != nil {
 		log.Printf("Failed to publish config change: %v", err)
 	}
 
@@ -281,11 +298,60 @@ func (s *Server) handleHealth(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
-// Item handlers (data plane CRUD)
+// Document handlers (data plane CRUD)
 
-func (s *Server) listItems(c *gin.Context) {
+func (s *Server) listDocuments(c *gin.Context) {
 	ctx := c.Request.Context()
-	tableName := c.Param("name")
+	collectionName := c.Param("name")
+
+	collectionConfig, err := s.collectionStore.Get(ctx, collectionName)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Collection not found"})
+		return
+	}
+	pk, sk := resolveKeyQueryValues(c, collectionConfig)
+	id := c.Query("id")
+
+	if sk != "" && pk == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "pk query param is required when sk is provided"})
+		return
+	}
+
+	// DynamoDB-style single document lookup when key params are provided.
+	if pk != "" || id != "" {
+		store := collections.NewDocument(s.mongoClient.Client, s.mongoClient.Database(), collectionName)
+
+		var (
+			doc  bson.M
+			opErr error
+		)
+
+		if pk != "" {
+			if collectionConfig.PrimaryKey == "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "this collection has no primary_key configured; use id for MongoDB _id lookup"})
+				return
+			}
+			if collectionConfig.SortKey != "" && sk == "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "sk query param is required for this collection"})
+				return
+			}
+			doc, opErr = store.GetByKeys(ctx, collectionConfig.PrimaryKey, collectionConfig.SortKey, pk, sk)
+		} else {
+			doc, opErr = store.Get(ctx, id)
+		}
+
+		if opErr != nil {
+			if opErr.Error() == "document not found" || strings.Contains(opErr.Error(), "not found") {
+				c.JSON(http.StatusNotFound, gin.H{"error": "Document not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": opErr.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, doc)
+		return
+	}
 
 	// Parse query params
 	page := int64(1)
@@ -320,9 +386,9 @@ func (s *Server) listItems(c *gin.Context) {
 		}
 	}
 
-	store := tables.NewItem(s.mongoClient.Client, s.mongoClient.Database(), tableName)
+	store := collections.NewDocument(s.mongoClient.Client, s.mongoClient.Database(), collectionName)
 
-	result, err := store.List(ctx, tables.ItemQuery{
+	result, err := store.List(ctx, collections.DocumentQuery{
 		Page:   page,
 		Limit:  limit,
 		Filter: filter,
@@ -336,46 +402,9 @@ func (s *Server) listItems(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
-func (s *Server) getItem(c *gin.Context) {
+func (s *Server) createDocument(c *gin.Context) {
 	ctx := c.Request.Context()
-	tableName := c.Param("name")
-
-	// Get query params
-	pk := c.Query("pk")
-	sk := c.Query("sk")
-	id := c.Query("id")
-
-	store := tables.NewItem(s.mongoClient.Client, s.mongoClient.Database(), tableName)
-
-	var item bson.M
-	var err error
-
-	if pk != "" {
-		// pk is always required when using key-based lookup, sk is optional
-		item, err = store.GetByKeys(ctx, pk, sk)
-	} else if id != "" {
-		// Or use MongoDB _id directly
-		item, err = store.Get(ctx, id)
-	} else {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "pk query param is required (sk optional), or use id for MongoDB _id"})
-		return
-	}
-
-	if err != nil {
-		if err.Error() == "document not found" || strings.Contains(err.Error(), "not found") {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Item not found"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, item)
-}
-
-func (s *Server) createItem(c *gin.Context) {
-	ctx := c.Request.Context()
-	tableName := c.Param("name")
+	collectionName := c.Param("name")
 
 	var data bson.M
 	if err := c.ShouldBindJSON(&data); err != nil {
@@ -383,7 +412,30 @@ func (s *Server) createItem(c *gin.Context) {
 		return
 	}
 
-	store := tables.NewItem(s.mongoClient.Client, s.mongoClient.Database(), tableName)
+	collectionConfig, err := s.collectionStore.Get(ctx, collectionName)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Collection not found"})
+		return
+	}
+
+	if collectionConfig.PrimaryKey != "" {
+		rawPK, hasPK := data[collectionConfig.PrimaryKey]
+		pk, pkOK := rawPK.(string)
+		if !hasPK || !pkOK || pk == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("%s is required and must be a non-empty string", collectionConfig.PrimaryKey)})
+			return
+		}
+		if collectionConfig.SortKey != "" {
+			rawSK, hasSK := data[collectionConfig.SortKey]
+			sk, skOK := rawSK.(string)
+			if !hasSK || !skOK || sk == "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("%s is required and must be a non-empty string", collectionConfig.SortKey)})
+				return
+			}
+		}
+	}
+
+	store := collections.NewDocument(s.mongoClient.Client, s.mongoClient.Database(), collectionName)
 
 	result, err := store.Create(ctx, data)
 	if err != nil {
@@ -394,13 +446,9 @@ func (s *Server) createItem(c *gin.Context) {
 	c.JSON(http.StatusCreated, result)
 }
 
-func (s *Server) updateItem(c *gin.Context) {
+func (s *Server) updateDocument(c *gin.Context) {
 	ctx := c.Request.Context()
-	tableName := c.Param("name")
-
-	// Get query params for identifying the item
-	pk := c.Query("pk")
-	sk := c.Query("sk")
+	collectionName := c.Param("name")
 	id := c.Query("id")
 
 	var data bson.M
@@ -409,22 +457,51 @@ func (s *Server) updateItem(c *gin.Context) {
 		return
 	}
 
-	store := tables.NewItem(s.mongoClient.Client, s.mongoClient.Database(), tableName)
+	collectionConfig, err := s.collectionStore.Get(ctx, collectionName)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Collection not found"})
+		return
+	}
+	pk, sk := resolveKeyQueryValues(c, collectionConfig)
 
-	// Determine ID to update: pk/sk composite or _id
-	var targetID string
+	if sk != "" && pk == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "pk query param is required when sk is provided"})
+		return
+	}
+
+	store := collections.NewDocument(s.mongoClient.Client, s.mongoClient.Database(), collectionName)
+
+	// Update by DynamoDB-style keys when provided.
 	if pk != "" {
-		// pk is required, sk is optional (DynamoDB-style)
-		if sk != "" {
-			targetID = pk + "#" + sk
-		} else {
-			targetID = pk
+		if collectionConfig.PrimaryKey == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "this collection has no primary_key configured; use id/_id for MongoDB _id update"})
+			return
 		}
-	} else if id != "" {
-		targetID = id
-	} else if bodyID, ok := data["_id"].(string); ok && bodyID != "" {
-		targetID = bodyID
-	} else {
+		if collectionConfig.SortKey != "" && sk == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "sk query param is required for this collection"})
+			return
+		}
+		result, opErr := store.UpdateByKeys(ctx, collectionConfig.PrimaryKey, collectionConfig.SortKey, pk, sk, data)
+		if opErr != nil {
+			if opErr.Error() == "document not found" || strings.Contains(opErr.Error(), "not found") {
+				c.JSON(http.StatusNotFound, gin.H{"error": "Document not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": opErr.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, result)
+		return
+	}
+
+	// Legacy MongoDB _id update fallback.
+	targetID := id
+	if targetID == "" {
+		if bodyID, ok := data["_id"].(string); ok && bodyID != "" {
+			targetID = bodyID
+		}
+	}
+	if targetID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "pk query param is required (sk optional), or use id/_id for MongoDB _id"})
 		return
 	}
@@ -432,7 +509,7 @@ func (s *Server) updateItem(c *gin.Context) {
 	result, err := store.Update(ctx, targetID, data)
 	if err != nil {
 		if err.Error() == "document not found" || strings.Contains(err.Error(), "not found") {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Item not found"})
+			c.JSON(http.StatusNotFound, gin.H{"error": "Document not found"})
 			return
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -442,35 +519,49 @@ func (s *Server) updateItem(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
-func (s *Server) deleteItem(c *gin.Context) {
+func (s *Server) deleteDocument(c *gin.Context) {
 	ctx := c.Request.Context()
-	tableName := c.Param("name")
-
-	// Get query params
-	pk := c.Query("pk")
-	sk := c.Query("sk")
+	collectionName := c.Param("name")
 	id := c.Query("id")
 
-	store := tables.NewItem(s.mongoClient.Client, s.mongoClient.Database(), tableName)
+	store := collections.NewDocument(s.mongoClient.Client, s.mongoClient.Database(), collectionName)
+	collectionConfig, err := s.collectionStore.Get(ctx, collectionName)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Collection not found"})
+		return
+	}
+	pk, sk := resolveKeyQueryValues(c, collectionConfig)
 
-	var err error
+	if sk != "" && pk == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "pk query param is required when sk is provided"})
+		return
+	}
+
+	var opErr error
 
 	if pk != "" {
-		// pk is required, sk is optional (DynamoDB-style)
-		err = store.DeleteByKeys(ctx, pk, sk)
+		if collectionConfig.PrimaryKey == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "this collection has no primary_key configured; use id for MongoDB _id delete"})
+			return
+		}
+		if collectionConfig.SortKey != "" && sk == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "sk query param is required for this collection"})
+			return
+		}
+		opErr = store.DeleteByKeys(ctx, collectionConfig.PrimaryKey, collectionConfig.SortKey, pk, sk)
 	} else if id != "" {
-		err = store.Delete(ctx, id)
+		opErr = store.Delete(ctx, id)
 	} else {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "pk query param is required (sk optional), or use id for MongoDB _id"})
 		return
 	}
 
-	if err != nil {
-		if err.Error() == "document not found" || strings.Contains(err.Error(), "not found") {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Item not found"})
+	if opErr != nil {
+		if opErr.Error() == "document not found" || strings.Contains(opErr.Error(), "not found") {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Document not found"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": opErr.Error()})
 		return
 	}
 
@@ -492,4 +583,18 @@ func getEnv(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+func resolveKeyQueryValues(c *gin.Context, collection *collections.Collection) (string, string) {
+	pk := c.Query("pk")
+	sk := c.Query("sk")
+
+	if pk == "" && collection != nil && collection.PrimaryKey != "" {
+		pk = c.Query(collection.PrimaryKey)
+	}
+	if sk == "" && collection != nil && collection.SortKey != "" {
+		sk = c.Query(collection.SortKey)
+	}
+
+	return pk, sk
 }

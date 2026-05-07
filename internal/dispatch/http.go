@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/sergiors/conduit/internal/streams"
-	"github.com/sergiors/conduit/internal/tables"
+	"github.com/sergiors/conduit/internal/collections"
 )
 
 // HTTPDestination sends records to an HTTP endpoint via POST.
@@ -20,11 +20,11 @@ type HTTPDestination struct {
 	endpoint       string
 	eventTypes     map[string]bool
 	bearerToken    string
-	filterCriteria tables.FilterCriteria
+	filterCriteria collections.FilterCriteria
 }
 
 // NewHTTPDestination creates an HTTP destination.
-func NewHTTPDestination(endpoint string, bearerToken string, eventTypes []string, filterCriteria tables.FilterCriteria) (*HTTPDestination, error) {
+func NewHTTPDestination(endpoint string, bearerToken string, eventTypes []string, filterCriteria collections.FilterCriteria) (*HTTPDestination, error) {
 	if endpoint == "" {
 		return nil, fmt.Errorf("endpoint is required")
 	}
@@ -60,7 +60,7 @@ func (h *HTTPDestination) Send(ctx context.Context, record streams.StreamRecord)
 		return nil
 	}
 
-	if !tables.MatchImage(record.NewImage, h.filterCriteria.NewImage) || !tables.MatchImage(record.OldImage, h.filterCriteria.OldImage) {
+	if !collections.MatchImage(record.NewImage, h.filterCriteria.NewImage) || !collections.MatchImage(record.OldImage, h.filterCriteria.OldImage) {
 		log.Printf("Event filtered out by image criteria for %s", h.name)
 		return nil
 	}

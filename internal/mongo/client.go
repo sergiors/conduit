@@ -79,9 +79,9 @@ func (c *Client) CreateTTLIndex(ctx context.Context, collection, field string) e
 	return err
 }
 
-// EnableTableStreams configures a collection for change streams
+// EnableStreams configures a collection for change streams
 // Uses fullDocument=updateLookup and optionally fullDocumentBeforeChange
-func (c *Client) EnableTableStreams(ctx context.Context, collection string, oldImage bool) error {
+func (c *Client) EnableStreams(ctx context.Context, collection string, oldImage bool) error {
 	// MongoDB change streams are enabled by default for replica sets
 	// This method validates the collection exists and logs the configuration
 	opts := options.ChangeStream()
