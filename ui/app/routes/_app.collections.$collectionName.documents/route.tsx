@@ -1,17 +1,18 @@
-import { useState, useEffect } from "react";
-import { useParams, Link } from "react-router";
-import Editor from "@monaco-editor/react";
+import { useEffect, useState } from "react";
+import { Link, useParams } from "react-router";
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "~/components/ui/alert-dialog";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent } from "~/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "~/components/ui/table";
 import {
   Dialog,
   DialogContent,
@@ -24,19 +25,17 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "~/components/ui/dropdown-menu";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "~/components/ui/alert-dialog";
 import { Field, FieldLabel } from "~/components/ui/field";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "~/components/ui/table";
 
-import { MoreHorizontalIcon, PlusIcon, ArrowLeftIcon } from "lucide-react";
+import { ArrowLeftIcon, MoreHorizontalIcon, PlusIcon } from "lucide-react";
 
 interface Document {
   _id: string;
@@ -295,9 +294,7 @@ export default function DocumentsRoute() {
         </Button>
       </div>
 
-      {error && (
-        <p className="text-sm text-destructive text-center">{error}</p>
-      )}
+      {error && <p className="text-sm text-destructive text-center">{error}</p>}
 
       <Card>
         <CardContent>
@@ -335,9 +332,7 @@ export default function DocumentsRoute() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem
-                            onClick={() => openEditDialog(doc)}
-                          >
+                          <DropdownMenuItem onClick={() => openEditDialog(doc)}>
                             Edit
                           </DropdownMenuItem>
                           <DropdownMenuItem
@@ -364,9 +359,7 @@ export default function DocumentsRoute() {
               >
                 Previous
               </Button>
-              <span className="text-sm text-muted-foreground">
-                Page {page}
-              </span>
+              <span className="text-sm text-muted-foreground">Page {page}</span>
               <Button
                 variant="outline"
                 onClick={() => setPage((p) => p + 1)}
@@ -381,28 +374,26 @@ export default function DocumentsRoute() {
 
       {/* Create Dialog */}
       <Dialog open={creatingDoc} onOpenChange={setCreatingDoc}>
-        <DialogContent className="max-w-4xl">
+        <DialogContent className="max-w-5xl">
           <DialogHeader>
             <DialogTitle>Create Document</DialogTitle>
           </DialogHeader>
           <Field>
             <FieldLabel>Document JSON</FieldLabel>
-            <div className="border rounded-md overflow-hidden">
-              <Editor
-                height="60vh"
-                language="json"
-                value={jsonValue}
-                onChange={(value) => setJsonValue(value || "{}")}
-                theme="vs-dark"
-                options={{
-                  minimap: { enabled: false },
-                  fontSize: 13,
-                  lineNumbers: "on",
-                  automaticLayout: true,
-                  tabSize: 2,
-                }}
-              />
-            </div>
+            <textarea
+              className="w-full h-[400px] font-mono text-sm p-3 border rounded-md bg-background"
+              value={jsonValue}
+              onChange={(e) => setJsonValue(e.target.value)}
+              onBlur={() => {
+                try {
+                  const formatted = JSON.stringify(JSON.parse(jsonValue), null, 2);
+                  setJsonValue(formatted);
+                } catch {
+                  // Don't format invalid JSON
+                }
+              }}
+              placeholder='{"field1": "value1", "field2": "value2"}'
+            />
           </Field>
           <div className="flex justify-end gap-2 mt-4">
             <Button variant="outline" onClick={() => setCreatingDoc(false)}>
@@ -416,13 +407,16 @@ export default function DocumentsRoute() {
       </Dialog>
 
       {/* Edit Dialog */}
-      <Dialog open={!!editingDoc} onOpenChange={(open) => {
-        if (!open) {
-          setEditingDoc(null);
-          setJsonValue("{}");
-        }
-      }}>
-        <DialogContent className="max-w-4xl">
+      <Dialog
+        open={!!editingDoc}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditingDoc(null);
+            setJsonValue("{}");
+          }
+        }}
+      >
+        <DialogContent className="max-w-3xl">
           <DialogHeader>
             <DialogTitle>Edit Document</DialogTitle>
           </DialogHeader>
@@ -430,24 +424,22 @@ export default function DocumentsRoute() {
             <FieldLabel>Document JSON</FieldLabel>
             <p className="text-xs text-muted-foreground mb-2">
               PK/SK fields ({collection.primary_key || "_id"}
-              {collection.sort_key ? `, ${collection.sort_key}` : ""}) are read-only
+              {collection.sort_key ? `, ${collection.sort_key}` : ""}) are
+              read-only
             </p>
-            <div className="border rounded-md overflow-hidden">
-              <Editor
-                height="60vh"
-                language="json"
-                value={jsonValue}
-                onChange={(value) => setJsonValue(value || "{}")}
-                theme="vs-dark"
-                options={{
-                  minimap: { enabled: false },
-                  fontSize: 13,
-                  lineNumbers: "on",
-                  automaticLayout: true,
-                  tabSize: 2,
-                }}
-              />
-            </div>
+            <textarea
+              className="w-full h-[400px] font-mono text-sm p-3 border rounded-md bg-background"
+              value={jsonValue}
+              onChange={(e) => setJsonValue(e.target.value)}
+              onBlur={() => {
+                try {
+                  const formatted = JSON.stringify(JSON.parse(jsonValue), null, 2);
+                  setJsonValue(formatted);
+                } catch {
+                  // Don't format invalid JSON
+                }
+              }}
+            />
           </Field>
           <div className="flex justify-end gap-2 mt-4">
             <Button
@@ -467,12 +459,16 @@ export default function DocumentsRoute() {
       </Dialog>
 
       {/* Delete Confirmation Dialog */}
-      <AlertDialog open={!!deletingDoc} onOpenChange={(open) => !open && setDeletingDoc(null)}>
+      <AlertDialog
+        open={!!deletingDoc}
+        onOpenChange={(open) => !open && setDeletingDoc(null)}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Document</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete this document? This action cannot be undone.
+              Are you sure you want to delete this document? This action cannot
+              be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -486,9 +482,7 @@ export default function DocumentsRoute() {
             </AlertDialogAction>
           </AlertDialogFooter>
           {error && (
-            <p className="text-sm text-destructive text-center">
-              {error}
-            </p>
+            <p className="text-sm text-destructive text-center">{error}</p>
           )}
         </AlertDialogContent>
       </AlertDialog>
