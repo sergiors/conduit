@@ -381,15 +381,15 @@ export default function DocumentsRoute() {
 
       {/* Create Dialog */}
       <Dialog open={creatingDoc} onOpenChange={setCreatingDoc}>
-        <DialogContent className="max-w-4xl h-[80vh] flex flex-col">
+        <DialogContent className="max-w-4xl">
           <DialogHeader>
             <DialogTitle>Create Document</DialogTitle>
           </DialogHeader>
-          <Field className="flex-1 flex flex-col">
+          <Field>
             <FieldLabel>Document JSON</FieldLabel>
-            <div className="border rounded-md overflow-hidden flex-1 min-h-[500px]">
+            <div className="border rounded-md overflow-hidden">
               <Editor
-                height="100%"
+                height="60vh"
                 language="json"
                 value={jsonValue}
                 onChange={(value) => setJsonValue(value || "{}")}
@@ -422,19 +422,19 @@ export default function DocumentsRoute() {
           setJsonValue("{}");
         }
       }}>
-        <DialogContent className="max-w-4xl h-[80vh] flex flex-col">
+        <DialogContent className="max-w-4xl">
           <DialogHeader>
             <DialogTitle>Edit Document</DialogTitle>
           </DialogHeader>
-          <Field className="flex-1 flex flex-col">
+          <Field>
             <FieldLabel>Document JSON</FieldLabel>
             <p className="text-xs text-muted-foreground mb-2">
               PK/SK fields ({collection.primary_key || "_id"}
               {collection.sort_key ? `, ${collection.sort_key}` : ""}) are read-only
             </p>
-            <div className="border rounded-md overflow-hidden flex-1 min-h-[500px]">
+            <div className="border rounded-md overflow-hidden">
               <Editor
-                height="100%"
+                height="60vh"
                 language="json"
                 value={jsonValue}
                 onChange={(value) => setJsonValue(value || "{}")}
