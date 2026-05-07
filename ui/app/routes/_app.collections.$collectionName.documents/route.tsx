@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
+import CodeMirror from "@uiw/react-codemirror";
+import { json } from "@codemirror/lang-json";
+import { oneDark } from "@codemirror/theme-one-dark";
 
 import {
   AlertDialog,
@@ -380,20 +383,25 @@ export default function DocumentsRoute() {
           </DialogHeader>
           <Field>
             <FieldLabel>Document JSON</FieldLabel>
-            <textarea
-              className="w-full h-[400px] font-mono text-sm p-3 border rounded-md bg-background"
-              value={jsonValue}
-              onChange={(e) => setJsonValue(e.target.value)}
-              onBlur={() => {
-                try {
-                  const formatted = JSON.stringify(JSON.parse(jsonValue), null, 2);
-                  setJsonValue(formatted);
-                } catch {
-                  // Don't format invalid JSON
-                }
-              }}
-              placeholder='{"field1": "value1", "field2": "value2"}'
-            />
+            <div className="border rounded-md overflow-hidden">
+              <CodeMirror
+                value={jsonValue}
+                height="400px"
+                language="json"
+                extensions={[json()]}
+                theme={oneDark}
+                onChange={(value) => setJsonValue(value)}
+                basicSetup={{
+                  lineNumbers: true,
+                  foldGutter: true,
+                  autocompletion: true,
+                  highlightActiveLine: true,
+                  highlightSelectionMatches: true,
+                  bracketMatching: true,
+                  closeBrackets: true,
+                }}
+              />
+            </div>
           </Field>
           <div className="flex justify-end gap-2 mt-4">
             <Button variant="outline" onClick={() => setCreatingDoc(false)}>
@@ -427,19 +435,25 @@ export default function DocumentsRoute() {
               {collection.sort_key ? `, ${collection.sort_key}` : ""}) are
               read-only
             </p>
-            <textarea
-              className="w-full h-[400px] font-mono text-sm p-3 border rounded-md bg-background"
-              value={jsonValue}
-              onChange={(e) => setJsonValue(e.target.value)}
-              onBlur={() => {
-                try {
-                  const formatted = JSON.stringify(JSON.parse(jsonValue), null, 2);
-                  setJsonValue(formatted);
-                } catch {
-                  // Don't format invalid JSON
-                }
-              }}
-            />
+            <div className="border rounded-md overflow-hidden">
+              <CodeMirror
+                value={jsonValue}
+                height="400px"
+                language="json"
+                extensions={[json()]}
+                theme={oneDark}
+                onChange={(value) => setJsonValue(value)}
+                basicSetup={{
+                  lineNumbers: true,
+                  foldGutter: true,
+                  autocompletion: true,
+                  highlightActiveLine: true,
+                  highlightSelectionMatches: true,
+                  bracketMatching: true,
+                  closeBrackets: true,
+                }}
+              />
+            </div>
           </Field>
           <div className="flex justify-end gap-2 mt-4">
             <Button
