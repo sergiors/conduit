@@ -217,7 +217,7 @@ export default function Route({
                         >
                           <DropdownMenuItem asChild>
                             <Link
-                              to={`/collections/${collection.collection_name}/documents`}
+                              to={`/documents/${collection.collection_name}`}
                             >
                               Documents
                             </Link>
