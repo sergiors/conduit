@@ -12,11 +12,9 @@ export default function Route({ params, loaderData }: Route.ComponentProps) {
   const navigate = useNavigate();
   const { collectionName } = params;
   const { collection } = loaderData;
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async (data: CollectionConfig) => {
-    setIsSubmitting(true);
     setError(null);
     try {
       const res = await fetch(`/api/collections/${collectionName}`, {
@@ -34,8 +32,6 @@ export default function Route({ params, loaderData }: Route.ComponentProps) {
     } catch (err) {
       setError("Failed to update collection");
       console.error("Failed to update collection:", err);
-    } finally {
-      setIsSubmitting(false);
     }
   };
 
@@ -57,7 +53,6 @@ export default function Route({ params, loaderData }: Route.ComponentProps) {
             initialData={collection}
             onSubmit={handleSubmit}
             onCancel={() => navigate("/tables")}
-            isSubmitting={isSubmitting}
           />
           {error && (
             <p className="text-sm text-destructive text-center mt-4">{error}</p>

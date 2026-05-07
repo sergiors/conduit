@@ -300,8 +300,8 @@ func (m *Manager) configChangeLoop(ctx context.Context) {
 			}
 			collectionName := msg.Payload
 			log.Printf("Config change detected for collection: %s", collectionName)
-			m.syncWithCollections(ctx)
-			// Clear and re-register destinations for the changed collection
+			// Only refresh destinations for the changed collection, don't full sync
+			// (syncLoop will handle watcher start/stop on next interval)
 			m.refreshDestinations(ctx, collectionName)
 		}
 	}
