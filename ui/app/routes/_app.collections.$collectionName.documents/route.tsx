@@ -1,8 +1,44 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, lazy, Suspense, useMemo } from "react";
 import { Link, useParams } from "react-router";
-import CodeMirror from "@uiw/react-codemirror";
-import { json } from "@codemirror/lang-json";
-import { oneDark } from "@codemirror/theme-one-dark";
+
+const CodeMirror = lazy(() => import("@uiw/react-codemirror"));
+const jsonLang = () => import("@codemirror/lang-json").then((m) => m.json());
+const oneDark = () => import("@codemirror/theme-one-dark").then((m) => m.oneDark);
+
+function CodeMirrorEditor({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const [extensions, setExtensions] = useState<any[]>([]);
+  const [theme, setTheme] = useState<any>(undefined);
+
+  useEffect(() => {
+    Promise.all([jsonLang(), oneDark()]).then(([lang, darkTheme]) => {
+      setExtensions([lang]);
+      setTheme(darkTheme);
+    });
+  }, []);
+
+  if (!theme || extensions.length === 0) {
+    return <div className="h-[400px] flex items-center justify-center text-muted-foreground">Loading editor...</div>;
+  }
+
+  return (
+    <CodeMirror
+      value={value}
+      height="400px"
+      extensions={extensions}
+      theme={theme}
+      onChange={onChange}
+      basicSetup={{
+        lineNumbers: true,
+        foldGutter: true,
+        autocompletion: true,
+        highlightActiveLine: true,
+        highlightSelectionMatches: true,
+        bracketMatching: true,
+        closeBrackets: true,
+      }}
+    />
+  );
+}
 
 import {
   AlertDialog,
@@ -384,23 +420,12 @@ export default function DocumentsRoute() {
           <Field>
             <FieldLabel>Document JSON</FieldLabel>
             <div className="border rounded-md overflow-hidden">
-              <CodeMirror
-                value={jsonValue}
-                height="400px"
-                language="json"
-                extensions={[json()]}
-                theme={oneDark}
-                onChange={(value) => setJsonValue(value)}
-                basicSetup={{
-                  lineNumbers: true,
-                  foldGutter: true,
-                  autocompletion: true,
-                  highlightActiveLine: true,
-                  highlightSelectionMatches: true,
-                  bracketMatching: true,
-                  closeBrackets: true,
-                }}
-              />
+              <Suspense fallback={<div className="h-[400px] flex items-center justify-center text-muted-foreground">Loading editor...</div>}>
+                <CodeMirrorEditor
+                  value={jsonValue}
+                  onChange={setJsonValue}
+                />
+              </Suspense>
             </div>
           </Field>
           <div className="flex justify-end gap-2 mt-4">
@@ -436,23 +461,12 @@ export default function DocumentsRoute() {
               read-only
             </p>
             <div className="border rounded-md overflow-hidden">
-              <CodeMirror
-                value={jsonValue}
-                height="400px"
-                language="json"
-                extensions={[json()]}
-                theme={oneDark}
-                onChange={(value) => setJsonValue(value)}
-                basicSetup={{
-                  lineNumbers: true,
-                  foldGutter: true,
-                  autocompletion: true,
-                  highlightActiveLine: true,
-                  highlightSelectionMatches: true,
-                  bracketMatching: true,
-                  closeBrackets: true,
-                }}
-              />
+              <Suspense fallback={<div className="h-[400px] flex items-center justify-center text-muted-foreground">Loading editor...</div>}>
+                <CodeMirrorEditor
+                  value={jsonValue}
+                  onChange={setJsonValue}
+                />
+              </Suspense>
             </div>
           </Field>
           <div className="flex justify-end gap-2 mt-4">
