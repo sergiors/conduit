@@ -92,8 +92,9 @@ func main() {
 	// Collection documents CRUD (data plane)
 	router.GET("/api/collections/:name/documents", server.listDocuments)
 	router.POST("/api/collections/:name/documents", server.createDocument)
-	router.PUT("/api/collections/:name/documents", server.updateDocument)
-	router.DELETE("/api/collections/:name/documents", server.deleteDocument)
+	router.GET("/api/collections/:name/documents/:id", server.getDocument)
+	router.PUT("/api/collections/:name/documents/:id", server.updateDocument)
+	router.DELETE("/api/collections/:name/documents/:id", server.deleteDocument)
 
 	router.GET("/health", server.handleHealth)
 
@@ -304,55 +305,6 @@ func (s *Server) listDocuments(c *gin.Context) {
 	ctx := c.Request.Context()
 	collectionName := c.Param("name")
 
-	collectionConfig, err := s.collectionStore.Get(ctx, collectionName)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Collection not found"})
-		return
-	}
-	pk, sk := resolveKeyQueryValues(c, collectionConfig)
-	id := c.Query("id")
-
-	if sk != "" && pk == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "pk query param is required when sk is provided"})
-		return
-	}
-
-	// DynamoDB-style single document lookup when key params are provided.
-	if pk != "" || id != "" {
-		store := collections.NewDocument(s.mongoClient.Client, s.mongoClient.Database(), collectionName)
-
-		var (
-			doc  bson.M
-			opErr error
-		)
-
-		if pk != "" {
-			if collectionConfig.PrimaryKey == "" {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "this collection has no primary_key configured; use id for MongoDB _id lookup"})
-				return
-			}
-			if collectionConfig.SortKey != "" && sk == "" {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "sk query param is required for this collection"})
-				return
-			}
-			doc, opErr = store.GetByKeys(ctx, collectionConfig.PrimaryKey, collectionConfig.SortKey, pk, sk)
-		} else {
-			doc, opErr = store.Get(ctx, id)
-		}
-
-		if opErr != nil {
-			if opErr.Error() == "document not found" || strings.Contains(opErr.Error(), "not found") {
-				c.JSON(http.StatusNotFound, gin.H{"error": "Document not found"})
-				return
-			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": opErr.Error()})
-			return
-		}
-
-		c.JSON(http.StatusOK, doc)
-		return
-	}
-
 	// Parse query params
 	page := int64(1)
 	limit := int64(20)
@@ -402,6 +354,26 @@ func (s *Server) listDocuments(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
+func (s *Server) getDocument(c *gin.Context) {
+	ctx := c.Request.Context()
+	collectionName := c.Param("name")
+	id := c.Param("id")
+
+	store := collections.NewDocument(s.mongoClient.Client, s.mongoClient.Database(), collectionName)
+
+	doc, err := store.Get(ctx, id)
+	if err != nil {
+		if err.Error() == "document not found" || strings.Contains(err.Error(), "not found") {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Document not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, doc)
+}
+
 func (s *Server) createDocument(c *gin.Context) {
 	ctx := c.Request.Context()
 	collectionName := c.Param("name")
@@ -449,7 +421,7 @@ func (s *Server) createDocument(c *gin.Context) {
 func (s *Server) updateDocument(c *gin.Context) {
 	ctx := c.Request.Context()
 	collectionName := c.Param("name")
-	id := c.Query("id")
+	id := c.Param("id")
 
 	var data bson.M
 	if err := c.ShouldBindJSON(&data); err != nil {
@@ -457,56 +429,9 @@ func (s *Server) updateDocument(c *gin.Context) {
 		return
 	}
 
-	collectionConfig, err := s.collectionStore.Get(ctx, collectionName)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Collection not found"})
-		return
-	}
-	pk, sk := resolveKeyQueryValues(c, collectionConfig)
-
-	if sk != "" && pk == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "pk query param is required when sk is provided"})
-		return
-	}
-
 	store := collections.NewDocument(s.mongoClient.Client, s.mongoClient.Database(), collectionName)
 
-	// Update by DynamoDB-style keys when provided.
-	if pk != "" {
-		if collectionConfig.PrimaryKey == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "this collection has no primary_key configured; use id/_id for MongoDB _id update"})
-			return
-		}
-		if collectionConfig.SortKey != "" && sk == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "sk query param is required for this collection"})
-			return
-		}
-		result, opErr := store.UpdateByKeys(ctx, collectionConfig.PrimaryKey, collectionConfig.SortKey, pk, sk, data)
-		if opErr != nil {
-			if opErr.Error() == "document not found" || strings.Contains(opErr.Error(), "not found") {
-				c.JSON(http.StatusNotFound, gin.H{"error": "Document not found"})
-				return
-			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": opErr.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, result)
-		return
-	}
-
-	// Legacy MongoDB _id update fallback.
-	targetID := id
-	if targetID == "" {
-		if bodyID, ok := data["_id"].(string); ok && bodyID != "" {
-			targetID = bodyID
-		}
-	}
-	if targetID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "pk query param is required (sk optional), or use id/_id for MongoDB _id"})
-		return
-	}
-
-	result, err := store.Update(ctx, targetID, data)
+	result, err := store.Update(ctx, id, data)
 	if err != nil {
 		if err.Error() == "document not found" || strings.Contains(err.Error(), "not found") {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Document not found"})
@@ -522,40 +447,11 @@ func (s *Server) updateDocument(c *gin.Context) {
 func (s *Server) deleteDocument(c *gin.Context) {
 	ctx := c.Request.Context()
 	collectionName := c.Param("name")
-	id := c.Query("id")
+	id := c.Param("id")
 
 	store := collections.NewDocument(s.mongoClient.Client, s.mongoClient.Database(), collectionName)
-	collectionConfig, err := s.collectionStore.Get(ctx, collectionName)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Collection not found"})
-		return
-	}
-	pk, sk := resolveKeyQueryValues(c, collectionConfig)
 
-	if sk != "" && pk == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "pk query param is required when sk is provided"})
-		return
-	}
-
-	var opErr error
-
-	if pk != "" {
-		if collectionConfig.PrimaryKey == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "this collection has no primary_key configured; use id for MongoDB _id delete"})
-			return
-		}
-		if collectionConfig.SortKey != "" && sk == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "sk query param is required for this collection"})
-			return
-		}
-		opErr = store.DeleteByKeys(ctx, collectionConfig.PrimaryKey, collectionConfig.SortKey, pk, sk)
-	} else if id != "" {
-		opErr = store.Delete(ctx, id)
-	} else {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "pk query param is required (sk optional), or use id for MongoDB _id"})
-		return
-	}
-
+	opErr := store.Delete(ctx, id)
 	if opErr != nil {
 		if opErr.Error() == "document not found" || strings.Contains(opErr.Error(), "not found") {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Document not found"})
@@ -585,16 +481,3 @@ func getEnv(key, defaultValue string) string {
 	return defaultValue
 }
 
-func resolveKeyQueryValues(c *gin.Context, collection *collections.Collection) (string, string) {
-	pk := c.Query("pk")
-	sk := c.Query("sk")
-
-	if pk == "" && collection != nil && collection.PrimaryKey != "" {
-		pk = c.Query(collection.PrimaryKey)
-	}
-	if sk == "" && collection != nil && collection.SortKey != "" {
-		sk = c.Query(collection.SortKey)
-	}
-
-	return pk, sk
-}

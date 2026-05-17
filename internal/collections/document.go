@@ -3,7 +3,6 @@ package collections
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -25,25 +24,6 @@ func NewDocument(client *mongo.Client, database, collection string) *Document {
 		database:   database,
 		collection: collection,
 	}
-}
-
-func buildKeyQuery(pkField, skField, pkValue, skValue string) (bson.M, error) {
-	if pkField == "" {
-		return nil, fmt.Errorf("partition key field is required")
-	}
-	if pkValue == "" {
-		return nil, fmt.Errorf("partition key value is required")
-	}
-
-	query := bson.M{pkField: pkValue}
-	if skField != "" {
-		if skValue == "" {
-			return nil, fmt.Errorf("sort key value is required")
-		}
-		query[skField] = skValue
-	}
-
-	return query, nil
 }
 
 // DocumentQuery represents query parameters for scanning items
@@ -156,39 +136,10 @@ func (d *Document) Get(ctx context.Context, id string) (bson.M, error) {
 	return doc, nil
 }
 
-// GetByKeys retrieves an item by configured key schema fields.
-func (d *Document) GetByKeys(ctx context.Context, pkField, skField, pkValue, skValue string) (bson.M, error) {
-	coll := d.client.Database(d.database).Collection(d.collection)
-
-	query, err := buildKeyQuery(pkField, skField, pkValue, skValue)
-	if err != nil {
-		return nil, err
-	}
-
-	result := coll.FindOne(ctx, query)
-	var doc bson.M
-	if err := result.Decode(&doc); err != nil {
-		if err == mongo.ErrNoDocuments {
-			return nil, fmt.Errorf("document not found")
-		}
-		return nil, fmt.Errorf("find document: %w", err)
-	}
-	return doc, nil
-}
 
 // Create inserts a new item
 func (d *Document) Create(ctx context.Context, data bson.M) (bson.M, error) {
 	coll := d.client.Database(d.database).Collection(d.collection)
-
-	// Set created_at if not present
-	if _, ok := data["created_at"]; !ok {
-		data["created_at"] = time.Now()
-	}
-
-	// Set updated_at if not present
-	if _, ok := data["updated_at"]; !ok {
-		data["updated_at"] = data["created_at"]
-	}
 
 	result, err := coll.InsertOne(ctx, data)
 	if err != nil {
@@ -200,54 +151,9 @@ func (d *Document) Create(ctx context.Context, data bson.M) (bson.M, error) {
 	return data, nil
 }
 
-// UpdateByKeys updates an existing item by configured key schema fields.
-func (d *Document) UpdateByKeys(ctx context.Context, pkField, skField, pkValue, skValue string, data bson.M) (bson.M, error) {
-	coll := d.client.Database(d.database).Collection(d.collection)
-
-	// Keys are immutable.
-	delete(data, "_id")
-	delete(data, pkField)
-	if skField != "" {
-		delete(data, skField)
-	}
-	data["updated_at"] = time.Now()
-
-	query, err := buildKeyQuery(pkField, skField, pkValue, skValue)
-	if err != nil {
-		return nil, err
-	}
-
-	result, err := coll.UpdateOne(
-		ctx,
-		query,
-		bson.M{"$set": data},
-		options.Update().SetUpsert(false),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("update document: %w", err)
-	}
-
-	if result.MatchedCount == 0 {
-		return nil, fmt.Errorf("document not found")
-	}
-
-	var doc bson.M
-	if err := coll.FindOne(ctx, query).Decode(&doc); err != nil {
-		if err == mongo.ErrNoDocuments {
-			return nil, fmt.Errorf("document not found")
-		}
-		return nil, fmt.Errorf("find document: %w", err)
-	}
-
-	return doc, nil
-}
-
 // Update updates an existing item by ID
 func (d *Document) Update(ctx context.Context, id string, data bson.M) (bson.M, error) {
 	coll := d.client.Database(d.database).Collection(d.collection)
-
-	// Set updated_at
-	data["updated_at"] = time.Now()
 
 	// Don't allow updating _id
 	delete(data, "_id")
@@ -288,26 +194,6 @@ func (d *Document) Delete(ctx context.Context, id string) error {
 	}
 
 	result, err := coll.DeleteOne(ctx, bson.M{"_id": idQuery})
-	if err != nil {
-		return fmt.Errorf("delete document: %w", err)
-	}
-
-	if result.DeletedCount == 0 {
-		return fmt.Errorf("document not found")
-	}
-	return nil
-}
-
-// DeleteByKeys removes an item by configured key schema fields.
-func (d *Document) DeleteByKeys(ctx context.Context, pkField, skField, pkValue, skValue string) error {
-	coll := d.client.Database(d.database).Collection(d.collection)
-
-	query, err := buildKeyQuery(pkField, skField, pkValue, skValue)
-	if err != nil {
-		return err
-	}
-
-	result, err := coll.DeleteOne(ctx, query)
 	if err != nil {
 		return fmt.Errorf("delete document: %w", err)
 	}

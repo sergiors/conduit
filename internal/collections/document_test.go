@@ -201,75 +201,6 @@ func TestItem_Get(t *testing.T) {
 	})
 }
 
-func TestItem_GetByKeys(t *testing.T) {
-	t.Run("get item by pk only", func(t *testing.T) {
-		store, cleanup := setupTestDocument(t)
-		defer cleanup()
-
-		ctx := context.Background()
-
-		coll := store.client.Database(store.database).Collection(store.collection)
-		coll.InsertOne(ctx, bson.M{
-			"_id":   "USER#123",
-			"pk":    "USER#123",
-			"name":  "John Doe",
-			"email": "john@example.com",
-		})
-
-		item, err := store.GetByKeys(ctx, "pk", "", "USER#123", "")
-		require.NoError(t, err)
-		assert.Equal(t, "John Doe", item["name"])
-	})
-
-	t.Run("get item by pk and sk", func(t *testing.T) {
-		store, cleanup := setupTestDocument(t)
-		defer cleanup()
-
-		ctx := context.Background()
-
-		coll := store.client.Database(store.database).Collection(store.collection)
-		coll.InsertOne(ctx, bson.M{
-			"_id":   "USER#123#EMAIL#primary",
-			"pk":    "USER#123",
-			"sk":    "EMAIL#primary",
-			"email": "john@example.com",
-		})
-
-		item, err := store.GetByKeys(ctx, "pk", "sk", "USER#123", "EMAIL#primary")
-		require.NoError(t, err)
-		assert.Equal(t, "john@example.com", item["email"])
-	})
-
-	t.Run("pk-only query matches by configured primary key", func(t *testing.T) {
-		store, cleanup := setupTestDocument(t)
-		defer cleanup()
-
-		ctx := context.Background()
-
-		coll := store.client.Database(store.database).Collection(store.collection)
-		coll.InsertOne(ctx, bson.M{
-			"_id": "USER#999#EMAIL#work",
-			"pk":  "USER#999",
-			"sk":  "EMAIL#work",
-		})
-
-		item, err := store.GetByKeys(ctx, "pk", "", "USER#999", "")
-		require.NoError(t, err)
-		assert.Equal(t, "USER#999", item["pk"])
-		assert.Equal(t, "EMAIL#work", item["sk"])
-	})
-
-	t.Run("get by keys not found returns error", func(t *testing.T) {
-		store, cleanup := setupTestDocument(t)
-		defer cleanup()
-
-		ctx := context.Background()
-
-		_, err := store.GetByKeys(ctx, "pk", "", "NONEXISTENT", "")
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "not found")
-	})
-}
 
 func TestItem_Create(t *testing.T) {
 	t.Run("create item with auto timestamps", func(t *testing.T) {
@@ -278,7 +209,6 @@ func TestItem_Create(t *testing.T) {
 
 		ctx := context.Background()
 
-		before := time.Now()
 		result, err := store.Create(ctx, bson.M{
 			"pk":   "USER#123",
 			"name": "Test User",
@@ -286,29 +216,6 @@ func TestItem_Create(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.NotNil(t, result["_id"])
-		assert.NotNil(t, result["created_at"])
-		assert.NotNil(t, result["updated_at"])
-
-		created_at := result["created_at"].(time.Time)
-		assert.True(t, created_at.After(before) || created_at.Equal(before))
-	})
-
-	t.Run("create item preserves existing timestamps", func(t *testing.T) {
-		store, cleanup := setupTestDocument(t)
-		defer cleanup()
-
-		ctx := context.Background()
-
-		customTime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
-		result, err := store.Create(ctx, bson.M{
-			"pk":         "USER#456",
-			"name":       "Test User",
-			"created_at": customTime,
-		})
-		require.NoError(t, err)
-
-		assert.Equal(t, customTime, result["created_at"])
-		assert.Equal(t, customTime, result["updated_at"])
 	})
 
 	t.Run("create item returns inserted document with id", func(t *testing.T) {
@@ -369,7 +276,6 @@ func TestItem_Update(t *testing.T) {
 		}
 
 		// Update
-		beforeUpdate := time.Now()
 		result, err := store.Update(ctx, id, bson.M{
 			"name":  "Updated",
 			"value": 200,
@@ -378,10 +284,6 @@ func TestItem_Update(t *testing.T) {
 
 		assert.Equal(t, "Updated", result["name"])
 		assert.Equal(t, 200, result["value"])
-		assert.NotNil(t, result["updated_at"])
-
-		updated_at := result["updated_at"].(time.Time)
-		assert.True(t, updated_at.After(beforeUpdate) || updated_at.Equal(beforeUpdate))
 	})
 
 	t.Run("update removes _id from data", func(t *testing.T) {
@@ -422,27 +324,6 @@ func TestItem_Update(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "not found")
 	})
-
-	t.Run("update by keys with optional sk", func(t *testing.T) {
-		store, cleanup := setupTestDocument(t)
-		defer cleanup()
-
-		ctx := context.Background()
-
-		_, err := store.Create(ctx, bson.M{
-			"pk":   "USER#KEYONLY",
-			"name": "Original",
-		})
-		require.NoError(t, err)
-
-		result, err := store.UpdateByKeys(ctx, "pk", "", "USER#KEYONLY", "", bson.M{
-			"name": "Updated By Key",
-			"pk":   "MUST_NOT_CHANGE",
-		})
-		require.NoError(t, err)
-		assert.Equal(t, "USER#KEYONLY", result["pk"])
-		assert.Equal(t, "Updated By Key", result["name"])
-	})
 }
 
 func TestItem_Delete(t *testing.T) {
@@ -480,76 +361,6 @@ func TestItem_Delete(t *testing.T) {
 		ctx := context.Background()
 
 		err := store.Delete(ctx, "nonexistent")
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "not found")
-	})
-}
-
-func TestItem_DeleteByKeys(t *testing.T) {
-	t.Run("delete by pk only", func(t *testing.T) {
-		store, cleanup := setupTestDocument(t)
-		defer cleanup()
-
-		ctx := context.Background()
-
-		coll := store.client.Database(store.database).Collection(store.collection)
-		coll.InsertOne(ctx, bson.M{
-			"_id":  "USER#123",
-			"pk":   "USER#123",
-			"name": "To Delete",
-		})
-
-		err := store.DeleteByKeys(ctx, "pk", "", "USER#123", "")
-		require.NoError(t, err)
-
-		_, err = store.GetByKeys(ctx, "pk", "", "USER#123", "")
-		require.Error(t, err)
-	})
-
-	t.Run("delete by pk and sk", func(t *testing.T) {
-		store, cleanup := setupTestDocument(t)
-		defer cleanup()
-
-		ctx := context.Background()
-
-		coll := store.client.Database(store.database).Collection(store.collection)
-		coll.InsertOne(ctx, bson.M{
-			"_id": "USER#123#EMAIL#primary",
-			"pk":  "USER#123",
-			"sk":  "EMAIL#primary",
-		})
-
-		err := store.DeleteByKeys(ctx, "pk", "sk", "USER#123", "EMAIL#primary")
-		require.NoError(t, err)
-
-		_, err = store.GetByKeys(ctx, "pk", "sk", "USER#123", "EMAIL#primary")
-		require.Error(t, err)
-	})
-
-	t.Run("delete by pk only matches on pk field", func(t *testing.T) {
-		store, cleanup := setupTestDocument(t)
-		defer cleanup()
-
-		ctx := context.Background()
-
-		coll := store.client.Database(store.database).Collection(store.collection)
-		coll.InsertOne(ctx, bson.M{
-			"_id": "USER#123#EMAIL#secondary",
-			"pk":  "USER#123",
-			"sk":  "EMAIL#secondary",
-		})
-
-		err := store.DeleteByKeys(ctx, "pk", "", "USER#123", "")
-		require.NoError(t, err)
-	})
-
-	t.Run("delete by keys not found returns error", func(t *testing.T) {
-		store, cleanup := setupTestDocument(t)
-		defer cleanup()
-
-		ctx := context.Background()
-
-		err := store.DeleteByKeys(ctx, "pk", "", "NONEXISTENT", "")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "not found")
 	})
