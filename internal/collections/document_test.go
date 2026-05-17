@@ -201,7 +201,6 @@ func TestItem_Get(t *testing.T) {
 	})
 }
 
-
 func TestItem_Create(t *testing.T) {
 	t.Run("create item with auto timestamps", func(t *testing.T) {
 		store, cleanup := setupTestDocument(t)

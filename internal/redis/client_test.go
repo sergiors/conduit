@@ -35,12 +35,12 @@ func TestKeyHelpers(t *testing.T) {
 func TestRetryEvent(t *testing.T) {
 	t.Run("retry event structure", func(t *testing.T) {
 		event := RetryEvent{
-			ID:          "users-123",
+			ID:             "users-123",
 			CollectionName: "users",
-			EventData:   []byte(`{"id": "123"}`),
-			RetryCount:  0,
-			MaxRetries:  5,
-			NextRetryAt: time.Now().Add(time.Second),
+			EventData:      []byte(`{"id": "123"}`),
+			RetryCount:     0,
+			MaxRetries:     5,
+			NextRetryAt:    time.Now().Add(time.Second),
 		}
 
 		assert.Equal(t, "users", event.CollectionName)
@@ -52,12 +52,12 @@ func TestRetryEvent(t *testing.T) {
 
 	t.Run("retry event with max retries exceeded", func(t *testing.T) {
 		event := RetryEvent{
-			ID:          "orders-456",
+			ID:             "orders-456",
 			CollectionName: "orders",
-			EventData:   []byte(`{"id": "456"}`),
-			RetryCount:  5,
-			MaxRetries:  5,
-			NextRetryAt: time.Now(),
+			EventData:      []byte(`{"id": "456"}`),
+			RetryCount:     5,
+			MaxRetries:     5,
+			NextRetryAt:    time.Now(),
 		}
 
 		assert.True(t, event.RetryCount >= event.MaxRetries)

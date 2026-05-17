@@ -12,16 +12,20 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/sergiors/conduit/internal/collections"
 	"github.com/sergiors/conduit/internal/mongo"
 	"github.com/sergiors/conduit/internal/redis"
-	"github.com/sergiors/conduit/internal/collections"
+	"github.com/swaggo/gin-swagger"
+	"github.com/swaggo/files"
 	"go.mongodb.org/mongo-driver/bson"
+
+	_ "github.com/sergiors/conduit/docs"
 )
 
 type Server struct {
-	collectionStore  *collections.Store
-	mongoClient *mongo.Client
-	redisClient *redis.Client
+	collectionStore *collections.Store
+	mongoClient     *mongo.Client
+	redisClient     *redis.Client
 }
 
 func NewServer() (*Server, error) {
@@ -57,9 +61,9 @@ func NewServer() (*Server, error) {
 	}
 
 	return &Server{
-		collectionStore:  store,
-		mongoClient: client,
-		redisClient: redisClient,
+		collectionStore: store,
+		mongoClient:     client,
+		redisClient:     redisClient,
 	}, nil
 }
 
@@ -89,6 +93,10 @@ func main() {
 	router.PUT("/api/collections/:name", server.updateCollection)
 	router.DELETE("/api/collections/:name", server.deleteCollection)
 
+	// Collection destinations
+	router.GET("/api/collections/:name/destinations", server.getDestinations)
+	router.PUT("/api/collections/:name/destinations", server.updateDestinations)
+
 	// Collection documents CRUD (data plane)
 	router.GET("/api/collections/:name/documents", server.listDocuments)
 	router.POST("/api/collections/:name/documents", server.createDocument)
@@ -98,6 +106,9 @@ func main() {
 
 	router.GET("/health", server.handleHealth)
 
+	// Swagger
+	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+
 	port := getEnv("PORT", "8080")
 	log.Printf("API server starting on port %s", port)
 	if err := router.Run(":" + port); err != nil {
@@ -105,6 +116,11 @@ func main() {
 	}
 }
 
+// @Summary List all collections
+// @Description List all collection configurations
+// @Produce json
+// @Success 200 {array} collections.Collection
+// @Router /api/collections [get]
 func (s *Server) listCollections(c *gin.Context) {
 	ctx := c.Request.Context()
 	collectionList, err := s.collectionStore.List(ctx)
@@ -120,6 +136,13 @@ func (s *Server) listCollections(c *gin.Context) {
 	c.JSON(http.StatusOK, collectionList)
 }
 
+// @Summary Get collection
+// @Description Get a collection configuration by name
+// @Produce json
+// @Param name path string true "Collection name"
+// @Success 200 {object} collections.Collection
+// @Failure 404 {object} map[string]string
+// @Router /api/collections/{name} [get]
 func (s *Server) getCollection(c *gin.Context) {
 	ctx := c.Request.Context()
 	name := c.Param("name")
@@ -133,6 +156,15 @@ func (s *Server) getCollection(c *gin.Context) {
 	c.JSON(http.StatusOK, collection)
 }
 
+// @Summary Create collection
+// @Description Creates a new collection configuration
+// @Accept json
+// @Produce json
+// @Param collection body collections.Collection true "Collection data"
+// @Success 201 {object} collections.Collection
+// @Failure 400 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /api/collections [post]
 func (s *Server) createCollection(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -140,36 +172,6 @@ func (s *Server) createCollection(c *gin.Context) {
 	if err := c.ShouldBindJSON(&collection); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
 		return
-	}
-	collectionName := collection.CollectionName
-	if collectionName == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Collection name is required"})
-		return
-	}
-	collection.CollectionName = collectionName
-	if collection.SortKey != "" && collection.PrimaryKey == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "primary_key is required when sort_key is defined"})
-		return
-	}
-	if collection.PrimaryKey != "" && collection.PrimaryKey == collection.SortKey {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "sort_key cannot be the same as primary_key"})
-		return
-	}
-
-	// Validate destinations
-	for i, dest := range collection.Destinations {
-		if dest.Endpoint == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("destination[%d]: endpoint is required", i)})
-			return
-		}
-		if len(dest.EventTypes) == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("destination[%d]: at least one event type is required", i)})
-			return
-		}
-		if err := dest.ValidateEventTypes(); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("destination[%d]: %v", i, err)})
-			return
-		}
 	}
 
 	// Deletion protection is mandatory on create
@@ -180,21 +182,25 @@ func (s *Server) createCollection(c *gin.Context) {
 		return
 	}
 
-	// Apply TTL index if configured
-	if collection.TTLAttribute != "" {
-		if err := s.mongoClient.CreateTTLIndex(ctx, collectionName, collection.TTLAttribute); err != nil {
-			log.Printf("Failed to create TTL index for %s: %v", collectionName, err)
-		}
-	}
-
 	// Notify worker of config change
-	if err := s.redisClient.PublishConfigChange(ctx, collectionName); err != nil {
+	if err := s.redisClient.PublishConfigChange(ctx, collection.CollectionName); err != nil {
 		log.Printf("Failed to publish config change: %v", err)
 	}
 
 	c.JSON(http.StatusCreated, collection)
 }
 
+// @Summary Update collection
+// @Description Update a collection configuration
+// @Accept json
+// @Produce json
+// @Param name path string true "Collection name"
+// @Param collection body collections.Collection true "Collection data"
+// @Success 200 {object} collections.Collection
+// @Failure 400 {object} map[string]string
+// @Failure 404 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /api/collections/{name} [put]
 func (s *Server) updateCollection(c *gin.Context) {
 	ctx := c.Request.Context()
 	name := c.Param("name")
@@ -204,42 +210,7 @@ func (s *Server) updateCollection(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
 		return
 	}
-	collectionName := collection.CollectionName
-	if collectionName == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Collection name is required"})
-		return
-	}
-	collection.CollectionName = collectionName
-
-	// Collection name in path must match body
-	if collectionName != name {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Collection name in path must match body"})
-		return
-	}
-	if collection.SortKey != "" && collection.PrimaryKey == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "primary_key is required when sort_key is defined"})
-		return
-	}
-	if collection.PrimaryKey != "" && collection.PrimaryKey == collection.SortKey {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "sort_key cannot be the same as primary_key"})
-		return
-	}
-
-	// Validate destinations
-	for i, dest := range collection.Destinations {
-		if dest.Endpoint == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("destination[%d]: endpoint is required", i)})
-			return
-		}
-		if len(dest.EventTypes) == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("destination[%d]: at least one event type is required", i)})
-			return
-		}
-		if err := dest.ValidateEventTypes(); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("destination[%d]: %v", i, err)})
-			return
-		}
-	}
+	collection.CollectionName = name
 
 	if err := s.collectionStore.Update(ctx, &collection); err != nil {
 		if err.Error() == "collection not found" {
@@ -252,19 +223,100 @@ func (s *Server) updateCollection(c *gin.Context) {
 
 	// Apply TTL index if configured (create or update)
 	if collection.TTLAttribute != "" {
-		if err := s.mongoClient.CreateTTLIndex(ctx, collectionName, collection.TTLAttribute); err != nil {
-			log.Printf("Failed to create/update TTL index for %s: %v", collectionName, err)
+		if err := s.mongoClient.CreateTTLIndex(ctx, name, collection.TTLAttribute); err != nil {
+			log.Printf("Failed to create/update TTL index for %s: %v", name, err)
 		}
 	}
 
 	// Notify worker of config change
-	if err := s.redisClient.PublishConfigChange(ctx, collectionName); err != nil {
+	if err := s.redisClient.PublishConfigChange(ctx, name); err != nil {
 		log.Printf("Failed to publish config change: %v", err)
 	}
 
 	c.JSON(http.StatusOK, collection)
 }
 
+// @Summary Get collection destinations
+// @Description Get destinations for a collection
+// @Produce json
+// @Param name path string true "Collection name"
+// @Success 200 {array} collections.DestinationConfig
+// @Failure 404 {object} map[string]string
+// @Router /api/collections/{name}/destinations [get]
+func (s *Server) getDestinations(c *gin.Context) {
+	ctx := c.Request.Context()
+	name := c.Param("name")
+
+	destinations, err := s.collectionStore.GetDestinations(ctx, name)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Collection not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, destinations)
+}
+
+// @Summary Update collection destinations
+// @Description Replace destinations for a collection (stream_enabled must be true)
+// @Accept json
+// @Produce json
+// @Param name path string true "Collection name"
+// @Param destinations body []collections.DestinationConfig true "Destinations data"
+// @Success 200 {array} collections.DestinationConfig
+// @Failure 400 {object} map[string]string
+// @Failure 404 {object} map[string]string
+// @Router /api/collections/{name}/destinations [put]
+func (s *Server) updateDestinations(c *gin.Context) {
+	ctx := c.Request.Context()
+	name := c.Param("name")
+
+	var destinations []collections.DestinationConfig
+	if err := c.ShouldBindJSON(&destinations); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		return
+	}
+
+	// Validate destinations
+	for i, dest := range destinations {
+		if dest.Endpoint == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("destination[%d]: endpoint is required", i)})
+			return
+		}
+		if len(dest.EventTypes) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("destination[%d]: at least one event type is required", i)})
+			return
+		}
+		if err := dest.ValidateEventTypes(); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("destination[%d]: %v", i, err)})
+			return
+		}
+	}
+
+	if err := s.collectionStore.UpdateDestinations(ctx, name, destinations); err != nil {
+		if err.Error() == "collection not found" {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Collection not found"})
+			return
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Notify worker of config change
+	if err := s.redisClient.PublishConfigChange(ctx, name); err != nil {
+		log.Printf("Failed to publish config change: %v", err)
+	}
+
+	c.JSON(http.StatusOK, destinations)
+}
+
+// @Summary Delete collection
+// @Description Delete a collection configuration
+// @Param name path string true "Collection name"
+// @Success 204
+// @Failure 403 {object} map[string]string
+// @Failure 404 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /api/collections/{name} [delete]
 func (s *Server) deleteCollection(c *gin.Context) {
 	ctx := c.Request.Context()
 	name := c.Param("name")
@@ -295,12 +347,28 @@ func (s *Server) deleteCollection(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+// @Summary Health check
+// @Description Check if the API is running
+// @Produce json
+// @Success 200 {object} map[string]string
+// @Router /health [get]
 func (s *Server) handleHealth(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
-// Document handlers (data plane CRUD)
 
+// @Summary List documents
+// @Description List documents in a collection with pagination and filtering
+// @Produce json
+// @Param name path string true "Collection name"
+// @Param page query int false "Page number" default(1)
+// @Param limit query int false "Items per page" default(20)
+// @Param filter query string false "Filter as JSON"
+// @Param sort query string false "Sort as JSON"
+// @Success 200 {object} interface{}
+// @Failure 400 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /api/collections/{name}/documents [get]
 func (s *Server) listDocuments(c *gin.Context) {
 	ctx := c.Request.Context()
 	collectionName := c.Param("name")
@@ -354,6 +422,15 @@ func (s *Server) listDocuments(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
+// @Summary Get document
+// @Description Get a document by ID in a collection
+// @Produce json
+// @Param name path string true "Collection name"
+// @Param id path string true "Document ID"
+// @Success 200 {object} interface{}
+// @Failure 404 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /api/collections/{name}/documents/{id} [get]
 func (s *Server) getDocument(c *gin.Context) {
 	ctx := c.Request.Context()
 	collectionName := c.Param("name")
@@ -374,6 +451,17 @@ func (s *Server) getDocument(c *gin.Context) {
 	c.JSON(http.StatusOK, doc)
 }
 
+// @Summary Create document
+// @Description Create a new document in a collection
+// @Accept json
+// @Produce json
+// @Param name path string true "Collection name"
+// @Param document body interface{} true "Document data"
+// @Success 201 {object} interface{}
+// @Failure 400 {object} map[string]string
+// @Failure 404 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /api/collections/{name}/documents [post]
 func (s *Server) createDocument(c *gin.Context) {
 	ctx := c.Request.Context()
 	collectionName := c.Param("name")
@@ -418,6 +506,18 @@ func (s *Server) createDocument(c *gin.Context) {
 	c.JSON(http.StatusCreated, result)
 }
 
+// @Summary Update document
+// @Description Update a document by ID in a collection
+// @Accept json
+// @Produce json
+// @Param name path string true "Collection name"
+// @Param id path string true "Document ID"
+// @Param document body interface{} true "Document data"
+// @Success 200 {object} interface{}
+// @Failure 400 {object} map[string]string
+// @Failure 404 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /api/collections/{name}/documents/{id} [put]
 func (s *Server) updateDocument(c *gin.Context) {
 	ctx := c.Request.Context()
 	collectionName := c.Param("name")
@@ -444,6 +544,14 @@ func (s *Server) updateDocument(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
+// @Summary Delete document
+// @Description Delete a document by ID in a collection
+// @Param name path string true "Collection name"
+// @Param id path string true "Document ID"
+// @Success 204
+// @Failure 404 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /api/collections/{name}/documents/{id} [delete]
 func (s *Server) deleteDocument(c *gin.Context) {
 	ctx := c.Request.Context()
 	collectionName := c.Param("name")
@@ -480,4 +588,3 @@ func getEnv(key, defaultValue string) string {
 	}
 	return defaultValue
 }
-

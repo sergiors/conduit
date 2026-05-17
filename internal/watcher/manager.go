@@ -10,28 +10,28 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/sergiors/conduit/internal/collections"
 	"github.com/sergiors/conduit/internal/dispatch"
 	redisclient "github.com/sergiors/conduit/internal/redis"
 	"github.com/sergiors/conduit/internal/retry"
 	"github.com/sergiors/conduit/internal/streams"
-	"github.com/sergiors/conduit/internal/collections"
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
 // Manager manages CDC watchers for all enabled collections
 type Manager struct {
-	mongoClient    *mongo.Client
-	database       string
+	mongoClient         *mongo.Client
+	database            string
 	collectionStore     *collections.Store
-	redisClient    *redisclient.Client
-	dispatcher     Dispatcher
-	retryProcessor *retry.Processor
-	watchers             map[string]*Watcher
-	currentDestinations  map[string][]collections.DestinationConfig
-	mu                   sync.RWMutex
-	syncInterval         time.Duration
-	pubsub         *redis.PubSub
-	configChan     <-chan *redis.Message
+	redisClient         *redisclient.Client
+	dispatcher          Dispatcher
+	retryProcessor      *retry.Processor
+	watchers            map[string]*Watcher
+	currentDestinations map[string][]collections.DestinationConfig
+	mu                  sync.RWMutex
+	syncInterval        time.Duration
+	pubsub              *redis.PubSub
+	configChan          <-chan *redis.Message
 }
 
 // Dispatcher interface for decoupling
@@ -63,12 +63,12 @@ func NewManager(
 	cfg Config,
 ) *Manager {
 	return &Manager{
-		mongoClient:  mongoClient,
-		database:     database,
-		collectionStore:   collectionStore,
-		redisClient:  redisClient,
-		dispatcher:   dispatcher,
-		retryProcessor: retryProcessor,
+		mongoClient:         mongoClient,
+		database:            database,
+		collectionStore:     collectionStore,
+		redisClient:         redisClient,
+		dispatcher:          dispatcher,
+		retryProcessor:      retryProcessor,
 		watchers:            make(map[string]*Watcher),
 		currentDestinations: make(map[string][]collections.DestinationConfig),
 		syncInterval:        cfg.SyncInterval,

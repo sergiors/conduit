@@ -107,10 +107,10 @@ func TestClientCreateTTLIndex(t *testing.T) {
 	defer cancel()
 
 	client, err := NewClient(ctx, Config{
-			URI:      "mongodb://localhost:27017",
-			Database: "conduit",
-			Timeout:  10 * time.Second,
-		})
+		URI:      "mongodb://localhost:27017",
+		Database: "conduit",
+		Timeout:  10 * time.Second,
+	})
 	if err != nil {
 		t.Skipf("MongoDB not available: %v", err)
 	}
@@ -185,10 +185,10 @@ func TestClientEnableStreams(t *testing.T) {
 	defer cancel()
 
 	client, err := NewClient(ctx, Config{
-			URI:      "mongodb://localhost:27017",
-			Database: "conduit",
-			Timeout:  10 * time.Second,
-		})
+		URI:      "mongodb://localhost:27017",
+		Database: "conduit",
+		Timeout:  10 * time.Second,
+	})
 	if err != nil {
 		t.Skipf("MongoDB not available: %v", err)
 	}

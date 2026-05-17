@@ -36,7 +36,7 @@ type DocumentQuery struct {
 
 // DocumentListResult represents the result of a scan operation
 type DocumentListResult struct {
-	Documents []bson.M `json:"documents"`
+	Documents  []bson.M `json:"documents"`
 	Total      int64    `json:"total"`
 	Page       int64    `json:"page"`
 	Limit      int64    `json:"limit"`
@@ -99,7 +99,7 @@ func (d *Document) List(ctx context.Context, query DocumentQuery) (*DocumentList
 	}
 
 	return &DocumentListResult{
-		Documents: documents,
+		Documents:  documents,
 		Total:      total,
 		Page:       query.Page,
 		Limit:      query.Limit,
@@ -135,7 +135,6 @@ func (d *Document) Get(ctx context.Context, id string) (bson.M, error) {
 	}
 	return doc, nil
 }
-
 
 // Create inserts a new item
 func (d *Document) Create(ctx context.Context, data bson.M) (bson.M, error) {

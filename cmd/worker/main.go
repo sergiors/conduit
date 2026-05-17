@@ -8,21 +8,21 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/sergiors/conduit/internal/collections"
 	"github.com/sergiors/conduit/internal/dispatch"
 	"github.com/sergiors/conduit/internal/mongo"
 	"github.com/sergiors/conduit/internal/redis"
 	"github.com/sergiors/conduit/internal/retry"
-	"github.com/sergiors/conduit/internal/collections"
 	"github.com/sergiors/conduit/internal/watcher"
 )
 
 type Worker struct {
-	mongoClient    *mongo.Client
-	redisClient    *redis.Client
-	collectionStore     *collections.Store
-	dispatcher     *dispatch.Dispatcher
-	watcherManager *watcher.Manager
-	retryProcessor *retry.Processor
+	mongoClient     *mongo.Client
+	redisClient     *redis.Client
+	collectionStore *collections.Store
+	dispatcher      *dispatch.Dispatcher
+	watcherManager  *watcher.Manager
+	retryProcessor  *retry.Processor
 }
 
 func NewWorker() (*Worker, error) {
@@ -51,8 +51,8 @@ func NewWorker() (*Worker, error) {
 
 	// Initialize Redis client with URI/DSN
 	redisClient, err := redis.NewClient(ctx, redis.Config{
-		URI:      redisURI,
-		Prefix:   "cdc:",
+		URI:    redisURI,
+		Prefix: "cdc:",
 	})
 	if err != nil {
 		mongoClient.Close(ctx)
@@ -86,12 +86,12 @@ func NewWorker() (*Worker, error) {
 	)
 
 	return &Worker{
-		mongoClient:    mongoClient,
-		redisClient:    redisClient,
-		collectionStore:     store,
-		dispatcher:     dispatcher,
-		watcherManager: watcherManager,
-		retryProcessor: retryProcessor,
+		mongoClient:     mongoClient,
+		redisClient:     redisClient,
+		collectionStore: store,
+		dispatcher:      dispatcher,
+		watcherManager:  watcherManager,
+		retryProcessor:  retryProcessor,
 	}, nil
 }
 

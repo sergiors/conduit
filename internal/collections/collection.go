@@ -54,19 +54,18 @@ func (d *DestinationConfig) ValidateEventTypes() error {
 	return nil
 }
 
-
 type Collection struct {
-	ID                   string              `bson:"_id,omitempty" json:"_id,omitempty"`
-	CollectionName       string              `bson:"collection_name,omitempty" json:"collection_name,omitempty"`
-	PrimaryKey           string              `bson:"primary_key,omitempty" json:"primary_key,omitempty"`
-	SortKey              string              `bson:"sort_key,omitempty" json:"sort_key,omitempty"`
-	StreamEnabled        bool                `bson:"stream_enabled" json:"stream_enabled"`
-	OldImage             bool                `bson:"old_image" json:"old_image"`
-	TTLAttribute         string              `bson:"ttl_attribute,omitempty" json:"ttl_attribute,omitempty"`
-	Destinations         []DestinationConfig `bson:"destinations" json:"destinations"`
-	DeletionProtection   bool                `bson:"deletion_protection" json:"deletion_protection"`
-	CreatedAt            time.Time           `bson:"created_at" json:"created_at"`
-	UpdatedAt            time.Time           `bson:"updated_at" json:"updated_at"`
+	ID                 string              `bson:"_id,omitempty" json:"_id,omitempty"`
+	CollectionName     string              `bson:"collection_name,omitempty" json:"collection_name,omitempty"`
+	PrimaryKey         string              `bson:"primary_key,omitempty" json:"primary_key,omitempty"`
+	SortKey            string              `bson:"sort_key,omitempty" json:"sort_key,omitempty"`
+	StreamEnabled      bool                `bson:"stream_enabled" json:"stream_enabled"`
+	OldImage           bool                `bson:"old_image" json:"old_image"`
+	TTLAttribute       string              `bson:"ttl_attribute,omitempty" json:"ttl_attribute,omitempty"`
+	Destinations       []DestinationConfig `bson:"destinations" json:"destinations"`
+	DeletionProtection bool                `bson:"deletion_protection" json:"deletion_protection"`
+	CreatedAt          time.Time           `bson:"created_at" json:"created_at"`
+	UpdatedAt          time.Time           `bson:"updated_at" json:"updated_at"`
 }
 
 // Store manages collection configurations in MongoDB
@@ -182,9 +181,11 @@ func (s *Store) Create(ctx context.Context, collection *Collection) error {
 	if name == "" {
 		return fmt.Errorf("collection name is required")
 	}
+
 	if collection.SortKey != "" && collection.PrimaryKey == "" {
 		return fmt.Errorf("primary_key is required when sort_key is defined")
 	}
+
 	if collection.PrimaryKey != "" && collection.PrimaryKey == collection.SortKey {
 		return fmt.Errorf("sort_key cannot be the same as primary_key")
 	}
@@ -244,36 +245,23 @@ func (s *Store) Update(ctx context.Context, collection *Collection) error {
 		return fmt.Errorf("collection not found")
 	}
 
-	// collection name cannot be changed
-	if name != existing.CollectionName {
-		return fmt.Errorf("collection name cannot be changed: '%s' -> '%s'", existing.CollectionName, name)
-	}
-
 	// TTL attribute cannot be changed once set
 	if existing.TTLAttribute != "" && collection.TTLAttribute != existing.TTLAttribute {
 		return fmt.Errorf("TTL attribute cannot be changed once set: '%s' -> '%s'", existing.TTLAttribute, collection.TTLAttribute)
 	}
-	if existing.PrimaryKey != collection.PrimaryKey {
-		return fmt.Errorf("primary_key cannot be changed once set")
-	}
-	if existing.SortKey != collection.SortKey {
-		return fmt.Errorf("sort_key cannot be changed once set")
-	}
+
 	if collection.SortKey != "" && collection.PrimaryKey == "" {
 		return fmt.Errorf("primary_key is required when sort_key is defined")
 	}
+
 	if collection.PrimaryKey != "" && collection.PrimaryKey == collection.SortKey {
 		return fmt.Errorf("sort_key cannot be the same as primary_key")
 	}
 
 	update := bson.M{
-		"collection_name":     collection.CollectionName,
-		"primary_key":         collection.PrimaryKey,
-		"sort_key":            collection.SortKey,
 		"stream_enabled":      collection.StreamEnabled,
 		"old_image":           collection.OldImage,
 		"ttl_attribute":       collection.TTLAttribute,
-		"destinations":        collection.Destinations,
 		"deletion_protection": collection.DeletionProtection,
 		"updated_at":          time.Now(),
 	}
@@ -319,4 +307,33 @@ func (s *Store) ListStreamEnabled(ctx context.Context) ([]Collection, error) {
 		return nil, err
 	}
 	return collections, nil
+}
+
+// GetDestinations returns the destinations for a collection
+func (s *Store) GetDestinations(ctx context.Context, collectionName string) ([]DestinationConfig, error) {
+	collection, err := s.Get(ctx, collectionName)
+	if err != nil {
+		return nil, err
+	}
+	return collection.Destinations, nil
+}
+
+// UpdateDestinations replaces the destinations for a collection
+func (s *Store) UpdateDestinations(ctx context.Context, collectionName string, destinations []DestinationConfig) error {
+	collection, err := s.Get(ctx, collectionName)
+	if err != nil {
+		return fmt.Errorf("collection not found")
+	}
+
+	if !collection.StreamEnabled {
+		return fmt.Errorf("stream_enabled must be true to configure destinations")
+	}
+
+	update := bson.M{
+		"destinations": destinations,
+		"updated_at":   time.Now(),
+	}
+
+	_, err = s.collection.UpdateOne(ctx, bson.M{"collection_name": collectionName}, bson.M{"$set": update})
+	return err
 }

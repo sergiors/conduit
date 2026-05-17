@@ -86,11 +86,11 @@ func TestProcessRetryEvent(t *testing.T) {
 		}, false, false)
 
 		event := redis.RetryEvent{
-			ID:          "users-123",
+			ID:             "users-123",
 			CollectionName: "users",
-			EventData:   eventData,
-			RetryCount:  0,
-			MaxRetries:  5,
+			EventData:      eventData,
+			RetryCount:     0,
+			MaxRetries:     5,
 		}
 
 		// Should succeed without panic
@@ -108,11 +108,11 @@ func TestProcessRetryEvent(t *testing.T) {
 		}, false, false)
 
 		event := redis.RetryEvent{
-			ID:          "users-456",
+			ID:             "users-456",
 			CollectionName: "users",
-			EventData:   eventData,
-			RetryCount:  5, // Already at max
-			MaxRetries:  5,
+			EventData:      eventData,
+			RetryCount:     5, // Already at max
+			MaxRetries:     5,
 		}
 
 		// Should not panic with nil redis client

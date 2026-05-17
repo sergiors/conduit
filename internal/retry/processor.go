@@ -20,7 +20,7 @@ type Processor struct {
 	maxRetries  int
 	baseDelay   time.Duration
 	maxDelay    time.Duration
-	collections      map[string]bool
+	collections map[string]bool
 	mu          sync.RWMutex
 }
 
@@ -55,7 +55,7 @@ func NewProcessor(
 		maxRetries:  cfg.MaxRetries,
 		baseDelay:   cfg.BaseDelay,
 		maxDelay:    cfg.MaxDelay,
-		collections:      make(map[string]bool),
+		collections: make(map[string]bool),
 	}
 }
 

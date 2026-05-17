@@ -1,0 +1,495 @@
+definitions:
+  collections.Collection:
+    properties:
+      _id:
+        type: string
+      collection_name:
+        type: string
+      created_at:
+        type: string
+      deletion_protection:
+        type: boolean
+      destinations:
+        items:
+          $ref: '#/definitions/collections.DestinationConfig'
+        type: array
+      old_image:
+        type: boolean
+      primary_key:
+        type: string
+      sort_key:
+        type: string
+      stream_enabled:
+        type: boolean
+      ttl_attribute:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  collections.DestinationConfig:
+    properties:
+      bearer_token:
+        description: HTTP auth token or Meilisearch API key
+        type: string
+      endpoint:
+        description: HTTP URL or Meilisearch host or EventBridge event-bus name
+        type: string
+      event_bus_name:
+        description: EventBridge event bus name
+        type: string
+      event_types:
+        items:
+          type: string
+        type: array
+      filter_criteria:
+        $ref: '#/definitions/collections.FilterCriteria'
+      index_name:
+        description: Meilisearch-specific
+        type: string
+      region:
+        description: EventBridge-specific
+        type: string
+      source:
+        description: 'Event source (default: "conduit-mongodb")'
+        type: string
+      type:
+        type: string
+    type: object
+  collections.FilterCondition:
+    properties:
+      anything-but: {}
+      exists:
+        type: boolean
+      numeric:
+        items: {}
+        type: array
+      prefix:
+        type: string
+      suffix:
+        type: string
+    type: object
+  collections.FilterCriteria:
+    properties:
+      new_image:
+        $ref: '#/definitions/collections.ImageFilter'
+      old_image:
+        $ref: '#/definitions/collections.ImageFilter'
+    type: object
+  collections.ImageFilter:
+    additionalProperties:
+      $ref: '#/definitions/collections.FilterCondition'
+    type: object
+info:
+  contact: {}
+paths:
+  /api/collections:
+    get:
+      description: List all collection configurations
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/collections.Collection'
+            type: array
+      summary: List all collections
+    post:
+      consumes:
+      - application/json
+      description: Creates a new collection configuration
+      parameters:
+      - description: Collection data
+        in: body
+        name: collection
+        required: true
+        schema:
+          $ref: '#/definitions/collections.Collection'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/collections.Collection'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Create collection
+  /api/collections/{name}:
+    delete:
+      description: Delete a collection configuration
+      parameters:
+      - description: Collection name
+        in: path
+        name: name
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Delete collection
+    get:
+      description: Get a collection configuration by name
+      parameters:
+      - description: Collection name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/collections.Collection'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get collection
+    put:
+      consumes:
+      - application/json
+      description: Update a collection configuration
+      parameters:
+      - description: Collection name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: Collection data
+        in: body
+        name: collection
+        required: true
+        schema:
+          $ref: '#/definitions/collections.Collection'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/collections.Collection'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Update collection
+  /api/collections/{name}/destinations:
+    get:
+      description: Get destinations for a collection
+      parameters:
+      - description: Collection name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/collections.DestinationConfig'
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get collection destinations
+    put:
+      consumes:
+      - application/json
+      description: Replace destinations for a collection (stream_enabled must be true)
+      parameters:
+      - description: Collection name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: Destinations data
+        in: body
+        name: destinations
+        required: true
+        schema:
+          items:
+            $ref: '#/definitions/collections.DestinationConfig'
+          type: array
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/collections.DestinationConfig'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Update collection destinations
+  /api/collections/{name}/documents:
+    get:
+      description: List documents in a collection with pagination and filtering
+      parameters:
+      - description: Collection name
+        in: path
+        name: name
+        required: true
+        type: string
+      - default: 1
+        description: Page number
+        in: query
+        name: page
+        type: integer
+      - default: 20
+        description: Items per page
+        in: query
+        name: limit
+        type: integer
+      - description: Filter as JSON
+        in: query
+        name: filter
+        type: string
+      - description: Sort as JSON
+        in: query
+        name: sort
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema: {}
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List documents
+    post:
+      consumes:
+      - application/json
+      description: Create a new document in a collection
+      parameters:
+      - description: Collection name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: Document data
+        in: body
+        name: document
+        required: true
+        schema: {}
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema: {}
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Create document
+  /api/collections/{name}/documents/{id}:
+    delete:
+      description: Delete a document by ID in a collection
+      parameters:
+      - description: Collection name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: Document ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Delete document
+    get:
+      description: Get a document by ID in a collection
+      parameters:
+      - description: Collection name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: Document ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema: {}
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get document
+    put:
+      consumes:
+      - application/json
+      description: Update a document by ID in a collection
+      parameters:
+      - description: Collection name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: Document ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Document data
+        in: body
+        name: document
+        required: true
+        schema: {}
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema: {}
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Update document
+  /health:
+    get:
+      description: Check if the API is running
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Health check
+swagger: "2.0"

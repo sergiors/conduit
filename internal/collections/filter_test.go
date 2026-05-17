@@ -209,4 +209,4 @@ func TestFilterCriteriaAndWithinField(t *testing.T) {
 }
 
 func strPtr(s string) *string { return &s }
-func boolPtr(b bool) *bool   { return &b }
+func boolPtr(b bool) *bool    { return &b }

@@ -137,13 +137,13 @@ func (c *Client) MarkProcessed(ctx context.Context, id string, ttl time.Duration
 // RetryQueue operations
 // RetryEvent adds an event to the retry queue with retry count
 type RetryEvent struct {
-	ID               string          `json:"id"`
-	CollectionName   string          `json:"collectionName"`
-	EventData        json.RawMessage `json:"eventData"` // Raw JSON of the stream record
-	RetryCount       int             `json:"retryCount"`
-	MaxRetries       int             `json:"maxRetries"`
-	NextRetryAt      time.Time       `json:"nextRetryAt"`
-} 
+	ID             string          `json:"id"`
+	CollectionName string          `json:"collectionName"`
+	EventData      json.RawMessage `json:"eventData"` // Raw JSON of the stream record
+	RetryCount     int             `json:"retryCount"`
+	MaxRetries     int             `json:"maxRetries"`
+	NextRetryAt    time.Time       `json:"nextRetryAt"`
+}
 
 // EnqueueRetry adds an event to the retry queue with exponential backoff
 // The event JSON is stored directly as the member in the sorted set
