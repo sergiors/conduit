@@ -654,7 +654,7 @@ const docTemplate = `{
                 "old_image": {
                     "type": "boolean"
                 },
-                "primary_key": {
+                "partition_key": {
                     "type": "string"
                 },
                 "sort_key": {

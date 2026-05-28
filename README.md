@@ -50,16 +50,16 @@ The project supports two operation modes:
 
 ### Core Components
 
-| Component           | Package             | Description                                |
-| ------------------- | ------------------- | ------------------------------------------ |
-| **API**             | `cmd/api`           | REST control plane for collection management    |
-| **Worker**          | `cmd/worker`        | CDC data plane with watchers               |
-| **Watcher Manager** | `internal/watcher`  | Centralized watcher lifecycle + Pub/Sub    |
-| **Dispatcher**      | `internal/dispatch` | Event routing to destinations              |
-| **Retry Processor** | `internal/retry`    | Backoff and DLQ handling                   |
-| **Redis Client**    | `internal/redis`    | State store + Pub/Sub operations           |
-| **Mongo Client**    | `internal/mongo`    | Database + change streams + replica set    |
-| **Collections Store**    | `internal/tables`   | Configuration management (`config.collections`) |
+| Component             | Package             | Description                                     |
+| --------------------- | ------------------- | ----------------------------------------------- |
+| **API**               | `cmd/api`           | REST control plane for collection management    |
+| **Worker**            | `cmd/worker`        | CDC data plane with watchers                    |
+| **Watcher Manager**   | `internal/watcher`  | Centralized watcher lifecycle + Pub/Sub         |
+| **Dispatcher**        | `internal/dispatch` | Event routing to destinations                   |
+| **Retry Processor**   | `internal/retry`    | Backoff and DLQ handling                        |
+| **Redis Client**      | `internal/redis`    | State store + Pub/Sub operations                |
+| **Mongo Client**      | `internal/mongo`    | Database + change streams + replica set         |
+| **Collections Store** | `internal/tables`   | Configuration management (`config.collections`) |
 
 ### Redis Key Structure
 
@@ -209,20 +209,20 @@ curl -X POST http://localhost:8080/api/collections \
 
 ### Collections
 
-| Method   | Endpoint            | Description     |
-| -------- | ------------------- | --------------- |
+| Method   | Endpoint                 | Description          |
+| -------- | ------------------------ | -------------------- |
 | `GET`    | `/api/collections`       | List all collections |
 | `POST`   | `/api/collections`       | Create collection    |
 | `PUT`    | `/api/collections/:name` | Update collection    |
 | `DELETE` | `/api/collections/:name` | Delete collection    |
-| `GET`    | `/health`           | Health check    |
+| `GET`    | `/health`                | Health check         |
 
 ### Collection Schema
 
 ```json
 {
   "collection_name": "users",
-  "primary_key": "id",
+  "partition_key": "id",
   "sort_key": "email",
   "stream_enabled": true,
   "old_image": true,
@@ -242,10 +242,10 @@ curl -X POST http://localhost:8080/api/collections \
 
 | Field                 | Type   | Default | Description                                 |
 | --------------------- | ------ | ------- | ------------------------------------------- |
-| `collection_name`          | string | -       | Name of the MongoDB collection              |
-| `primary_key`         | string | -       | Optional partition key field name           |
+| `collection_name`     | string | -       | Name of the MongoDB collection              |
+| `partition_key`       | string | -       | Optional partition key field name           |
 | `sort_key`            | string | -       | Optional sort key field name                |
-| `stream_enabled`      | bool   | false   | Enable CDC streaming for this collection         |
+| `stream_enabled`      | bool   | false   | Enable CDC streaming for this collection    |
 | `old_image`           | bool   | false   | Include old document state in change events |
 | `ttl_attribute`       | string | -       | Field name for TTL expiration               |
 | `deletion_protection` | bool   | true    | Prevent accidental deletion (default: true) |
@@ -253,8 +253,8 @@ curl -X POST http://localhost:8080/api/collections \
 
 Key schema rules:
 
-- If `sort_key` is defined, `primary_key` is required
-- `primary_key` and `sort_key` can use any user-defined field names
+- If `sort_key` is defined, `partition_key` is required
+- `partition_key` and `sort_key` can use any user-defined field names
 - If both are omitted, collection runs in MongoDB-native mode
 
 **Destination Configuration:**
@@ -274,10 +274,10 @@ Key schema rules:
 
 **EventBridge-specific fields:**
 
-| Field            | Type   | Required | Description                             |
-| ---------------- | ------ | -------- | --------------------------------------- |
-| `region`         | string | Yes      | AWS region (e.g. `us-east-1`)           |
-| `event_bus_name` | string | Yes      | EventBridge event bus name              |
+| Field            | Type   | Required | Description                               |
+| ---------------- | ------ | -------- | ----------------------------------------- |
+| `region`         | string | Yes      | AWS region (e.g. `us-east-1`)             |
+| `event_bus_name` | string | Yes      | EventBridge event bus name                |
 | `source`         | string | No       | Event source (default: `conduit-mongodb`) |
 
 **Meilisearch-specific fields:**
@@ -286,7 +286,7 @@ Key schema rules:
 | -------------- | ------ | -------- | ----------------------------------------------- |
 | `endpoint`     | string | Yes      | Meilisearch host (e.g. `http://localhost:7700`) |
 | `bearer_token` | string | No       | Meilisearch API key                             |
-| `index_name`   | string | No       | Target index (default: `collection_name`)            |
+| `index_name`   | string | No       | Target index (default: `collection_name`)       |
 
 **HTTP Request:**
 
@@ -486,7 +486,7 @@ DynamoDB-compatible mode:
 ```json
 {
   "collection_name": "users",
-  "primary_key": "id",
+  "partition_key": "id",
   "sort_key": "email"
 }
 ```
@@ -512,10 +512,10 @@ MongoDB-native mode:
 
 Streaming is **explicitly enabled per collection**:
 
-| `stream_enabled` | Worker Behavior                      |
-| ---------------- | ------------------------------------ |
+| `stream_enabled` | Worker Behavior                           |
+| ---------------- | ----------------------------------------- |
 | `false`          | ❌ No watcher created, collection ignored |
-| `true`           | ✅ Watcher created, events processed |
+| `true`           | ✅ Watcher created, events processed      |
 
 ### Watcher Lifecycle
 
@@ -655,13 +655,13 @@ redis-cli KEYS "cdc:dlq:*"
 
 ## 🔒 Critical Guarantees
 
-| Guarantee              | Implementation                 |
-| ---------------------- | ------------------------------ |
-| **No event loss**      | Retry queue + DLQ              |
-| **No duplicates**      | Idempotency keys (24h TTL)     |
-| **No goroutine leaks** | Proper watcher lifecycle       |
-| **Per-collection resume**   | Individual tokens in Redis     |
-| **Graceful shutdown**  | Context cancellation + timeout |
+| Guarantee                 | Implementation                 |
+| ------------------------- | ------------------------------ |
+| **No event loss**         | Retry queue + DLQ              |
+| **No duplicates**         | Idempotency keys (24h TTL)     |
+| **No goroutine leaks**    | Proper watcher lifecycle       |
+| **Per-collection resume** | Individual tokens in Redis     |
+| **Graceful shutdown**     | Context cancellation + timeout |
 
 ## 🚨 Troubleshooting
 

@@ -30,7 +30,7 @@ export interface DestinationConfig {
 export interface CollectionConfig {
   _id?: string;
   collection_name: string;
-  primary_key?: string;
+  partition_key?: string;
   sort_key?: string;
   stream_enabled: boolean;
   old_image: boolean;
@@ -43,9 +43,11 @@ export interface CollectionConfig {
 
 export async function clientLoader() {
   const response = await fetch("/api/collections");
+
   if (!response.ok) {
     throw new Error("Failed to fetch collections");
   }
+
   const collections: CollectionConfig[] = await response.json();
   return { collections };
 }

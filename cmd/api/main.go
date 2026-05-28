@@ -478,11 +478,11 @@ func (s *Server) createDocument(c *gin.Context) {
 		return
 	}
 
-	if collectionConfig.PrimaryKey != "" {
-		rawPK, hasPK := data[collectionConfig.PrimaryKey]
+	if collectionConfig.PartitionKey != "" {
+		rawPK, hasPK := data[collectionConfig.PartitionKey]
 		pk, pkOK := rawPK.(string)
 		if !hasPK || !pkOK || pk == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("%s is required and must be a non-empty string", collectionConfig.PrimaryKey)})
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("%s is required and must be a non-empty string", collectionConfig.PartitionKey)})
 			return
 		}
 		if collectionConfig.SortKey != "" {

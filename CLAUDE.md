@@ -37,7 +37,7 @@ as closely as possible.
 
 Compatibility model:
 
--   DynamoDB-compatible mode: collection defines key schema (`primary_key` and optional `sort_key`)
+-   DynamoDB-compatible mode: collection defines key schema (`partition_key` and optional `sort_key`)
 -   MongoDB-native mode: collection defines no key schema and uses default MongoDB behavior (`_id`)
 
 The system operates with DynamoDB semantics:

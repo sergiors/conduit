@@ -167,7 +167,7 @@ func (m *Manager) startWatcher(ctx context.Context, collection collections.Colle
 		m.mongoClient,
 		m.database,
 		collection.CollectionName,
-		collection.PrimaryKey,
+		collection.PartitionKey,
 		collection.SortKey,
 		collection.OldImage,
 		resumeToken,

@@ -1,7 +1,6 @@
+import { DatabaseIcon, MoreHorizontalIcon, PlusIcon } from "lucide-react";
 import { useState } from "react";
-import { Link, useRevalidator } from "react-router";
-
-import { clientLoader, type CollectionConfig } from "./loader.client";
+import { Link, useRevalidator, useRouteLoaderData } from "react-router";
 
 import {
   AlertDialog,
@@ -14,46 +13,37 @@ import {
   AlertDialogTitle,
 } from "~/components/ui/alert-dialog";
 import { Button } from "~/components/ui/button";
-import { Card, CardContent } from "~/components/ui/card";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "~/components/ui/dialog";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "~/components/ui/table";
-
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "~/components/ui/card";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "~/components/ui/dropdown-menu";
 
-import { MoreHorizontalIcon } from "lucide-react";
+import type { CollectionConfig } from "../_app/loader.client";
+import type { Route } from "./+types/route";
 
-export { clientLoader };
+export const handle = {
+  breadcrumb: ({}: Route.LoaderArgs) => <>Collections</>,
+};
 
-export function meta() {
-  return [
-    { title: "Tables - Conduit" },
-    { name: "description", content: "Conduit Tables Management" },
-  ];
-}
+// Tipo do loader do _app/route.tsx
+type AppLoaderData = { collections: CollectionConfig[] };
 
-export default function Route({
-  loaderData,
-}: {
-  loaderData: { collections: CollectionConfig[] };
-}) {
-  const { collections } = loaderData;
+export default function Route() {
+  const loaderData = useRouteLoaderData("routes/_app") as
+    | AppLoaderData
+    | undefined;
+  const collections = loaderData?.collections || [];
+
   const revalidator = useRevalidator();
 
   const [deletingCollection, setDeletingCollection] =
@@ -90,17 +80,27 @@ export default function Route({
   };
 
   const openDeleteDialog = (collection: CollectionConfig) => {
-    if (collection.deletion_protection) return;
+    if (collection.deletion_protection) {
+      setDeleteError("Disable deletion protection first");
+      return;
+    }
     setDeletingCollection(collection);
   };
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
-        <h1 className="text-2xl font-bold">Collections</h1>
-        <Link to="/collections/new">
-          <Button>New Collection</Button>
-        </Link>
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold">Collections</h1>
+          <p className="text-sm text-muted-foreground">
+            Manage your MongoDB collections and CDC configurations
+          </p>
+        </div>
+        <Button size="sm" asChild>
+          <Link to="/collections/new">
+            <PlusIcon /> New Collection
+          </Link>
+        </Button>
       </div>
 
       {/* Delete Confirmation Dialog */}
@@ -137,165 +137,153 @@ export default function Route({
         </AlertDialogContent>
       </AlertDialog>
 
-      <Card>
-        <CardContent>
-          {collections.length === 0 ? (
-            <p className="text-muted-foreground">No collections configured.</p>
-          ) : (
-            <Table>
-              <TableHeader className="pointer-events-none">
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Stream</TableHead>
-                  <TableHead>Old Image</TableHead>
-                  <TableHead>TTL Attribute</TableHead>
-                  <TableHead>Destinations</TableHead>
-                  <TableHead>Deletion Protection</TableHead>
-                  <TableHead className="w-[50px]"></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {collections.map((collection: CollectionConfig) => (
-                  <TableRow key={collection._id || collection.collection_name}>
-                    <TableCell className="font-medium">
+      {collections.length === 0 ? (
+        <Card>
+          <CardHeader className="text-center">
+            <DatabaseIcon className="h-12 w-12 mx-auto text-muted-foreground" />
+            <CardTitle>No collections yet</CardTitle>
+            <CardDescription>
+              Create your first collection to start managing MongoDB change data
+              capture
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex justify-center">
+            <Button asChild>
+              <Link to="/collections/new">
+                <PlusIcon /> Create Collection
+              </Link>
+            </Button>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {collections.map((collection: CollectionConfig) => (
+            <Card
+              key={collection._id || collection.collection_name}
+              className="relative"
+            >
+              <CardHeader>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <DatabaseIcon className="h-5 w-5 text-muted-foreground" />
+                    <CardTitle className="text-lg">
                       {collection.collection_name}
-                    </TableCell>
-                    <TableCell>
-                      <span
-                        className={`text-sm ${
-                          collection.stream_enabled
-                            ? "text-green-600"
-                            : "text-muted-foreground"
-                        }`}
+                    </CardTitle>
+                  </div>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="icon" className="h-8 w-8">
+                        <MoreHorizontalIcon className="h-4 w-4" />
+                        <span className="sr-only">Actions</span>
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem asChild>
+                        <Link to={`/documents/${collection.collection_name}`}>
+                          Documents
+                        </Link>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        disabled={!collection.stream_enabled}
+                        asChild
                       >
-                        {collection.stream_enabled ? "Yes" : "No"}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <span
-                        className={`text-sm ${
-                          collection.old_image
-                            ? "text-green-600"
-                            : "text-muted-foreground"
-                        }`}
-                      >
-                        {collection.old_image ? "Yes" : "No"}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {collection.ttl_attribute || "-"}
-                    </TableCell>
-                    <TableCell>
-                      <DestinationsCell
-                        destinations={collection.destinations}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <span
-                        className={`text-sm ${
-                          collection.deletion_protection
-                            ? "text-green-600"
-                            : "text-red-600"
-                        }`}
-                      >
-                        {collection.deletion_protection
-                          ? "Enabled"
-                          : "Disabled"}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon">
-                            <MoreHorizontalIcon className="size-4" />
-                            <span className="sr-only">Actions</span>
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent
-                          align="end"
-                          className="[&_[role='menuitem']]:cursor-pointer"
+                        <Link
+                          to={`/collections/${collection.collection_name}/destinations`}
                         >
-                          <DropdownMenuItem asChild>
-                            <Link
-                              to={`/documents/${collection.collection_name}`}
-                            >
-                              Documents
-                            </Link>
-                          </DropdownMenuItem>
-                          <DropdownMenuItem asChild>
-                            <Link
-                              to={`/collections/${collection.collection_name}/edit`}
-                            >
-                              Edit
-                            </Link>
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() => openDeleteDialog(collection)}
-                            disabled={collection.deletion_protection}
-                            className="text-destructive focus:text-destructive"
-                          >
-                            Delete
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-function DestinationsCell({
-  destinations,
-}: {
-  destinations: CollectionConfig["destinations"];
-}) {
-  const [open, setOpen] = useState(false);
-
-  return (
-    <>
-      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
-        {destinations.length}{" "}
-        {destinations.length === 1 ? "destination" : "destinations"}
-      </Button>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Destinations</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            {destinations.map((d, i) => (
-              <div key={i} className="border rounded-lg p-4 space-y-2">
-                <div className="flex items-center gap-2">
-                  <span className="font-medium">{d.type}</span>
-                  {d.endpoint && (
-                    <span className="text-muted-foreground text-sm">
-                      → {d.endpoint}
+                          Destinations
+                        </Link>
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem asChild>
+                        <Link
+                          to={`/collections/${collection.collection_name}/settings`}
+                        >
+                          Settings
+                        </Link>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => openDeleteDialog(collection)}
+                        disabled={collection.deletion_protection}
+                        className="text-destructive focus:text-destructive"
+                      >
+                        Delete
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+                <CardDescription>
+                  {collection.partition_key && (
+                    <span className="mr-3">
+                      PK:{" "}
+                      <code className="text-xs bg-muted px-1 rounded">
+                        {collection.partition_key}
+                      </code>
                     </span>
                   )}
+                  {collection.sort_key && (
+                    <span>
+                      SK:{" "}
+                      <code className="text-xs bg-muted px-1 rounded">
+                        {collection.sort_key}
+                      </code>
+                    </span>
+                  )}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="flex items-center gap-2">
+                    <div
+                      className={`h-2 w-2 rounded-full ${collection.stream_enabled ? "bg-green-500" : "bg-muted"}`}
+                    />
+                    <span className="text-muted-foreground">Stream</span>
+                    <span className="font-medium">
+                      {collection.stream_enabled ? "On" : "Off"}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div
+                      className={`h-2 w-2 rounded-full ${collection.old_image ? "bg-blue-500" : "bg-muted"}`}
+                    />
+                    <span className="text-muted-foreground">Old Image</span>
+                    <span className="font-medium">
+                      {collection.old_image ? "Yes" : "No"}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground">TTL</span>
+                    <span className="font-medium">
+                      {collection.ttl_attribute || "-"}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground">Protection</span>
+                    <span
+                      className={`font-medium ${collection.deletion_protection ? "text-amber-600" : "text-green-600"}`}
+                    >
+                      {collection.deletion_protection ? "On" : "Off"}
+                    </span>
+                  </div>
                 </div>
-                {d.bearer_token && (
-                  <div className="text-sm text-muted-foreground">
-                    <span className="font-medium">Bearer Token:</span>{" "}
-                    {d.bearer_token.substring(0, 20)}...
+                {(collection.destinations || []).length > 0 && (
+                  <div className="mt-3 pt-3 border-t">
+                    <div className="flex items-center gap-1 flex-wrap">
+                      {(collection.destinations || []).map((dest, idx) => (
+                        <span
+                          key={idx}
+                          className="text-xs bg-secondary text-secondary-foreground px-2 py-0.5 rounded-full"
+                        >
+                          {dest.type}
+                        </span>
+                      ))}
+                    </div>
                   </div>
                 )}
-                <div className="text-sm">
-                  <span className="font-medium">Event Types:</span>{" "}
-                  <span className="text-muted-foreground">
-                    {d.event_types?.join(", ") || "ALL"}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </DialogContent>
-      </Dialog>
-    </>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

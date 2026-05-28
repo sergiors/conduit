@@ -15,7 +15,7 @@ definitions:
         type: array
       old_image:
         type: boolean
-      primary_key:
+      partition_key:
         type: string
       sort_key:
         type: string

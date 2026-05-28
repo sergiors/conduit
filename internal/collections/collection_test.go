@@ -21,7 +21,7 @@ func TestTableValidation(t *testing.T) {
 	t.Run("valid table with required fields", func(t *testing.T) {
 		table := Collection{
 			CollectionName: "users",
-			PrimaryKey:     "id",
+			PartitionKey:     "id",
 			SortKey:        "email",
 			StreamEnabled:  true,
 			OldImage:       false,
@@ -29,7 +29,7 @@ func TestTableValidation(t *testing.T) {
 		}
 
 		assert.Equal(t, "users", table.CollectionName)
-		assert.Equal(t, "id", table.PrimaryKey)
+		assert.Equal(t, "id", table.PartitionKey)
 		assert.Equal(t, "email", table.SortKey)
 		assert.True(t, table.StreamEnabled)
 		assert.False(t, table.OldImage)
@@ -150,7 +150,7 @@ func TestStoreCRUD(t *testing.T) {
 	t.Run("create table", func(t *testing.T) {
 		table := &Collection{
 			CollectionName: "test_table",
-			PrimaryKey:     "primaryKey",
+			PartitionKey:     "primaryKey",
 			SortKey:        "sortKey",
 			StreamEnabled:  true,
 			OldImage:       true,

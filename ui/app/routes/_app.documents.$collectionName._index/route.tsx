@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
+import { useState } from "react";
 
 import {
   AlertDialog,
@@ -36,44 +36,38 @@ import {
   Trash2Icon,
 } from "lucide-react";
 import type { Route } from "./+types/route";
+import { clientLoader } from "./loader.client";
+export { clientLoader };
 
 interface Document {
   _id: string;
   [key: string]: unknown;
 }
 
-interface CollectionConfig {
-  _id?: string;
-  collection_name: string;
-  primary_key?: string;
-  sort_key?: string;
-}
+export const handle = {
+  breadcrumb: ({ params }: Route.LoaderArgs) => (
+    <>{params.collectionName} › Documents</>
+  ),
+};
 
-export { clientLoader } from "./loader.client";
+export default function DocumentsRoute({
+  loaderData,
+  params,
+}: Route.ComponentProps) {
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const { collectionName } = params;
 
-export default function DocumentsRoute({ loaderData }: Route.ComponentProps) {
-  const { documents } = loaderData;
-  const { collectionName } = useParams<{ collectionName: string }>();
-  // const [documents, setDocuments] = useState<Document[]>([]);
-  // const [collection, setCollection] = useState<CollectionConfig | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [page, setPage] = useState(1);
-  const [total, setTotal] = useState(0);
+  const documents: Document[] = (loaderData?.documents || []) as Document[];
+  const pagination = {
+    page: loaderData?.page || 1,
+    limit: loaderData?.limit || 20,
+    total: loaderData?.total || 0,
+  };
+
   const [deletingDoc, setDeletingDoc] = useState<Document | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  console.log(documents);
-
-  // useEffect(() => {
-  //   fetchCollection();
-  // }, [collectionName]);
-
-  // useEffect(() => {
-  //   if (collection) {
-  //     fetchDocuments();
-  //   }
-  // }, [page, collection]);
 
   const handleDelete = async () => {
     if (!deletingDoc) return;
@@ -91,7 +85,7 @@ export default function DocumentsRoute({ loaderData }: Route.ComponentProps) {
 
       if (res.ok) {
         setDeletingDoc(null);
-        // fetchDocuments();
+        navigate(`?${searchParams.toString()}`, { replace: true });
       } else {
         const error = await res.json();
         setError(error.error || "Failed to delete document");
@@ -104,54 +98,30 @@ export default function DocumentsRoute({ loaderData }: Route.ComponentProps) {
     }
   };
 
-  // const getDocKey = (doc: Document) => {
-  //   const pkField = collection?.primary_key;
-  //   const skField = collection?.sort_key;
-
-  //   if (pkField && doc[pkField]) {
-  //     const pk = doc[pkField];
-  //     if (skField && doc[skField]) {
-  //       return `${String(pk)}:${String(doc[skField])}`;
-  //     }
-  //     return String(pk);
-  //   }
-  //   return String(doc._id);
-  // };
-
-  // const getDisplayFields = () => {
-  //   if (!collection) return ["_id"];
-  //   const fields: string[] = [];
-  //   if (collection.primary_key) fields.push(collection.primary_key);
-  //   if (collection.sort_key) fields.push(collection.sort_key);
-  //   if (fields.length === 0) fields.push("_id");
-  //   return fields;
-  // };
-
-  // if (!collection) {
-  //   return (
-  //     <div className="p-4 md:p-8">
-  //       <p className="text-muted-foreground">Loading...</p>
-  //     </div>
-  //   );
-  // }
+  const changePage = (newPage: number) => {
+    const newParams = new URLSearchParams(searchParams);
+    newParams.set("page", String(newPage));
+    navigate(`?${newParams.toString()}`, { replace: true });
+  };
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Link to="/collections">
-            <Button variant="ghost" size="icon">
-              <ArrowLeftIcon className="h-4 w-4" />
-            </Button>
-          </Link>
+          <Button variant="ghost" size="icon" asChild>
+            <Link to="/collections">
+              <ArrowLeftIcon />
+            </Link>
+          </Button>
           <h1 className="text-2xl font-bold">Documents: {collectionName}</h1>
         </div>
-        <Link to="new">
-          <Button>
-            <PlusIcon className="h-4 w-4 mr-2" />
+
+        <Button size="sm" asChild>
+          <Link to="new">
+            <PlusIcon />
             New Document
-          </Button>
-        </Link>
+          </Link>
+        </Button>
       </div>
 
       {error && (
@@ -162,11 +132,7 @@ export default function DocumentsRoute({ loaderData }: Route.ComponentProps) {
 
       <Card>
         <CardContent>
-          {loading ? (
-            <p className="text-muted-foreground text-center py-8">
-              Loading documents...
-            </p>
-          ) : documents.length === 0 ? (
+          {documents.length === 0 ? (
             <p className="text-muted-foreground text-center py-8">
               No documents in this collection.
             </p>
@@ -174,20 +140,12 @@ export default function DocumentsRoute({ loaderData }: Route.ComponentProps) {
             <Table>
               <TableHeader>
                 <TableRow>
-                  {/*             {getDisplayFields().map((field) => (
-                    <TableHead key={field}>{field}</TableHead>
-                  ))}*/}
                   <TableHead className="w-[100px]"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {documents.map((doc: Document) => (
                   <TableRow key={doc._id}>
-                    {/*{getDisplayFields().map((field) => (
-                      <TableCell key={field} className="font-medium">
-                        {String(doc[field] ?? doc._id)}
-                      </TableCell>
-                    ))}*/}
                     <TableCell>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
@@ -222,18 +180,19 @@ export default function DocumentsRoute({ loaderData }: Route.ComponentProps) {
             <div className="flex items-center justify-between mt-4">
               <Button
                 variant="outline"
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page === 1}
+                onClick={() => changePage(pagination.page - 1)}
+                disabled={pagination.page === 1}
               >
                 Previous
               </Button>
               <span className="text-sm text-muted-foreground">
-                Page {page} of {Math.ceil(total / 20)}
+                Page {pagination.page} of {Math.ceil(pagination.total / pagination.limit)}
+                {" "}({pagination.total} total)
               </span>
               <Button
                 variant="outline"
-                onClick={() => setPage((p) => p + 1)}
-                disabled={page * 20 >= total}
+                onClick={() => changePage(pagination.page + 1)}
+                disabled={pagination.page * pagination.limit >= pagination.total}
               >
                 Next
               </Button>

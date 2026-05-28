@@ -57,7 +57,7 @@ func (d *DestinationConfig) ValidateEventTypes() error {
 type Collection struct {
 	ID                 string              `bson:"_id,omitempty" json:"_id,omitempty"`
 	CollectionName     string              `bson:"collection_name,omitempty" json:"collection_name,omitempty"`
-	PrimaryKey         string              `bson:"primary_key,omitempty" json:"primary_key,omitempty"`
+	PartitionKey       string              `bson:"partition_key,omitempty" json:"partition_key,omitempty"`
 	SortKey            string              `bson:"sort_key,omitempty" json:"sort_key,omitempty"`
 	StreamEnabled      bool                `bson:"stream_enabled" json:"stream_enabled"`
 	OldImage           bool                `bson:"old_image" json:"old_image"`
@@ -115,7 +115,7 @@ func (s *Store) createCollection(ctx context.Context, collection *Collection) er
 			log.Printf("Warning: Failed to enable changeStreamPreAndPostImages for %s: %v", collectionName, err)
 		}
 
-		if err := s.ensureKeyIndex(ctx, collectionName, collection.PrimaryKey, collection.SortKey); err != nil {
+		if err := s.ensureKeyIndex(ctx, collectionName, collection.PartitionKey, collection.SortKey); err != nil {
 			return fmt.Errorf("ensure key index: %w", err)
 		}
 		return nil
@@ -144,7 +144,7 @@ func (s *Store) createCollection(ctx context.Context, collection *Collection) er
 		return fmt.Errorf("delete placeholder: %w", err)
 	}
 
-	if err := s.ensureKeyIndex(ctx, collectionName, collection.PrimaryKey, collection.SortKey); err != nil {
+	if err := s.ensureKeyIndex(ctx, collectionName, collection.PartitionKey, collection.SortKey); err != nil {
 		return fmt.Errorf("ensure key index: %w", err)
 	}
 
@@ -182,11 +182,11 @@ func (s *Store) Create(ctx context.Context, collection *Collection) error {
 		return fmt.Errorf("collection name is required")
 	}
 
-	if collection.SortKey != "" && collection.PrimaryKey == "" {
-		return fmt.Errorf("primary_key is required when sort_key is defined")
+	if collection.SortKey != "" && collection.PartitionKey == "" {
+		return fmt.Errorf("partition_key is required when sort_key is defined")
 	}
 
-	if collection.PrimaryKey != "" && collection.PrimaryKey == collection.SortKey {
+	if collection.PartitionKey != "" && collection.PartitionKey == collection.SortKey {
 		return fmt.Errorf("sort_key cannot be the same as primary_key")
 	}
 
@@ -248,14 +248,6 @@ func (s *Store) Update(ctx context.Context, collection *Collection) error {
 	// TTL attribute cannot be changed once set
 	if existing.TTLAttribute != "" && collection.TTLAttribute != existing.TTLAttribute {
 		return fmt.Errorf("TTL attribute cannot be changed once set: '%s' -> '%s'", existing.TTLAttribute, collection.TTLAttribute)
-	}
-
-	if collection.SortKey != "" && collection.PrimaryKey == "" {
-		return fmt.Errorf("primary_key is required when sort_key is defined")
-	}
-
-	if collection.PrimaryKey != "" && collection.PrimaryKey == collection.SortKey {
-		return fmt.Errorf("sort_key cannot be the same as primary_key")
 	}
 
 	update := bson.M{

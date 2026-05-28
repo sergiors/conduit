@@ -1,13 +1,17 @@
-import { useState } from "react";
-import { useNavigate, useParams } from "react-router";
-
-import { Button } from "~/components/ui/button";
-import { Card, CardContent } from "~/components/ui/card";
-import { Field, FieldGroup, FieldLabel } from "~/components/ui/field";
-
 import Editor from "@monaco-editor/react";
 import { ArrowLeftIcon, SaveIcon, XIcon } from "lucide-react";
-import { Link } from "react-router";
+import { useState } from "react";
+import { Link, useNavigate, useParams } from "react-router";
+
+import { Button } from "~/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "~/components/ui/card";
+import { Field } from "~/components/ui/field";
 
 export default function NewDocumentRoute() {
   const { collectionName } = useParams<{ collectionName: string }>();
@@ -48,60 +52,54 @@ export default function NewDocumentRoute() {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
-        <Link to={`/documents/${collectionName}`}>
-          <Button variant="ghost" size="icon">
-            <ArrowLeftIcon className="h-4 w-4" />
-          </Button>
-        </Link>
+        <Button variant="ghost" size="icon" asChild>
+          <Link to={`/documents/${collectionName}`}>
+            <ArrowLeftIcon />
+          </Link>
+        </Button>
         <h1 className="text-2xl font-bold">New Document</h1>
       </div>
 
       <Card>
-        <CardContent className="p-4 space-y-4">
-          <FieldGroup>
-            <Field>
-              <FieldLabel>Document JSON</FieldLabel>
-              <div className="border rounded-md overflow-hidden">
-                <Editor
-                  height="500px"
-                  language="json"
-                  value={jsonValue}
-                  onChange={(value) => setJsonValue(value || "{}")}
-                  theme="vs-dark"
-                  options={{
-                    minimap: { enabled: false },
-                    fontSize: 13,
-                    lineNumbers: "on",
-                    automaticLayout: true,
-                    tabSize: 2,
-                    wordWrap: "on",
-                  }}
-                />
-              </div>
-            </Field>
-          </FieldGroup>
+        <CardHeader>
+          <CardTitle>Document JSON</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Field className="border rounded-2xl overflow-hidden">
+            <Editor
+              height="50vh"
+              language="json"
+              value={jsonValue}
+              onChange={(value) => setJsonValue(value || "{}")}
+              theme="vs-dark"
+              options={{
+                minimap: { enabled: false },
+                fontSize: 13,
+                lineNumbers: "on",
+                automaticLayout: true,
+                tabSize: 2,
+                wordWrap: "on",
+              }}
+            />
+          </Field>
 
           {error && (
             <p className="text-sm text-destructive text-center">{error}</p>
           )}
-
-          <div className="flex justify-end gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() =>
-                navigate(`/collections/${collectionName}/documents`)
-              }
-            >
-              <XIcon className="h-4 w-4 mr-2" />
-              Cancel
-            </Button>
-            <Button onClick={handleSubmit} disabled={isSubmitting}>
-              <SaveIcon className="h-4 w-4 mr-2" />
-              {isSubmitting ? "Creating..." : "Save"}
-            </Button>
-          </div>
         </CardContent>
+
+        <CardFooter className="justify-end gap-2">
+          <Button type="button" variant="outline" asChild>
+            <Link to={`/documents/${collectionName}`}>
+              <XIcon />
+              Cancel
+            </Link>
+          </Button>
+          <Button onClick={handleSubmit} disabled={isSubmitting}>
+            <SaveIcon />
+            {isSubmitting ? "Creating..." : "Save"}
+          </Button>
+        </CardFooter>
       </Card>
     </div>
   );

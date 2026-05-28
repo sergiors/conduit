@@ -1,9 +1,9 @@
-import type { CollectionConfig } from "../_app.collections._index/loader.client";
+import type { CollectionConfig } from "~/routes/_app/loader.client";
 import type { Route } from "./+types/route";
 
 export async function clientLoader({ params }: Route.ClientLoaderArgs) {
-  const collectioName = params.collectionName;
-  const response = await fetch(`/api/collections/${collectioName}`);
+  const collectionName = params.collectionName;
+  const response = await fetch(`/api/collections/${collectionName}`);
 
   if (!response.ok) {
     throw new Error("Failed to fetch collection");

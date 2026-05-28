@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+const VALID_EVENT_TYPES = ["INSERT", "MODIFY", "REMOVE"] as const;
+
 export const conditionSchema = z.object({
   type: z.enum(["prefix", "suffix", "exists", "numeric", "anything-but"]),
   value: z.string().optional(),
@@ -32,31 +34,34 @@ export const destinationSchema = z
   })
   .refine(
     (data) => {
-      if (data.type === "http" && !data.endpoint) return false;
+      if (!data.endpoint) return false;
       if (data.type === "eventbridge" && !data.region) return false;
       if (data.type === "eventbridge" && !data.event_bus_name) return false;
-      if (data.type === "meilisearch" && !data.endpoint) return false;
       return true;
     },
     {
-      message: "Required fields missing for destination type",
+      message: "Endpoint is required for all destination types",
       path: ["endpoint"],
+    },
+  )
+  .refine(
+    (data) => {
+      const invalidTypes = data.event_types.filter(
+        (t) => !VALID_EVENT_TYPES.includes(t as any),
+      );
+      return invalidTypes.length === 0;
+    },
+    {
+      message: `Event types must be one of: ${VALID_EVENT_TYPES.join(", ")}`,
+      path: ["event_types"],
     },
   );
 
-export const updateCollectionSchema = z
-  .object({
-    stream_enabled: z.boolean(),
-    old_image: z.boolean(),
-    deletion_protection: z.boolean(),
-    destinations: z.array(destinationSchema),
-  })
-  .refine((data) => !data.stream_enabled || data.destinations.length > 0, {
-    message: "At least one destination is required when stream is enabled",
-    path: ["destinations"],
-  });
+export const destinationsFormSchema = z.object({
+  destinations: z.array(destinationSchema),
+});
 
-export type UpdateCollectionInput = z.infer<typeof updateCollectionSchema>;
+export type DestinationsForm = z.infer<typeof destinationsFormSchema>;
 
 export interface FilterCondition {
   prefix?: string;
@@ -87,32 +92,21 @@ export interface DestinationConfig {
   index_name?: string;
 }
 
-export interface CollectionConfig {
-  _id?: string;
-  collection_name: string;
-  primary_key?: string;
-  sort_key?: string;
-  stream_enabled: boolean;
-  old_image: boolean;
-  ttl_attribute?: string;
-  destinations: DestinationConfig[];
-  deletion_protection: boolean;
-  created_at?: string;
-  updated_at?: string;
-}
-
-export const collectionFormSchema = z.object({
-  collection_name: z.string().min(1, "Collection name is required"),
-  primary_key: z.string().optional(),
-  sort_key: z.string().optional(),
-  stream_enabled: z.boolean(),
-  old_image: z.boolean(),
-  ttl_attribute: z.string().optional(),
-  destinations: z.array(destinationSchema),
-  deletion_protection: z.boolean(),
-});
-
-export type CollectionForm = z.infer<typeof collectionFormSchema>;
-
 export type FieldFilter = z.infer<typeof fieldFilterSchema>;
 export type Condition = z.infer<typeof conditionSchema>;
+
+export const conditionOptions: { value: Condition["type"]; label: string }[] = [
+  { value: "prefix", label: "Prefix" },
+  { value: "suffix", label: "Suffix" },
+  { value: "exists", label: "Exists" },
+  { value: "numeric", label: "Numeric" },
+  { value: "anything-but", label: "Anything But" },
+];
+
+export const numericOperators = [
+  { value: ">", label: ">" },
+  { value: "<", label: "<" },
+  { value: ">=", label: ">=" },
+  { value: "<=", label: "<=" },
+  { value: "=", label: "=" },
+];
