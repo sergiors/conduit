@@ -1,5 +1,5 @@
-import { Link, useNavigate, useSearchParams } from "react-router";
 import { useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router";
 
 import {
   AlertDialog,
@@ -29,7 +29,6 @@ import {
 } from "~/components/ui/table";
 
 import {
-  ArrowLeftIcon,
   MoreHorizontalIcon,
   PencilIcon,
   PlusIcon,
@@ -46,7 +45,9 @@ interface Document {
 
 export const handle = {
   breadcrumb: ({ params }: Route.LoaderArgs) => (
-    <>{params.collectionName} › Documents</>
+    <>
+      <Link to={`/`}>{params.collectionName}</Link>
+    </>
   ),
 };
 
@@ -107,14 +108,7 @@ export default function DocumentsRoute({
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" asChild>
-            <Link to="/collections">
-              <ArrowLeftIcon />
-            </Link>
-          </Button>
-          <h1 className="text-2xl font-bold">Documents: {collectionName}</h1>
-        </div>
+        <h1 className="text-2xl font-bold">Documents: {collectionName}</h1>
 
         <Button size="sm" asChild>
           <Link to="new">
@@ -186,13 +180,16 @@ export default function DocumentsRoute({
                 Previous
               </Button>
               <span className="text-sm text-muted-foreground">
-                Page {pagination.page} of {Math.ceil(pagination.total / pagination.limit)}
-                {" "}({pagination.total} total)
+                Page {pagination.page} of{" "}
+                {Math.ceil(pagination.total / pagination.limit)} (
+                {pagination.total} total)
               </span>
               <Button
                 variant="outline"
                 onClick={() => changePage(pagination.page + 1)}
-                disabled={pagination.page * pagination.limit >= pagination.total}
+                disabled={
+                  pagination.page * pagination.limit >= pagination.total
+                }
               >
                 Next
               </Button>

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"reflect"
 	"sync"
 	"time"
 
@@ -456,65 +455,33 @@ func (m *Manager) refreshDestinations(ctx context.Context, collectionName string
 
 	// If desired is empty, remove all current destinations
 	if len(desired) == 0 {
-		for _, dest := range current {
-			name := destinationName(dest)
-			d.Remove(collectionName, name)
-			log.Printf("Removed destination %s for collection %s", name, collectionName)
-		}
+		diff := DiffDestinations(current, desired)
+		diff.LogChanges(collectionName)
+		diff.ApplyChanges(ctx, collectionName, d)
+
 		m.mu.Lock()
 		delete(m.currentDestinations, collectionName)
 		m.mu.Unlock()
-		log.Printf("Removed all destinations for collection %s", collectionName)
+
+		if len(diff.Changes) > 0 {
+			log.Printf("Removed all destinations for collection %s", collectionName)
+		}
 		return nil
 	}
 
-	toAdd, toRemove := diffDestinations(current, desired)
+	// Compute diff and apply changes
+	diff := DiffDestinations(current, desired)
+	diff.LogChanges(collectionName)
+	diff.ApplyChanges(ctx, collectionName, d)
 
-	// Check if destinations are being updated (same name, different config)
-	// vs truly removed/added
-	for _, dest := range toRemove {
-		name := destinationName(dest)
-		d.Remove(collectionName, name)
-
-		// Check if this destination is also being added (update scenario)
-		isUpdate := false
-		for _, addDest := range toAdd {
-			if destinationName(addDest) == name {
-				isUpdate = true
-				break
-			}
-		}
-
-		if isUpdate {
-			log.Printf("Updated destination %s for collection %s (config changed)", name, collectionName)
-		} else {
-			log.Printf("Removed destination %s for collection %s", name, collectionName)
-		}
-	}
-
-	for _, dest := range toAdd {
-		name := destinationName(dest)
-		if created := dispatch.BuildDestination(ctx, collectionName, dest); created != nil {
-			d.Register(collectionName, created)
-
-			// Check if this is an update (already logged above)
-			isUpdate := false
-			for _, remDest := range toRemove {
-				if destinationName(remDest) == name {
-					isUpdate = true
-					break
-				}
-			}
-
-			if !isUpdate {
-				log.Printf("Added destination %s for collection %s", name, collectionName)
-			}
-		}
-	}
-
+	// Update state
 	m.mu.Lock()
 	m.currentDestinations[collectionName] = desired
 	m.mu.Unlock()
+
+	if len(diff.Changes) > 0 {
+		log.Printf("Refreshed destinations for collection %s: %s", collectionName, diff.Summary())
+	}
 
 	return nil
 }
@@ -635,48 +602,3 @@ func configEqual(a, b collections.DestinationConfig) bool {
 		imageFilterEqual(a.FilterCriteria.NewImage, b.FilterCriteria.NewImage)
 }
 
-func filterConditionEqual(a, b collections.FilterCondition) bool {
-	if !ptrStrEqual(a.Prefix, b.Prefix) || !ptrStrEqual(a.Suffix, b.Suffix) || !ptrBoolEqual(a.Exists, b.Exists) {
-		return false
-	}
-	if !reflect.DeepEqual(a.Numeric, b.Numeric) || !reflect.DeepEqual(a.AnythingBut, b.AnythingBut) {
-		return false
-	}
-	return true
-}
-
-func ptrStrEqual(a, b *string) bool {
-	if a == nil && b == nil {
-		return true
-	}
-	if a == nil || b == nil {
-		return false
-	}
-	return *a == *b
-}
-
-func ptrBoolEqual(a, b *bool) bool {
-	if a == nil && b == nil {
-		return true
-	}
-	if a == nil || b == nil {
-		return false
-	}
-	return *a == *b
-}
-
-func imageFilterEqual(a, b collections.ImageFilter) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for field, condA := range a {
-		condB, ok := b[field]
-		if !ok {
-			return false
-		}
-		if !filterConditionEqual(condA, condB) {
-			return false
-		}
-	}
-	return true
-}

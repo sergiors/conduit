@@ -77,7 +77,7 @@ export function AppSidebar({ collections = [], ...props }: AppSidebarProps) {
             <SidebarMenu>
               <SidebarMenuItem>
                 <SidebarMenuButton asChild>
-                  <Link to="/collections/new" className="text-xs">
+                  <Link to="/collections/new">
                     <PlusIcon /> New Collection
                   </Link>
                 </SidebarMenuButton>

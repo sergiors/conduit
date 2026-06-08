@@ -31,10 +31,6 @@ import {
 import type { CollectionConfig } from "../_app/loader.client";
 import type { Route } from "./+types/route";
 
-export const handle = {
-  breadcrumb: ({}: Route.LoaderArgs) => <>Collections</>,
-};
-
 // Tipo do loader do _app/route.tsx
 type AppLoaderData = { collections: CollectionConfig[] };
 

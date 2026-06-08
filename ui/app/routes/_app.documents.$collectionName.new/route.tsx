@@ -12,6 +12,17 @@ import {
   CardTitle,
 } from "~/components/ui/card";
 import { Field } from "~/components/ui/field";
+import type { Route } from "./+types/route";
+
+export const handle = {
+  breadcrumb: ({ params }: Route.LoaderArgs) => (
+    <>
+      <Link to={`/documents/${params.collectionName}`}>
+        {params.collectionName}
+      </Link>
+    </>
+  ),
+};
 
 export default function NewDocumentRoute() {
   const { collectionName } = useParams<{ collectionName: string }>();
