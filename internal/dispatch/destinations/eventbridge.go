@@ -1,12 +1,19 @@
-package dispatch
+package destinations
 
 import (
 	"context"
 	"fmt"
 	"log"
 
+	"github.com/sergiors/conduit/internal/collections"
+	"github.com/sergiors/conduit/internal/dispatch"
 	"github.com/sergiors/conduit/internal/streams"
 )
+
+// init registers the EventBridge destination builder automatically when this package is imported.
+// This is triggered by the blank import in cmd/worker/main.go:
+//
+//	import _ "github.com/sergiors/conduit/internal/dispatch/destinations"
 
 // EventBridgeDestination sends records to AWS EventBridge.
 type EventBridgeDestination struct {
@@ -73,4 +80,28 @@ func (e *EventBridgeDestination) Send(ctx context.Context, record streams.Stream
 
 func (e *EventBridgeDestination) Close() error {
 	return nil
+}
+
+func init() {
+	dispatch.RegisterDestination("eventbridge", func(ctx context.Context, collectionName string, dest collections.DestinationConfig) dispatch.Destination {
+		region := dest.Region
+		if region == "" {
+			log.Printf("EventBridge destination for %s missing required 'region'", collectionName)
+			return nil
+		}
+		busName := dest.EventBusName
+		if busName == "" {
+			busName = dest.Endpoint
+		}
+		if busName == "" {
+			log.Printf("EventBridge destination for %s missing required 'event_bus_name' or 'endpoint'", collectionName)
+			return nil
+		}
+		ebDest, err := NewEventBridgeDestination(region, busName, dest.Source, "")
+		if err != nil {
+			log.Printf("Failed to create EventBridge destination for %s: %v", collectionName, err)
+			return nil
+		}
+		return ebDest
+	})
 }

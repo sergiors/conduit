@@ -1,4 +1,4 @@
-package dispatch
+package destinations
 
 import (
 	"bytes"
@@ -10,8 +10,14 @@ import (
 	"time"
 
 	"github.com/sergiors/conduit/internal/collections"
+	"github.com/sergiors/conduit/internal/dispatch"
 	"github.com/sergiors/conduit/internal/streams"
 )
+
+// init registers the HTTP destination builder automatically when this package is imported.
+// This is triggered by the blank import in cmd/worker/main.go:
+//
+//	import _ "github.com/sergiors/conduit/internal/dispatch/destinations"
 
 // HTTPDestination sends records to an HTTP endpoint via POST.
 type HTTPDestination struct {
@@ -41,7 +47,7 @@ func NewHTTPDestination(endpoint string, bearerToken string, eventTypes []string
 	}
 
 	return &HTTPDestination{
-		name:           "http:" + endpoint,
+		name:           endpoint,
 		client:         &http.Client{Timeout: 30 * time.Second},
 		endpoint:       endpoint,
 		bearerToken:    bearerToken,
@@ -97,4 +103,23 @@ func (h *HTTPDestination) Send(ctx context.Context, record streams.StreamRecord)
 
 func (h *HTTPDestination) Close() error {
 	return nil
+}
+
+func init() {
+	dispatch.RegisterDestination("http", func(ctx context.Context, collectionName string, dest collections.DestinationConfig) dispatch.Destination {
+		if dest.Endpoint == "" {
+			log.Printf("HTTP destination requested but endpoint not set for collection %s", collectionName)
+			return nil
+		}
+		eventTypes := dest.EventTypes
+		if len(eventTypes) == 0 {
+			eventTypes = []string{"INSERT", "MODIFY", "REMOVE"}
+		}
+		httpDest, err := NewHTTPDestination(dest.Endpoint, dest.BearerToken, eventTypes, dest.FilterCriteria)
+		if err != nil {
+			log.Printf("Failed to create HTTP destination for %s: %v", collectionName, err)
+			return nil
+		}
+		return httpDest
+	})
 }

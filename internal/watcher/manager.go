@@ -424,7 +424,9 @@ func (m *Manager) refreshDestinations(ctx context.Context, collectionName string
 	}
 
 	for _, dest := range toAdd {
-		m.registerSingleDestination(ctx, collectionName, dest, d)
+		if created := dispatch.BuildDestination(ctx, collectionName, dest); created != nil {
+			d.Register(collectionName, created)
+		}
 	}
 
 	m.mu.Lock()
@@ -435,136 +437,17 @@ func (m *Manager) refreshDestinations(ctx context.Context, collectionName string
 	return nil
 }
 
-// registerSingleDestination creates and registers a single destination
-func (m *Manager) registerSingleDestination(ctx context.Context, collectionName string, dest collections.DestinationConfig, d *dispatch.Dispatcher) {
-	switch dest.Type {
-	case "http":
-		if dest.Endpoint == "" {
-			log.Printf("HTTP destination requested but endpoint not set for collection %s", collectionName)
-			return
-		}
-		eventTypes := dest.EventTypes
-		if len(eventTypes) == 0 {
-			eventTypes = []string{"INSERT", "MODIFY", "REMOVE"}
-		}
-		httpDest, err := dispatch.NewHTTPDestination(dest.Endpoint, dest.BearerToken, eventTypes, dest.FilterCriteria)
-		if err != nil {
-			log.Printf("Failed to create HTTP destination for %s: %v", collectionName, err)
-			return
-		}
-		d.Register(collectionName, httpDest)
-		log.Printf("Registered HTTP destination for collection %s -> %s", collectionName, dest.Endpoint)
-	case "eventbridge":
-		region := dest.Region
-		if region == "" {
-			log.Printf("EventBridge destination for %s missing required 'region'", collectionName)
-			return
-		}
-		busName := dest.EventBusName
-		if busName == "" {
-			busName = dest.Endpoint
-		}
-		if busName == "" {
-			log.Printf("EventBridge destination for %s missing required 'event_bus_name' or 'endpoint'", collectionName)
-			return
-		}
-		ebDest, err := dispatch.NewEventBridgeDestination(region, busName, dest.Source, "")
-		if err != nil {
-			log.Printf("Failed to create EventBridge destination for %s: %v", collectionName, err)
-			return
-		}
-		d.Register(collectionName, ebDest)
-		log.Printf("Registered EventBridge destination for collection %s -> %s@%s", collectionName, busName, region)
-	case "meilisearch":
-		host := dest.Endpoint
-		if host == "" {
-			log.Printf("Meilisearch destination for %s missing required 'endpoint' (host)", collectionName)
-			return
-		}
-		indexName := dest.IndexName
-		if indexName == "" {
-			indexName = collectionName
-		}
-		meiliDest, err := dispatch.NewMeilisearchDestination(host, dest.BearerToken, indexName)
-		if err != nil {
-			log.Printf("Failed to create Meilisearch destination for %s: %v", collectionName, err)
-			return
-		}
-		d.Register(collectionName, meiliDest)
-		log.Printf("Registered Meilisearch destination for collection %s -> %s/%s", collectionName, host, indexName)
-	default:
-		log.Printf("Unknown destination type: %s for collection %s", dest.Type, collectionName)
-	}
-}
-
 // registerDestinations registers event destinations for a collection
 func (m *Manager) registerDestinations(ctx context.Context, collectionName string, destinations []collections.DestinationConfig) error {
+	d, ok := m.dispatcher.(*dispatch.Dispatcher)
+	if !ok {
+		return nil
+	}
+
 	for _, dest := range destinations {
-		switch dest.Type {
-		case "http":
-			if dest.Endpoint == "" {
-				log.Printf("HTTP destination requested but endpoint not set for collection %s", collectionName)
-				continue
-			}
-			// Default to all event types if not specified
-			eventTypes := dest.EventTypes
-			if len(eventTypes) == 0 {
-				eventTypes = []string{"INSERT", "MODIFY", "REMOVE"}
-			}
-			httpDest, err := dispatch.NewHTTPDestination(dest.Endpoint, dest.BearerToken, eventTypes, dest.FilterCriteria)
-			if err != nil {
-				log.Printf("Failed to create HTTP destination for %s: %v", collectionName, err)
-				continue
-			}
-			// Cast to Dispatcher interface to access Register method
-			if d, ok := m.dispatcher.(*dispatch.Dispatcher); ok {
-				d.Register(collectionName, httpDest)
-				log.Printf("Registered HTTP destination for collection %s -> %s", collectionName, dest.Endpoint)
-			}
-		case "eventbridge":
-			region := dest.Region
-			if region == "" {
-				log.Printf("EventBridge destination for %s missing required 'region'", collectionName)
-				continue
-			}
-			busName := dest.EventBusName
-			if busName == "" {
-				busName = dest.Endpoint
-			}
-			if busName == "" {
-				log.Printf("EventBridge destination for %s missing required 'event_bus_name' or 'endpoint'", collectionName)
-				continue
-			}
-			ebDest, err := dispatch.NewEventBridgeDestination(region, busName, dest.Source, "")
-			if err != nil {
-				log.Printf("Failed to create EventBridge destination for %s: %v", collectionName, err)
-				continue
-			}
-			if d, ok := m.dispatcher.(*dispatch.Dispatcher); ok {
-				d.Register(collectionName, ebDest)
-				log.Printf("Registered EventBridge destination for collection %s -> %s@%s", collectionName, busName, region)
-			}
-		case "meilisearch":
-			host := dest.Endpoint
-			if host == "" {
-				log.Printf("Meilisearch destination for %s missing required 'endpoint' (host)", collectionName)
-				continue
-			}
-			indexName := dest.IndexName
-			if indexName == "" {
-				indexName = collectionName
-			}
-			meiliDest, err := dispatch.NewMeilisearchDestination(host, dest.BearerToken, indexName)
-			if err != nil {
-				log.Printf("Failed to create Meilisearch destination for %s: %v", collectionName, err)
-				continue
-			}
-			if d, ok := m.dispatcher.(*dispatch.Dispatcher); ok {
-				d.Register(collectionName, meiliDest)
-				log.Printf("Registered Meilisearch destination for collection %s -> %s/%s", collectionName, host, indexName)
-			}
-		default:
-			log.Printf("Unknown destination type: %s for collection %s", dest.Type, collectionName)
+		if created := dispatch.BuildDestination(ctx, collectionName, dest); created != nil {
+			d.Register(collectionName, created)
+			log.Printf("Registered %s destination for collection %s", dest.Type, collectionName)
 		}
 	}
 	return nil

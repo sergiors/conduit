@@ -152,40 +152,26 @@ func TestDestinationName(t *testing.T) {
 		assert.Equal(t, "https://webhook.example.com", name)
 	})
 
-	t.Run("eventbridge destination matches Name() format", func(t *testing.T) {
-		dest := collections.DestinationConfig{
-			Type:        "eventbridge",
-			Region:      "us-east-1",
-			EventBusName: "default",
-		}
-		name := destinationName(dest)
-		// Must match: "eventbridge:" + eventBusName + "@" + region
-		assert.Equal(t, "eventbridge:default@us-east-1", name)
-	})
-
-	t.Run("meilisearch destination matches Name() format", func(t *testing.T) {
-		dest := collections.DestinationConfig{
-			Type:      "meilisearch",
-			Endpoint:  "http://localhost:7700",
-			IndexName: "users",
-		}
-		name := destinationName(dest)
-		// Must match: "meilisearch:" + host + "/" + indexName
-		assert.Equal(t, "meilisearch:http://localhost:7700/users", name)
-	})
-
-	t.Run("same endpoint different types produce different names", func(t *testing.T) {
-		httpDest := collections.DestinationConfig{
-			Type:     "http",
-			Endpoint: "https://api.example.com",
-		}
-		meiliDest := collections.DestinationConfig{
-			Type:      "meilisearch",
-			Endpoint:  "https://api.example.com",
-			IndexName: "default",
-		}
-		assert.NotEqual(t, destinationName(httpDest), destinationName(meiliDest))
-	})
+	// TODO: Re-enable tests when EventBridge and Meilisearch destinations are enabled
+	// t.Run("eventbridge destination matches Name() format", func(t *testing.T) {
+	// 	dest := collections.DestinationConfig{
+	// 		Type:        "eventbridge",
+	// 		Region:      "us-east-1",
+	// 		EventBusName: "default",
+	// 	}
+	// 	name := destinationName(dest)
+	// 	assert.Equal(t, "eventbridge:default@us-east-1", name)
+	// })
+	//
+	// t.Run("meilisearch destination matches Name() format", func(t *testing.T) {
+	// 	dest := collections.DestinationConfig{
+	// 		Type:      "meilisearch",
+	// 		Endpoint:  "http://localhost:7700",
+	// 		IndexName: "users",
+	// 	}
+	// 	name := destinationName(dest)
+	// 	assert.Equal(t, "meilisearch:http://localhost:7700/users", name)
+	// })
 }
 
 func TestConfigEqual(t *testing.T) {

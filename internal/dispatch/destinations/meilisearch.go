@@ -1,12 +1,19 @@
-package dispatch
+package destinations
 
 import (
 	"context"
 	"fmt"
 	"log"
 
+	"github.com/sergiors/conduit/internal/collections"
+	"github.com/sergiors/conduit/internal/dispatch"
 	"github.com/sergiors/conduit/internal/streams"
 )
+
+// init registers the Meilisearch destination builder automatically when this package is imported.
+// This is triggered by the blank import in cmd/worker/main.go:
+//
+//	import _ "github.com/sergiors/conduit/internal/dispatch/destinations"
 
 // MeilisearchDestination sends records to Meilisearch for full-text indexing.
 type MeilisearchDestination struct {
@@ -50,4 +57,24 @@ func (m *MeilisearchDestination) Send(ctx context.Context, record streams.Stream
 
 func (m *MeilisearchDestination) Close() error {
 	return nil
+}
+
+func init() {
+	dispatch.RegisterDestination("meilisearch", func(ctx context.Context, collectionName string, dest collections.DestinationConfig) dispatch.Destination {
+		host := dest.Endpoint
+		if host == "" {
+			log.Printf("Meilisearch destination for %s missing required 'endpoint' (host)", collectionName)
+			return nil
+		}
+		indexName := dest.IndexName
+		if indexName == "" {
+			indexName = collectionName
+		}
+		meiliDest, err := NewMeilisearchDestination(host, dest.BearerToken, indexName)
+		if err != nil {
+			log.Printf("Failed to create Meilisearch destination for %s: %v", collectionName, err)
+			return nil
+		}
+		return meiliDest
+	})
 }
