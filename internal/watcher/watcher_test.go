@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sergiors/conduit/internal/collections"
 	"github.com/sergiors/conduit/internal/streams"
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/bson"
@@ -139,6 +140,233 @@ func TestManagerCreation(t *testing.T) {
 		assert.Equal(t, 30*time.Second, manager.syncInterval)
 		assert.Equal(t, 0, manager.GetActiveWatchers())
 	})
+}
+
+func TestDestinationName(t *testing.T) {
+	t.Run("http destination uses type and endpoint", func(t *testing.T) {
+		dest := collections.DestinationConfig{
+			Type:     "http",
+			Endpoint: "https://webhook.example.com",
+		}
+		name := destinationName(dest)
+		assert.Equal(t, "http:https://webhook.example.com", name)
+	})
+
+	t.Run("eventbridge destination includes region and bus name", func(t *testing.T) {
+		dest := collections.DestinationConfig{
+			Type:        "eventbridge",
+			Region:      "us-east-1",
+			EventBusName: "default",
+		}
+		name := destinationName(dest)
+		assert.Equal(t, "eventbridge:us-east-1:default", name)
+	})
+
+	t.Run("meilisearch destination includes endpoint and index", func(t *testing.T) {
+		dest := collections.DestinationConfig{
+			Type:      "meilisearch",
+			Endpoint:  "http://localhost:7700",
+			IndexName: "users",
+		}
+		name := destinationName(dest)
+		assert.Equal(t, "meilisearch:http://localhost:7700:users", name)
+	})
+
+	t.Run("same endpoint different types produce different names", func(t *testing.T) {
+		httpDest := collections.DestinationConfig{
+			Type:     "http",
+			Endpoint: "https://api.example.com",
+		}
+		meiliDest := collections.DestinationConfig{
+			Type:      "meilisearch",
+			Endpoint:  "https://api.example.com",
+			IndexName: "default",
+		}
+		assert.NotEqual(t, destinationName(httpDest), destinationName(meiliDest))
+	})
+}
+
+func TestConfigEqual(t *testing.T) {
+	t.Run("identical configs are equal", func(t *testing.T) {
+		a := collections.DestinationConfig{
+			Type:        "http",
+			Endpoint:    "https://webhook.example.com",
+			BearerToken: "token123",
+			EventTypes:  []string{"INSERT", "MODIFY"},
+		}
+		b := collections.DestinationConfig{
+			Type:        "http",
+			Endpoint:    "https://webhook.example.com",
+			BearerToken: "token123",
+			EventTypes:  []string{"INSERT", "MODIFY"},
+		}
+		assert.True(t, configEqual(a, b))
+	})
+
+	t.Run("different event types order are equal", func(t *testing.T) {
+		a := collections.DestinationConfig{
+			Type:       "http",
+			Endpoint:   "https://webhook.example.com",
+			EventTypes: []string{"INSERT", "MODIFY"},
+		}
+		b := collections.DestinationConfig{
+			Type:       "http",
+			Endpoint:   "https://webhook.example.com",
+			EventTypes: []string{"MODIFY", "INSERT"},
+		}
+		assert.True(t, configEqual(a, b))
+	})
+
+	t.Run("different endpoints are not equal", func(t *testing.T) {
+		a := collections.DestinationConfig{
+			Type:     "http",
+			Endpoint: "https://webhook.example.com",
+		}
+		b := collections.DestinationConfig{
+			Type:     "http",
+			Endpoint: "https://other.example.com",
+		}
+		assert.False(t, configEqual(a, b))
+	})
+
+	t.Run("different event types are not equal", func(t *testing.T) {
+		a := collections.DestinationConfig{
+			Type:       "http",
+			Endpoint:   "https://webhook.example.com",
+			EventTypes: []string{"INSERT"},
+		}
+		b := collections.DestinationConfig{
+			Type:       "http",
+			Endpoint:   "https://webhook.example.com",
+			EventTypes: []string{"INSERT", "MODIFY"},
+		}
+		assert.False(t, configEqual(a, b))
+	})
+
+	t.Run("different filter criteria are not equal", func(t *testing.T) {
+		a := collections.DestinationConfig{
+			Type:     "http",
+			Endpoint: "https://webhook.example.com",
+		}
+		b := collections.DestinationConfig{
+			Type:     "http",
+			Endpoint: "https://webhook.example.com",
+			FilterCriteria: collections.FilterCriteria{
+				OldImage: collections.ImageFilter{
+					"status": collections.FilterCondition{
+						Prefix: ptr("active"),
+					},
+				},
+			},
+		}
+		assert.False(t, configEqual(a, b))
+	})
+}
+
+func TestDiffDestinations(t *testing.T) {
+	t.Run("no changes when configs are identical", func(t *testing.T) {
+		current := []collections.DestinationConfig{
+			{Type: "http", Endpoint: "https://webhook.example.com"},
+		}
+		desired := []collections.DestinationConfig{
+			{Type: "http", Endpoint: "https://webhook.example.com"},
+		}
+
+		toAdd, toRemove := diffDestinations(current, desired)
+		assert.Empty(t, toAdd)
+		assert.Empty(t, toRemove)
+	})
+
+	t.Run("add new destination", func(t *testing.T) {
+		current := []collections.DestinationConfig{
+			{Type: "http", Endpoint: "https://existing.example.com"},
+		}
+		desired := []collections.DestinationConfig{
+			{Type: "http", Endpoint: "https://existing.example.com"},
+			{Type: "http", Endpoint: "https://new.example.com"},
+		}
+
+		toAdd, toRemove := diffDestinations(current, desired)
+		assert.Len(t, toAdd, 1)
+		assert.Equal(t, "https://new.example.com", toAdd[0].Endpoint)
+		assert.Empty(t, toRemove)
+	})
+
+	t.Run("remove destination", func(t *testing.T) {
+		current := []collections.DestinationConfig{
+			{Type: "http", Endpoint: "https://existing.example.com"},
+			{Type: "http", Endpoint: "https://remove.example.com"},
+		}
+		desired := []collections.DestinationConfig{
+			{Type: "http", Endpoint: "https://existing.example.com"},
+		}
+
+		toAdd, toRemove := diffDestinations(current, desired)
+		assert.Empty(t, toAdd)
+		assert.Len(t, toRemove, 1)
+		assert.Equal(t, "https://remove.example.com", toRemove[0].Endpoint)
+	})
+
+	t.Run("update destination with changed config", func(t *testing.T) {
+		current := []collections.DestinationConfig{
+			{Type: "http", Endpoint: "https://webhook.example.com", EventTypes: []string{"INSERT"}},
+		}
+		desired := []collections.DestinationConfig{
+			{Type: "http", Endpoint: "https://webhook.example.com", EventTypes: []string{"INSERT", "MODIFY"}},
+		}
+
+		toAdd, toRemove := diffDestinations(current, desired)
+		assert.Len(t, toAdd, 1)
+		assert.Len(t, toRemove, 1)
+		assert.Equal(t, "https://webhook.example.com", toAdd[0].Endpoint)
+		assert.Equal(t, "https://webhook.example.com", toRemove[0].Endpoint)
+	})
+
+	t.Run("remove all destinations", func(t *testing.T) {
+		current := []collections.DestinationConfig{
+			{Type: "http", Endpoint: "https://webhook.example.com"},
+			{Type: "eventbridge", Region: "us-east-1", EventBusName: "default"},
+		}
+		desired := []collections.DestinationConfig{}
+
+		toAdd, toRemove := diffDestinations(current, desired)
+		assert.Empty(t, toAdd)
+		assert.Len(t, toRemove, 2)
+	})
+
+	t.Run("add multiple destinations", func(t *testing.T) {
+		current := []collections.DestinationConfig{}
+		desired := []collections.DestinationConfig{
+			{Type: "http", Endpoint: "https://a.example.com"},
+			{Type: "http", Endpoint: "https://b.example.com"},
+			{Type: "meilisearch", Endpoint: "http://localhost:7700", IndexName: "users"},
+		}
+
+		toAdd, toRemove := diffDestinations(current, desired)
+		assert.Len(t, toAdd, 3)
+		assert.Empty(t, toRemove)
+	})
+
+	t.Run("mixed add remove and update", func(t *testing.T) {
+		current := []collections.DestinationConfig{
+			{Type: "http", Endpoint: "https://keep.example.com"},
+			{Type: "http", Endpoint: "https://remove.example.com"},
+			{Type: "http", Endpoint: "https://update.example.com", EventTypes: []string{"INSERT"}},
+		}
+		desired := []collections.DestinationConfig{
+			{Type: "http", Endpoint: "https://keep.example.com"},
+			{Type: "http", Endpoint: "https://add.example.com"},
+			{Type: "http", Endpoint: "https://update.example.com", EventTypes: []string{"INSERT", "MODIFY"}},
+		}
+
+		toAdd, toRemove := diffDestinations(current, desired)
+		assert.Len(t, toAdd, 2)
+		assert.Len(t, toRemove, 2)
+	})
+}
+
+func ptr(s string) *string {
+	return &s
 }
 
 func TestManagerConfig(t *testing.T) {

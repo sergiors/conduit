@@ -400,6 +400,21 @@ func (m *Manager) refreshDestinations(ctx context.Context, collectionName string
 	m.mu.RUnlock()
 
 	desired := collection.Destinations
+
+	// If desired is empty, remove all current destinations
+	if len(desired) == 0 {
+		for _, dest := range current {
+			name := destinationName(dest)
+			d.Remove(collectionName, name)
+			log.Printf("Removed destination %s for collection %s", name, collectionName)
+		}
+		m.mu.Lock()
+		delete(m.currentDestinations, collectionName)
+		m.mu.Unlock()
+		log.Printf("Removed all destinations for collection %s", collectionName)
+		return nil
+	}
+
 	toAdd, toRemove := diffDestinations(current, desired)
 
 	for _, dest := range toRemove {
