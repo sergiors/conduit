@@ -194,21 +194,20 @@ func (m *Manager) startWatcher(ctx context.Context, collection collections.Colle
 // stopWatcher stops and removes a watcher
 func (m *Manager) stopWatcher(ctx context.Context, collectionName string) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	watcher, exists := m.watchers[collectionName]
 	if !exists {
-		return nil
+		m.mu.Unlock()
+		return nil // Already stopped (idempotent)
 	}
 
-	log.Printf("Stopping watcher for collection: %s", collectionName)
+	// Remove from map BEFORE stopping to prevent duplicate stop attempts
+	delete(m.watchers, collectionName)
+	delete(m.currentDestinations, collectionName)
+	m.mu.Unlock()
 
 	if err := watcher.Stop(ctx); err != nil {
 		return err
 	}
-
-	delete(m.watchers, collectionName)
-	delete(m.currentDestinations, collectionName)
 
 	// Clear destinations from dispatcher
 	if d, ok := m.dispatcher.(*dispatch.Dispatcher); ok {
@@ -300,10 +299,60 @@ func (m *Manager) configChangeLoop(ctx context.Context) {
 			}
 			collectionName := msg.Payload
 			log.Printf("Config change detected for collection: %s", collectionName)
-			// Only refresh destinations for the changed collection, don't full sync
-			// (syncLoop will handle watcher start/stop on next interval)
-			m.refreshDestinations(ctx, collectionName)
+			// Handle change for specific collection
+			m.handleCollectionChange(ctx, collectionName)
 		}
+	}
+}
+
+// handleCollectionChange handles config changes for a single collection
+func (m *Manager) handleCollectionChange(ctx context.Context, collectionName string) {
+	collection, err := m.collectionStore.Get(ctx, collectionName)
+	if err != nil {
+		log.Printf("Failed to fetch collection %s for config change: %v", collectionName, err)
+		return
+	}
+
+	m.mu.RLock()
+	_, watcherExists := m.watchers[collectionName]
+	m.mu.RUnlock()
+
+	if !collection.StreamEnabled {
+		// Collection disabled - stop watcher if running
+		if watcherExists {
+			log.Printf("Collection %s disabled, stopping watcher", collectionName)
+			if err := m.stopWatcher(ctx, collectionName); err != nil {
+				log.Printf("Failed to stop watcher for %s: %v", collectionName, err)
+			}
+		}
+		return
+	}
+
+	// Collection enabled
+	if !watcherExists {
+		// New collection - start watcher with destinations
+		log.Printf("Collection %s enabled, starting watcher", collectionName)
+		if err := m.startWatcher(ctx, *collection); err != nil {
+			log.Printf("Failed to start watcher for %s: %v", collectionName, err)
+		}
+		return
+	}
+
+	// Existing watcher - check if oldImage changed (requires restart)
+	m.mu.RLock()
+	watcher := m.watchers[collectionName]
+	m.mu.RUnlock()
+
+	if watcher.OldImage() != collection.OldImage {
+		log.Printf("oldImage changed for %s, restarting watcher", collectionName)
+		if err := m.restartWatcher(ctx, *collection); err != nil {
+			log.Printf("Failed to restart watcher for %s: %v", collectionName, err)
+		}
+	}
+
+	// Always refresh destinations for existing watchers
+	if err := m.refreshDestinations(ctx, collectionName); err != nil {
+		log.Printf("Failed to refresh destinations for %s: %v", collectionName, err)
 	}
 }
 
@@ -367,6 +416,10 @@ func (m *Manager) syncWithCollections(ctx context.Context) {
 					log.Printf("Failed to restart watcher for %s: %v", collectionName, err)
 				}
 			}
+			// Always refresh destinations for existing collections
+			if err := m.refreshDestinations(ctx, collectionName); err != nil {
+				log.Printf("Failed to refresh destinations for %s: %v", collectionName, err)
+			}
 		}
 	}
 
@@ -417,15 +470,45 @@ func (m *Manager) refreshDestinations(ctx context.Context, collectionName string
 
 	toAdd, toRemove := diffDestinations(current, desired)
 
+	// Check if destinations are being updated (same name, different config)
+	// vs truly removed/added
 	for _, dest := range toRemove {
 		name := destinationName(dest)
 		d.Remove(collectionName, name)
-		log.Printf("Removed destination %s for collection %s", name, collectionName)
+
+		// Check if this destination is also being added (update scenario)
+		isUpdate := false
+		for _, addDest := range toAdd {
+			if destinationName(addDest) == name {
+				isUpdate = true
+				break
+			}
+		}
+
+		if isUpdate {
+			log.Printf("Updated destination %s for collection %s (config changed)", name, collectionName)
+		} else {
+			log.Printf("Removed destination %s for collection %s", name, collectionName)
+		}
 	}
 
 	for _, dest := range toAdd {
+		name := destinationName(dest)
 		if created := dispatch.BuildDestination(ctx, collectionName, dest); created != nil {
 			d.Register(collectionName, created)
+
+			// Check if this is an update (already logged above)
+			isUpdate := false
+			for _, remDest := range toRemove {
+				if destinationName(remDest) == name {
+					isUpdate = true
+					break
+				}
+			}
+
+			if !isUpdate {
+				log.Printf("Added destination %s for collection %s", name, collectionName)
+			}
 		}
 	}
 
@@ -433,7 +516,6 @@ func (m *Manager) refreshDestinations(ctx context.Context, collectionName string
 	m.currentDestinations[collectionName] = desired
 	m.mu.Unlock()
 
-	log.Printf("Refreshed destinations for collection %s (%d added, %d removed)", collectionName, len(toAdd), len(toRemove))
 	return nil
 }
 
