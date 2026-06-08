@@ -143,33 +143,35 @@ func TestManagerCreation(t *testing.T) {
 }
 
 func TestDestinationName(t *testing.T) {
-	t.Run("http destination uses type and endpoint", func(t *testing.T) {
+	t.Run("http destination uses only endpoint", func(t *testing.T) {
 		dest := collections.DestinationConfig{
 			Type:     "http",
 			Endpoint: "https://webhook.example.com",
 		}
 		name := destinationName(dest)
-		assert.Equal(t, "http:https://webhook.example.com", name)
+		assert.Equal(t, "https://webhook.example.com", name)
 	})
 
-	t.Run("eventbridge destination includes region and bus name", func(t *testing.T) {
+	t.Run("eventbridge destination matches Name() format", func(t *testing.T) {
 		dest := collections.DestinationConfig{
 			Type:        "eventbridge",
 			Region:      "us-east-1",
 			EventBusName: "default",
 		}
 		name := destinationName(dest)
-		assert.Equal(t, "eventbridge:us-east-1:default", name)
+		// Must match: "eventbridge:" + eventBusName + "@" + region
+		assert.Equal(t, "eventbridge:default@us-east-1", name)
 	})
 
-	t.Run("meilisearch destination includes endpoint and index", func(t *testing.T) {
+	t.Run("meilisearch destination matches Name() format", func(t *testing.T) {
 		dest := collections.DestinationConfig{
 			Type:      "meilisearch",
 			Endpoint:  "http://localhost:7700",
 			IndexName: "users",
 		}
 		name := destinationName(dest)
-		assert.Equal(t, "meilisearch:http://localhost:7700:users", name)
+		// Must match: "meilisearch:" + host + "/" + indexName
+		assert.Equal(t, "meilisearch:http://localhost:7700/users", name)
 	})
 
 	t.Run("same endpoint different types produce different names", func(t *testing.T) {

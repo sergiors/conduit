@@ -630,16 +630,18 @@ func diffDestinations(current, desired []collections.DestinationConfig) (toAdd, 
 }
 
 // destinationName builds the internal name for a destination config.
-// It includes type-specific identifiers so that two destinations of the same
-// type but with different configs are treated as distinct.
+// This MUST match exactly what Destination.Name() returns for Remove() to work correctly.
 func destinationName(dest collections.DestinationConfig) string {
 	switch dest.Type {
 	case "eventbridge":
-		return dest.Type + ":" + dest.Region + ":" + dest.EventBusName
+		// Matches: "eventbridge:" + eventBusName + "@" + region
+		return "eventbridge:" + dest.EventBusName + "@" + dest.Region
 	case "meilisearch":
-		return dest.Type + ":" + dest.Endpoint + ":" + dest.IndexName
+		// Matches: "meilisearch:" + host + "/" + indexName
+		return "meilisearch:" + dest.Endpoint + "/" + dest.IndexName
 	default:
-		return dest.Type + ":" + dest.Endpoint
+		// HTTP: just the endpoint
+		return dest.Endpoint
 	}
 }
 
