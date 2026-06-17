@@ -1,4 +1,8 @@
-import { DatabaseIcon, MoreHorizontalIcon, PlusIcon } from "lucide-react";
+import {
+  DatabaseIcon,
+  MoreHorizontalIcon,
+  PlusIcon,
+} from "lucide-react";
 import { useState } from "react";
 import { Link, useRevalidator, useRouteLoaderData } from "react-router";
 
@@ -20,6 +24,7 @@ import {
   CardHeader,
   CardTitle,
 } from "~/components/ui/card";
+import { Checkbox } from "~/components/ui/checkbox";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -46,6 +51,7 @@ export default function Route() {
     useState<CollectionConfig | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const handleDelete = async () => {
     if (!deletingCollection?.collection_name) return;
@@ -53,19 +59,34 @@ export default function Route() {
     setIsSubmitting(true);
     setDeleteError(null);
     try {
-      const res = await fetch(
-        `/api/collections/${deletingCollection.collection_name}`,
-        {
+      const name = deletingCollection.collection_name;
+
+      // If the collection is protected, disable protection first via the
+      // dedicated endpoint. The dialog already confirmed this intent.
+      if (deletingCollection.deletion_protection) {
+        const disableRes = await fetch(`/api/collections/${name}/protection`, {
           method: "DELETE",
-        },
-      );
+        });
+        if (!disableRes.ok) {
+          const error = await disableRes.json().catch(() => ({}));
+          setDeleteError(error.error || "Failed to disable deletion protection");
+          revalidator.revalidate();
+          return;
+        }
+      }
+
+      const res = await fetch(`/api/collections/${name}`, {
+        method: "DELETE",
+      });
 
       if (res.ok) {
         setDeletingCollection(null);
+        setConfirmDelete(false);
         revalidator.revalidate();
       } else {
         const error = await res.json();
         setDeleteError(error.error || "Failed to delete collection");
+        revalidator.revalidate();
       }
     } catch (err) {
       setDeleteError("Failed to delete collection");
@@ -76,10 +97,8 @@ export default function Route() {
   };
 
   const openDeleteDialog = (collection: CollectionConfig) => {
-    if (collection.deletion_protection) {
-      setDeleteError("Disable deletion protection first");
-      return;
-    }
+    setDeleteError(null);
+    setConfirmDelete(false);
     setDeletingCollection(collection);
   };
 
@@ -102,11 +121,21 @@ export default function Route() {
       {/* Delete Confirmation Dialog */}
       <AlertDialog
         open={!!deletingCollection}
-        onOpenChange={(open) => !open && setDeletingCollection(null)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeletingCollection(null);
+            setConfirmDelete(false);
+            setDeleteError(null);
+          }
+        }}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Collection</AlertDialogTitle>
+            <AlertDialogTitle>
+              {deletingCollection?.deletion_protection
+                ? "Disable Protection & Delete Collection"
+                : "Delete Collection"}
+            </AlertDialogTitle>
             <AlertDialogDescription>
               Are you sure you want to delete the collection{" "}
               <span className="font-medium text-foreground">
@@ -114,15 +143,40 @@ export default function Route() {
               </span>
               ? This action cannot be undone.
             </AlertDialogDescription>
+            {deletingCollection?.deletion_protection && (
+              <AlertDialogDescription className="text-amber-600 dark:text-amber-500">
+                This collection has deletion protection enabled. Deleting it
+                will disable protection first.
+              </AlertDialogDescription>
+            )}
           </AlertDialogHeader>
+          {deletingCollection?.deletion_protection && (
+            <label className="flex items-start gap-2 text-sm cursor-pointer">
+              <Checkbox
+                checked={confirmDelete}
+                onCheckedChange={(v) => setConfirmDelete(v === true)}
+              />
+              <span>
+                I understand this will disable deletion protection and
+                permanently delete the collection.
+              </span>
+            </label>
+          )}
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
               onClick={handleDelete}
-              disabled={isSubmitting}
+              disabled={
+                isSubmitting ||
+                (!!deletingCollection?.deletion_protection && !confirmDelete)
+              }
             >
-              {isSubmitting ? "Deleting..." : "Delete"}
+              {isSubmitting
+                ? "Deleting..."
+                : deletingCollection?.deletion_protection
+                  ? "Disable protection & delete"
+                  : "Delete"}
             </AlertDialogAction>
           </AlertDialogFooter>
           {deleteError && (
@@ -199,7 +253,6 @@ export default function Route() {
                       </DropdownMenuItem>
                       <DropdownMenuItem
                         onClick={() => openDeleteDialog(collection)}
-                        disabled={collection.deletion_protection}
                         className="text-destructive focus:text-destructive"
                       >
                         Delete

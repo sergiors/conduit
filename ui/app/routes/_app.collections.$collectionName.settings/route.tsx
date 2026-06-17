@@ -1,23 +1,24 @@
-import { zodResolver } from "@hookform/resolvers/zod";
-import { Controller, useForm } from "react-hook-form";
-import { Form, Link, useActionData, useSubmit } from "react-router";
-
-import { Button } from "~/components/ui/button";
-import { Card, CardContent } from "~/components/ui/card";
-import { Checkbox } from "~/components/ui/checkbox";
-import {
-  Field,
-  FieldError,
-  FieldGroup,
-  FieldLabel,
-} from "~/components/ui/field";
-import { Input } from "~/components/ui/input";
+import { useState, type FormEvent } from "react";
+import { Link, useFetcher } from "react-router";
 
 import { AlertCircleIcon } from "lucide-react";
 import { Alert, AlertDescription } from "~/components/ui/alert";
+import { Button } from "~/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "~/components/ui/card";
+import { Checkbox } from "~/components/ui/checkbox";
+import { Field, FieldLabel } from "~/components/ui/field";
+import { Input } from "~/components/ui/input";
+import { Switch } from "~/components/ui/switch";
+
+import type { CollectionConfig } from "~/routes/_app/loader.client";
 import type { Route } from "./+types/route";
-import { collectionFormSchema, type CollectionForm } from "./schema";
-export { clientAction } from "./action.client";
+
 export { clientLoader } from "./loader.client";
 
 export const handle = {
@@ -26,14 +27,18 @@ export const handle = {
   ),
 };
 
-export default function EditCollectionRoute({
+type ActionData = { error?: string; ok?: boolean };
+
+function fetcherError(data: unknown): string | null {
+  return (data as ActionData | undefined)?.error ?? null;
+}
+
+export default function SettingsRoute({
   params,
   loaderData,
 }: Route.ComponentProps) {
   const { collectionName } = params;
   const { collection } = loaderData;
-  const submit = useSubmit();
-  const actionData = useActionData();
 
   if (!collection) {
     return (
@@ -43,206 +48,324 @@ export default function EditCollectionRoute({
     );
   }
 
-  const {
-    control,
-    handleSubmit,
-    formState: { errors, isSubmitting },
-    watch,
-  } = useForm<CollectionForm>({
-    resolver: zodResolver(collectionFormSchema),
-    defaultValues: {
-      collection_name: collection?.collection_name ?? "",
-      partition_key: collection?.partition_key ?? "",
-      sort_key: collection?.sort_key ?? "",
-      stream_enabled: collection?.stream_enabled ?? false,
-      old_image: collection?.old_image ?? false,
-      ttl_attribute: collection?.ttl_attribute ?? "",
-      deletion_protection: collection?.deletion_protection ?? true,
-    },
-  });
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Settings</h1>
+        <Button variant="outline" size="sm" asChild>
+          <Link to="/collections">Back</Link>
+        </Button>
+      </div>
 
-  const streamEnabled = watch("stream_enabled");
+      <GeneralCard collection={collection} />
+      <ProtectionCard collection={collection} />
+      <TTLCard collection={collection} />
+      <StreamCard collection={collection} collectionName={collectionName} />
+    </div>
+  );
+}
 
-  const onSubmit = async (data: CollectionForm) => {
-    await submit(data, {
-      method: "put",
-      action: ".",
-      encType: "application/json",
-    });
+function GeneralCard({ collection }: { collection: CollectionConfig }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>General</CardTitle>
+        <CardDescription>
+          Collection identity and key schema. These are set at creation and
+          cannot be changed.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <Field>
+          <FieldLabel htmlFor="collection_name">Collection Name</FieldLabel>
+          <Input
+            id="collection_name"
+            value={collection.collection_name}
+            disabled
+            readOnly
+          />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="partition_key">Partition Key</FieldLabel>
+          <Input
+            id="partition_key"
+            value={collection.partition_key ?? ""}
+            disabled
+            readOnly
+          />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="sort_key">Sort Key</FieldLabel>
+          <Input
+            id="sort_key"
+            value={collection.sort_key ?? ""}
+            disabled
+            readOnly
+          />
+        </Field>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ProtectionCard({ collection }: { collection: CollectionConfig }) {
+  const fetcher = useFetcher();
+  const error = fetcherError(fetcher.data);
+  const enabled = collection.deletion_protection;
+  const busy = fetcher.state !== "idle";
+
+  const toggle = () => {
+    fetcher.submit(
+      {},
+      {
+        method: enabled ? "delete" : "put",
+        action: `/collections/${collection.collection_name}/protection`,
+      },
+    );
   };
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Settings: {collectionName}</h1>
+    <Card>
+      <CardHeader>
+        <CardTitle>Deletion protection</CardTitle>
+        <CardDescription>
+          Protects the collection from being deleted unintentionally. When this
+          setting is on, the collection cannot be deleted.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {error && (
+          <Alert variant="destructive">
+            <AlertCircleIcon />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">Status</span>
+            <span
+              className={`font-medium ${enabled ? "text-amber-600" : "text-green-600"}`}
+            >
+              {enabled ? "On" : "Off"}
+            </span>
+          </div>
+          <Button
+            variant={enabled ? "outline" : "default"}
+            size="sm"
+            disabled={busy}
+            onClick={toggle}
+          >
+            {busy ? "Saving..." : enabled ? "Turn off" : "Turn on"}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
-      <Card>
-        <CardContent>
-          <Form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-            {actionData?.error && (
-              <Alert variant="destructive">
-                <AlertCircleIcon />
-                <AlertDescription>{actionData.error}</AlertDescription>
-              </Alert>
+function TTLCard({ collection }: { collection: CollectionConfig }) {
+  const fetcher = useFetcher();
+  const error = fetcherError(fetcher.data);
+  const enabled = !!collection.ttl_attribute;
+  const attribute = collection.ttl_attribute ?? "";
+  const busy = fetcher.state !== "idle";
+  const [attr, setAttr] = useState(attribute);
+
+  const turnOn = (e: FormEvent) => {
+    e.preventDefault();
+    if (!attr) return;
+    fetcher.submit(
+      { attribute: attr },
+      {
+        method: "put",
+        action: `/collections/${collection.collection_name}/ttl`,
+        encType: "application/json",
+      },
+    );
+  };
+
+  const turnOff = () => {
+    fetcher.submit(
+      {},
+      {
+        method: "delete",
+        action: `/collections/${collection.collection_name}/ttl`,
+      },
+    );
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Time to Live (TTL)</CardTitle>
+        <CardDescription>
+          Automatically delete expired items based on a TTL attribute.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {error && (
+          <Alert variant="destructive">
+            <AlertCircleIcon />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">Status</span>
+            <span
+              className={`font-medium ${enabled ? "text-green-600" : "text-muted-foreground"}`}
+            >
+              {enabled ? "On" : "Off"}
+            </span>
+            {enabled && (
+              <span className="text-xs text-muted-foreground">
+                {" · attribute "}
+                <code className="rounded bg-muted px-1">{attribute}</code>
+              </span>
             )}
-
-            {actionData?.success && (
-              <Alert className="bg-green-500">
-                <AlertDescription className="text-foreground">
-                  Collection updated successfully!
-                </AlertDescription>
-              </Alert>
-            )}
-
-            <FieldGroup>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <Controller
-                  name="collection_name"
-                  control={control}
-                  render={({ field, fieldState }) => (
-                    <Field data-invalid={fieldState.invalid}>
-                      <FieldLabel htmlFor={field.name}>
-                        Collection Name *
-                      </FieldLabel>
-                      <Input
-                        {...field}
-                        id={field.name}
-                        aria-invalid={fieldState.invalid}
-                        disabled
-                      />
-                      <FieldError errors={[errors.collection_name]} />
-                    </Field>
-                  )}
-                />
-
-                <Controller
-                  name="partition_key"
-                  control={control}
-                  render={({ field }) => (
-                    <Field>
-                      <FieldLabel htmlFor={field.name}>
-                        Partition Key
-                      </FieldLabel>
-                      <Input {...field} id={field.name} disabled />
-                      {collection?.partition_key && (
-                        <p className="text-xs text-muted-foreground mt-1">
-                          Cannot be changed after creation
-                        </p>
-                      )}
-                    </Field>
-                  )}
-                />
-
-                <Controller
-                  name="sort_key"
-                  control={control}
-                  render={({ field }) => (
-                    <Field>
-                      <FieldLabel htmlFor={field.name}>Sort Key</FieldLabel>
-                      <Input {...field} id={field.name} disabled />
-                      {collection?.sort_key && (
-                        <p className="text-xs text-muted-foreground mt-1">
-                          Cannot be changed after creation
-                        </p>
-                      )}
-                    </Field>
-                  )}
-                />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Controller
-                  name="ttl_attribute"
-                  control={control}
-                  render={({ field }) => (
-                    <Field>
-                      <FieldLabel htmlFor={field.name}>
-                        TTL Attribute
-                      </FieldLabel>
-                      <Input {...field} id={field.name} disabled />
-                      {collection?.ttl_attribute && (
-                        <p className="text-xs text-muted-foreground mt-1">
-                          Cannot be changed after creation
-                        </p>
-                      )}
-                    </Field>
-                  )}
-                />
-              </div>
-
-              <div className="flex flex-col gap-4 md:flex-row md:flex-wrap">
-                <Field orientation="horizontal">
-                  <Controller
-                    name="stream_enabled"
-                    control={control}
-                    render={({ field }) => (
-                      <FieldLabel className="has-data-checked:bg-transparent">
-                        <Checkbox
-                          checked={field.value}
-                          onCheckedChange={field.onChange}
-                        />
-                        <span>Stream Enabled</span>
-                      </FieldLabel>
-                    )}
-                  />
-                </Field>
-
-                <Field orientation="horizontal">
-                  <Controller
-                    name="old_image"
-                    control={control}
-                    render={({ field }) => (
-                      <FieldLabel className="has-data-checked:bg-transparent">
-                        <Checkbox
-                          checked={field.value}
-                          onCheckedChange={field.onChange}
-                        />
-                        <span>Old Image</span>
-                      </FieldLabel>
-                    )}
-                  />
-                </Field>
-
-                <Field orientation="horizontal">
-                  <Controller
-                    name="deletion_protection"
-                    control={control}
-                    render={({ field }) => (
-                      <FieldLabel className="has-data-checked:bg-transparent">
-                        <Checkbox
-                          checked={field.value}
-                          onCheckedChange={field.onChange}
-                        />
-                        <span>Deletion Protection</span>
-                      </FieldLabel>
-                    )}
-                  />
-                </Field>
-              </div>
-
-              {streamEnabled && (
-                <p className="text-sm text-muted-foreground">
-                  Configure sinks in the{" "}
-                  <Link
-                    to={`/collections/${collectionName}/sinks`}
-                    className="underline"
-                  >
-                    Sinks page
-                  </Link>
-                </p>
-              )}
-            </FieldGroup>
-
-            <div className="flex gap-2 justify-end">
-              <Button type="button" variant="outline" asChild>
-                <Link to="/collections">Cancel</Link>
+          </div>
+          {enabled ? (
+            <Button variant="outline" size="sm" disabled={busy} onClick={turnOff}>
+              {busy ? "Saving..." : "Turn off"}
+            </Button>
+          ) : (
+            <form onSubmit={turnOn} className="flex items-center gap-2">
+              <Input
+                value={attr}
+                onChange={(e) => setAttr(e.target.value)}
+                placeholder="e.g. expiresAt"
+                className="w-48"
+              />
+              <Button type="submit" size="sm" disabled={busy || !attr}>
+                Turn on
               </Button>
-              <Button type="submit" disabled={isSubmitting}>
-                {isSubmitting ? "Updating..." : "Update Collection"}
+            </form>
+          )}
+        </div>
+        {enabled && (
+          <p className="text-xs text-muted-foreground">
+            TTL attribute is immutable. Turn off to change it.
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function StreamCard({
+  collection,
+  collectionName,
+}: {
+  collection: CollectionConfig;
+  collectionName: string;
+}) {
+  const fetcher = useFetcher();
+  const error = fetcherError(fetcher.data);
+  const enabled = collection.stream_enabled;
+  const oldImage = collection.old_image;
+  const busy = fetcher.state !== "idle";
+  const [includeOld, setIncludeOld] = useState(oldImage);
+
+  const submitStream = (oldImageValue: boolean) => {
+    fetcher.submit(
+      { old_image: oldImageValue },
+      {
+        method: "put",
+        action: `/collections/${collection.collection_name}/stream`,
+        encType: "application/json",
+      },
+    );
+  };
+
+  const turnOn = (e: FormEvent) => {
+    e.preventDefault();
+    submitStream(includeOld);
+  };
+
+  const turnOff = () => {
+    fetcher.submit(
+      {},
+      {
+        method: "delete",
+        action: `/collections/${collection.collection_name}/stream`,
+      },
+    );
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Streaming (CDC)</CardTitle>
+        <CardDescription>
+          Enable change data capture for this collection. Changes are streamed
+          to the configured sinks.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {error && (
+          <Alert variant="destructive">
+            <AlertCircleIcon />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">Status</span>
+            <span
+              className={`font-medium ${enabled ? "text-green-600" : "text-muted-foreground"}`}
+            >
+              {enabled ? "On" : "Off"}
+            </span>
+            {enabled && (
+              <span className="text-xs text-muted-foreground">
+                {" · old image "}
+                {oldImage ? "Yes" : "No"}
+              </span>
+            )}
+          </div>
+          {enabled ? (
+            <div className="flex items-center gap-3">
+              <label className="flex items-center gap-2 text-sm">
+                <Switch
+                  checked={oldImage}
+                  onCheckedChange={(v) => submitStream(v === true)}
+                  disabled={busy}
+                  aria-label="Include old image"
+                />
+                Old image
+              </label>
+              <Button variant="outline" size="sm" disabled={busy} onClick={turnOff}>
+                {busy ? "Saving..." : "Turn off"}
               </Button>
             </div>
-          </Form>
-        </CardContent>
-      </Card>
-    </div>
+          ) : (
+            <form onSubmit={turnOn} className="flex items-center gap-3">
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={includeOld}
+                  onCheckedChange={(v) => setIncludeOld(v === true)}
+                />
+                Include old image
+              </label>
+              <Button type="submit" size="sm" disabled={busy}>
+                Turn on
+              </Button>
+            </form>
+          )}
+        </div>
+        {enabled && (
+          <p className="text-sm text-muted-foreground">
+            Configure sinks in the{" "}
+            <Link
+              to={`/collections/${collectionName}/sinks`}
+              className="underline"
+            >
+              Sinks page
+            </Link>
+            .
+          </p>
+        )}
+      </CardContent>
+    </Card>
   );
 }
