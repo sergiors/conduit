@@ -9,14 +9,14 @@ definitions:
         type: string
       deletion_protection:
         type: boolean
-      destinations:
-        items:
-          $ref: '#/definitions/collections.DestinationConfig'
-        type: array
       old_image:
         type: boolean
       partition_key:
         type: string
+      sinks:
+        items:
+          $ref: '#/definitions/collections.SinkConfig'
+        type: array
       sort_key:
         type: string
       stream_enabled:
@@ -26,7 +26,31 @@ definitions:
       updated_at:
         type: string
     type: object
-  collections.DestinationConfig:
+  collections.FilterCondition:
+    properties:
+      anything-but: {}
+      exists:
+        type: boolean
+      numeric:
+        items: {}
+        type: array
+      prefix:
+        type: string
+      suffix:
+        type: string
+    type: object
+  collections.FilterCriteria:
+    properties:
+      new_image:
+        $ref: '#/definitions/collections.ImageFilter'
+      old_image:
+        $ref: '#/definitions/collections.ImageFilter'
+    type: object
+  collections.ImageFilter:
+    additionalProperties:
+      $ref: '#/definitions/collections.FilterCondition'
+    type: object
+  collections.SinkConfig:
     properties:
       bearer_token:
         description: HTTP auth token or Meilisearch API key
@@ -54,30 +78,6 @@ definitions:
         type: string
       type:
         type: string
-    type: object
-  collections.FilterCondition:
-    properties:
-      anything-but: {}
-      exists:
-        type: boolean
-      numeric:
-        items: {}
-        type: array
-      prefix:
-        type: string
-      suffix:
-        type: string
-    type: object
-  collections.FilterCriteria:
-    properties:
-      new_image:
-        $ref: '#/definitions/collections.ImageFilter'
-      old_image:
-        $ref: '#/definitions/collections.ImageFilter'
-    type: object
-  collections.ImageFilter:
-    additionalProperties:
-      $ref: '#/definitions/collections.FilterCondition'
     type: object
 info:
   contact: {}
@@ -221,71 +221,6 @@ paths:
               type: string
             type: object
       summary: Update collection
-  /api/collections/{name}/destinations:
-    get:
-      description: Get destinations for a collection
-      parameters:
-      - description: Collection name
-        in: path
-        name: name
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/collections.DestinationConfig'
-            type: array
-        "404":
-          description: Not Found
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      summary: Get collection destinations
-    put:
-      consumes:
-      - application/json
-      description: Replace destinations for a collection (stream_enabled must be true)
-      parameters:
-      - description: Collection name
-        in: path
-        name: name
-        required: true
-        type: string
-      - description: Destinations data
-        in: body
-        name: destinations
-        required: true
-        schema:
-          items:
-            $ref: '#/definitions/collections.DestinationConfig'
-          type: array
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/collections.DestinationConfig'
-            type: array
-        "400":
-          description: Bad Request
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "404":
-          description: Not Found
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      summary: Update collection destinations
   /api/collections/{name}/documents:
     get:
       description: List documents in a collection with pagination and filtering
@@ -479,6 +414,71 @@ paths:
               type: string
             type: object
       summary: Update document
+  /api/collections/{name}/sinks:
+    get:
+      description: Get sinks for a collection
+      parameters:
+      - description: Collection name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/collections.SinkConfig'
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get collection sinks
+    put:
+      consumes:
+      - application/json
+      description: Replace sinks for a collection (stream_enabled must be true)
+      parameters:
+      - description: Collection name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: Sinks data
+        in: body
+        name: sinks
+        required: true
+        schema:
+          items:
+            $ref: '#/definitions/collections.SinkConfig'
+          type: array
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/collections.SinkConfig'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Update collection sinks
   /health:
     get:
       description: Check if the API is running

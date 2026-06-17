@@ -225,104 +225,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/collections/{name}/destinations": {
-            "get": {
-                "description": "Get destinations for a collection",
-                "produces": [
-                    "application/json"
-                ],
-                "summary": "Get collection destinations",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Collection name",
-                        "name": "name",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/collections.DestinationConfig"
-                            }
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            },
-            "put": {
-                "description": "Replace destinations for a collection (stream_enabled must be true)",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "summary": "Update collection destinations",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Collection name",
-                        "name": "name",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Destinations data",
-                        "name": "destinations",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/collections.DestinationConfig"
-                            }
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/collections.DestinationConfig"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
         "/api/collections/{name}/documents": {
             "get": {
                 "description": "List documents in a collection with pagination and filtering",
@@ -608,6 +510,104 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/collections/{name}/sinks": {
+            "get": {
+                "description": "Get sinks for a collection",
+                "produces": [
+                    "application/json"
+                ],
+                "summary": "Get collection sinks",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Collection name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/collections.SinkConfig"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "put": {
+                "description": "Replace sinks for a collection (stream_enabled must be true)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "summary": "Update collection sinks",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Collection name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Sinks data",
+                        "name": "sinks",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/collections.SinkConfig"
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/collections.SinkConfig"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/health": {
             "get": {
                 "description": "Check if the API is running",
@@ -645,17 +645,17 @@ const docTemplate = `{
                 "deletion_protection": {
                     "type": "boolean"
                 },
-                "destinations": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/collections.DestinationConfig"
-                    }
-                },
                 "old_image": {
                     "type": "boolean"
                 },
                 "partition_key": {
                     "type": "string"
+                },
+                "sinks": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/collections.SinkConfig"
+                    }
                 },
                 "sort_key": {
                     "type": "string"
@@ -667,47 +667,6 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "updated_at": {
-                    "type": "string"
-                }
-            }
-        },
-        "collections.DestinationConfig": {
-            "type": "object",
-            "properties": {
-                "bearer_token": {
-                    "description": "HTTP auth token or Meilisearch API key",
-                    "type": "string"
-                },
-                "endpoint": {
-                    "description": "HTTP URL or Meilisearch host or EventBridge event-bus name",
-                    "type": "string"
-                },
-                "event_bus_name": {
-                    "description": "EventBridge event bus name",
-                    "type": "string"
-                },
-                "event_types": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "filter_criteria": {
-                    "$ref": "#/definitions/collections.FilterCriteria"
-                },
-                "index_name": {
-                    "description": "Meilisearch-specific",
-                    "type": "string"
-                },
-                "region": {
-                    "description": "EventBridge-specific",
-                    "type": "string"
-                },
-                "source": {
-                    "description": "Event source (default: \"conduit-mongodb\")",
-                    "type": "string"
-                },
-                "type": {
                     "type": "string"
                 }
             }
@@ -746,6 +705,47 @@ const docTemplate = `{
             "type": "object",
             "additionalProperties": {
                 "$ref": "#/definitions/collections.FilterCondition"
+            }
+        },
+        "collections.SinkConfig": {
+            "type": "object",
+            "properties": {
+                "bearer_token": {
+                    "description": "HTTP auth token or Meilisearch API key",
+                    "type": "string"
+                },
+                "endpoint": {
+                    "description": "HTTP URL or Meilisearch host or EventBridge event-bus name",
+                    "type": "string"
+                },
+                "event_bus_name": {
+                    "description": "EventBridge event bus name",
+                    "type": "string"
+                },
+                "event_types": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "filter_criteria": {
+                    "$ref": "#/definitions/collections.FilterCriteria"
+                },
+                "index_name": {
+                    "description": "Meilisearch-specific",
+                    "type": "string"
+                },
+                "region": {
+                    "description": "EventBridge-specific",
+                    "type": "string"
+                },
+                "source": {
+                    "description": "Event source (default: \"conduit-mongodb\")",
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
             }
         }
     }

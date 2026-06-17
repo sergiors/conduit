@@ -3,13 +3,13 @@ import type { Route } from "./+types/route";
 export async function clientLoader({ params }: Route.ClientLoaderArgs) {
   const collectionName = params.collectionName;
   const response = await fetch(
-    `/api/collections/${collectionName}/destinations`,
+    `/api/collections/${collectionName}/sinks`,
   );
 
   if (!response.ok) {
-    throw new Error("Failed to fetch destinations");
+    throw new Error("Failed to fetch sinks");
   }
 
-  const destinations = await response.json();
-  return { destinations };
+  const sinks = await response.json();
+  return { sinks };
 }

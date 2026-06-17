@@ -1,31 +1,21 @@
-// Package dispatch implements event dispatching to configured destinations.
+// Package dispatch implements event dispatching to configured sinks.
 //
-// This package handles routing CDC events to external systems:
-//   - Dispatcher: Central event router with per-collection destination registration
-//   - HTTPDestination: Sends events to HTTP endpoints with optional bearer token
-//   - EventBridgeDestination: Sends events to AWS EventBridge
-//
-// Key Features:
-//   - Multiple destinations per collection
-//   - Event type filtering (INSERT, MODIFY, REMOVE)
-//   - Bearer token authentication for HTTP endpoints
-//   - Graceful failure handling (one destination failure doesn't block others)
+// Components:
+//   - Dispatcher: Central event router with per-collection sink registration
+//   - Sink: Interface for individual event consumers
+//   - SinkBuilder: Factory function for creating sinks from configuration
 //
 // Usage:
 //
-//	dispatcher := dispatch.NewDispatcher()
+//	d := dispatch.NewDispatcher()
+//	d.Register("collection", dispatch.BuildSink(ctx, "collection", sinkConfig))
 //
-//	// Register HTTP destination for a collection
-//	httpDest, err := dispatch.NewHTTPDestination(
-//	    "http://localhost:3000/events",
-//	    "my-secret-token",
-//	    []string{"INSERT", "MODIFY", "REMOVE"},
-//	)
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
-//	dispatcher.Register("users", httpDest)
+//	// Route a stream record to all registered sinks
+//	d.Dispatch(ctx, "collection", record)
 //
-//	// Dispatch event
-//	err = dispatcher.Dispatch(ctx, "users", record)
+// Features:
+//   - Multiple sinks per collection
+//   - Per-sink event type filtering
+//   - Graceful failure handling (one sink failure doesn't block others)
+//   - Concurrent-safe registration and removal
 package dispatch

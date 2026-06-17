@@ -15,7 +15,7 @@ export interface FilterCriteria {
   new_image?: ImageFilter;
 }
 
-export interface DestinationConfig {
+export interface SinkConfig {
   type: string;
   endpoint?: string;
   bearer_token?: string;
@@ -35,7 +35,7 @@ export interface CollectionConfig {
   stream_enabled: boolean;
   old_image: boolean;
   ttl_attribute?: string;
-  destinations: DestinationConfig[];
+  sinks: SinkConfig[];
   deletion_protection: boolean;
   created_at?: string;
   updated_at?: string;

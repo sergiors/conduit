@@ -13,7 +13,7 @@ curl -X POST "$API_URL/api/collections" \
     "old_image": true,
     "ttl_attribute": "expiresAt",
     "deletion_protection": true,
-    "destinations": [
+    "sinks": [
       {
         "type": "http",
         "endpoint": "http://localhost:3000/events",

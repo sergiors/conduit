@@ -73,8 +73,8 @@ func TestCalculateNextRetry(t *testing.T) {
 func TestProcessRetryEvent(t *testing.T) {
 	t.Run("successful dispatch skips retry", func(t *testing.T) {
 		dispatcher := dispatch.NewDispatcher()
-		// Register a mock destination that always succeeds
-		dispatcher.Register("users", &successDestination{})
+		// Register a mock sink that always succeeds
+		dispatcher.Register("users", &successSink{})
 
 		processor := NewProcessor(nil, dispatcher, DefaultConfig())
 
@@ -140,11 +140,11 @@ func TestRetryEventStructure(t *testing.T) {
 	})
 }
 
-// successDestination is a mock destination that always succeeds
-type successDestination struct{}
+// successSink is a mock sink that always succeeds
+type successSink struct{}
 
-func (s *successDestination) Name() string { return "success" }
-func (s *successDestination) Close() error { return nil }
-func (s *successDestination) Send(ctx context.Context, record streams.StreamRecord) error {
+func (s *successSink) Name() string { return "success" }
+func (s *successSink) Close() error { return nil }
+func (s *successSink) Send(ctx context.Context, record streams.StreamRecord) error {
 	return nil
 }

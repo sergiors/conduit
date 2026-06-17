@@ -1,4 +1,4 @@
-package destinations
+package sinks
 
 import (
 	"bytes"
@@ -14,13 +14,13 @@ import (
 	"github.com/sergiors/conduit/internal/streams"
 )
 
-// init registers the HTTP destination builder automatically when this package is imported.
+// init registers the HTTP sink builder automatically when this package is imported.
 // This is triggered by the blank import in cmd/worker/main.go:
 //
-//	import _ "github.com/sergiors/conduit/internal/dispatch/destinations"
+//	import _ "github.com/sergiors/conduit/internal/dispatch/sinks"
 
-// HTTPDestination sends records to an HTTP endpoint via POST.
-type HTTPDestination struct {
+// HTTPSink sends records to an HTTP endpoint via POST.
+type HTTPSink struct {
 	name           string
 	client         *http.Client
 	endpoint       string
@@ -29,8 +29,8 @@ type HTTPDestination struct {
 	filterCriteria collections.FilterCriteria
 }
 
-// NewHTTPDestination creates an HTTP destination.
-func NewHTTPDestination(endpoint string, bearerToken string, eventTypes []string, filterCriteria collections.FilterCriteria) (*HTTPDestination, error) {
+// NewHTTPSink creates an HTTP sink.
+func NewHTTPSink(endpoint string, bearerToken string, eventTypes []string, filterCriteria collections.FilterCriteria) (*HTTPSink, error) {
 	if endpoint == "" {
 		return nil, fmt.Errorf("endpoint is required")
 	}
@@ -46,7 +46,7 @@ func NewHTTPDestination(endpoint string, bearerToken string, eventTypes []string
 		eventTypeFilter["REMOVE"] = true
 	}
 
-	return &HTTPDestination{
+	return &HTTPSink{
 		name:           endpoint,
 		client:         &http.Client{Timeout: 30 * time.Second},
 		endpoint:       endpoint,
@@ -56,13 +56,13 @@ func NewHTTPDestination(endpoint string, bearerToken string, eventTypes []string
 	}, nil
 }
 
-func (h *HTTPDestination) Name() string {
+func (h *HTTPSink) Name() string {
 	return h.name
 }
 
-func (h *HTTPDestination) Send(ctx context.Context, record streams.StreamRecord) error {
+func (h *HTTPSink) Send(ctx context.Context, record streams.StreamRecord) error {
 	if !h.eventTypes[string(record.RecordType)] {
-		log.Printf("Skipping event type %s for HTTP destination", record.RecordType)
+		log.Printf("Skipping event type %s for HTTP sink", record.RecordType)
 		return nil
 	}
 
@@ -101,25 +101,25 @@ func (h *HTTPDestination) Send(ctx context.Context, record streams.StreamRecord)
 	return nil
 }
 
-func (h *HTTPDestination) Close() error {
+func (h *HTTPSink) Close() error {
 	return nil
 }
 
 func init() {
-	dispatch.RegisterDestination("http", func(ctx context.Context, collectionName string, dest collections.DestinationConfig) dispatch.Destination {
-		if dest.Endpoint == "" {
-			log.Printf("HTTP destination requested but endpoint not set for collection %s", collectionName)
+	dispatch.RegisterSink("http", func(ctx context.Context, collectionName string, sink collections.SinkConfig) dispatch.Sink {
+		if sink.Endpoint == "" {
+			log.Printf("HTTP sink requested but endpoint not set for collection %s", collectionName)
 			return nil
 		}
-		eventTypes := dest.EventTypes
+		eventTypes := sink.EventTypes
 		if len(eventTypes) == 0 {
 			eventTypes = []string{"INSERT", "MODIFY", "REMOVE"}
 		}
-		httpDest, err := NewHTTPDestination(dest.Endpoint, dest.BearerToken, eventTypes, dest.FilterCriteria)
+		httpSink, err := NewHTTPSink(sink.Endpoint, sink.BearerToken, eventTypes, sink.FilterCriteria)
 		if err != nil {
-			log.Printf("Failed to create HTTP destination for %s: %v", collectionName, err)
+			log.Printf("Failed to create HTTP sink for %s: %v", collectionName, err)
 			return nil
 		}
-		return httpDest
+		return httpSink
 	})
 }

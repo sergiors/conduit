@@ -12,14 +12,14 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-// ValidEventTypes are the allowed event types for destinations
+// ValidEventTypes are the allowed event types for sinks
 var ValidEventTypes = []string{"INSERT", "MODIFY", "REMOVE"}
 
-// DestinationConfig represents a destination configuration.
-// Common fields are used by all destinations; type-specific fields are
+// SinkConfig represents a sink configuration.
+// Common fields are used by all sinks; type-specific fields are
 // documented below and applied by the watcher manager when building each
-// destination.
-type DestinationConfig struct {
+// sink.
+type SinkConfig struct {
 	Type           string         `bson:"type" json:"type"`
 	Endpoint       string         `bson:"endpoint,omitempty" json:"endpoint"`                   // HTTP URL or Meilisearch host or EventBridge event-bus name
 	BearerToken    string         `bson:"bearer_token,omitempty" json:"bearer_token,omitempty"` // HTTP auth token or Meilisearch API key
@@ -36,7 +36,7 @@ type DestinationConfig struct {
 }
 
 // ValidateEventTypes validates that all event types are valid
-func (d *DestinationConfig) ValidateEventTypes() error {
+func (d *SinkConfig) ValidateEventTypes() error {
 	if len(d.EventTypes) == 0 {
 		return nil // Empty means all types, which is valid
 	}
@@ -55,17 +55,17 @@ func (d *DestinationConfig) ValidateEventTypes() error {
 }
 
 type Collection struct {
-	ID                 string              `bson:"_id,omitempty" json:"_id,omitempty"`
-	CollectionName     string              `bson:"collection_name,omitempty" json:"collection_name,omitempty"`
-	PartitionKey       string              `bson:"partition_key,omitempty" json:"partition_key,omitempty"`
-	SortKey            string              `bson:"sort_key,omitempty" json:"sort_key,omitempty"`
-	StreamEnabled      bool                `bson:"stream_enabled" json:"stream_enabled"`
-	OldImage           bool                `bson:"old_image" json:"old_image"`
-	TTLAttribute       string              `bson:"ttl_attribute,omitempty" json:"ttl_attribute,omitempty"`
-	Destinations       []DestinationConfig `bson:"destinations" json:"destinations"`
-	DeletionProtection bool                `bson:"deletion_protection" json:"deletion_protection"`
-	CreatedAt          time.Time           `bson:"created_at" json:"created_at"`
-	UpdatedAt          time.Time           `bson:"updated_at" json:"updated_at"`
+	ID                 string       `bson:"_id,omitempty" json:"_id,omitempty"`
+	CollectionName     string       `bson:"collection_name,omitempty" json:"collection_name,omitempty"`
+	PartitionKey       string       `bson:"partition_key,omitempty" json:"partition_key,omitempty"`
+	SortKey            string       `bson:"sort_key,omitempty" json:"sort_key,omitempty"`
+	StreamEnabled      bool         `bson:"stream_enabled" json:"stream_enabled"`
+	OldImage           bool         `bson:"old_image" json:"old_image"`
+	TTLAttribute       string       `bson:"ttl_attribute,omitempty" json:"ttl_attribute,omitempty"`
+	Sinks              []SinkConfig `bson:"sinks" json:"sinks"`
+	DeletionProtection bool         `bson:"deletion_protection" json:"deletion_protection"`
+	CreatedAt          time.Time    `bson:"created_at" json:"created_at"`
+	UpdatedAt          time.Time    `bson:"updated_at" json:"updated_at"`
 }
 
 // Store manages collection configurations in MongoDB
@@ -301,29 +301,35 @@ func (s *Store) ListStreamEnabled(ctx context.Context) ([]Collection, error) {
 	return collections, nil
 }
 
-// GetDestinations returns the destinations for a collection
-func (s *Store) GetDestinations(ctx context.Context, collectionName string) ([]DestinationConfig, error) {
+// GetSinks returns the sinks for a collection
+func (s *Store) GetSinks(ctx context.Context, collectionName string) ([]SinkConfig, error) {
 	collection, err := s.Get(ctx, collectionName)
 	if err != nil {
 		return nil, err
 	}
-	return collection.Destinations, nil
+	return collection.Sinks, nil
 }
 
-// UpdateDestinations replaces the destinations for a collection
-func (s *Store) UpdateDestinations(ctx context.Context, collectionName string, destinations []DestinationConfig) error {
+// UpdateSinks replaces the sinks for a collection
+func (s *Store) UpdateSinks(ctx context.Context, collectionName string, sinks []SinkConfig) error {
 	collection, err := s.Get(ctx, collectionName)
 	if err != nil {
 		return fmt.Errorf("collection not found")
 	}
 
 	if !collection.StreamEnabled {
-		return fmt.Errorf("stream_enabled must be true to configure destinations")
+		return fmt.Errorf("stream_enabled must be true to configure sinks")
+	}
+
+	for i, sink := range sinks {
+		if err := sink.ValidateEventTypes(); err != nil {
+			return fmt.Errorf("sink[%d]: %w", i, err)
+		}
 	}
 
 	update := bson.M{
-		"destinations": destinations,
-		"updated_at":   time.Now(),
+		"sinks":      sinks,
+		"updated_at": time.Now(),
 	}
 
 	_, err = s.collection.UpdateOne(ctx, bson.M{"collection_name": collectionName}, bson.M{"$set": update})

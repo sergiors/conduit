@@ -44,7 +44,7 @@ The project supports two operation modes:
 - **Idempotency**: Duplicate event prevention with TTL-based keys
 - **Retry with Backoff**: Exponential backoff (1s → 5m), max 5 retries
 - **Dead Letter Queue**: Failed events after max retries
-- **Pluggable Destinations**: HTTP endpoints, EventBridge, Meilisearch, custom sinks
+- **Pluggable Sinks**: HTTP endpoints, EventBridge, Meilisearch, custom sinks
 
 ## 🏗 Architecture
 
@@ -55,7 +55,7 @@ The project supports two operation modes:
 | **API**               | `cmd/api`           | REST control plane for collection management    |
 | **Worker**            | `cmd/worker`        | CDC data plane with watchers                    |
 | **Watcher Manager**   | `internal/watcher`  | Centralized watcher lifecycle + Pub/Sub         |
-| **Dispatcher**        | `internal/dispatch` | Event routing to destinations                   |
+| **Dispatcher**        | `internal/dispatch` | Event routing to sinks                   |
 | **Retry Processor**   | `internal/retry`    | Backoff and DLQ handling                        |
 | **Redis Client**      | `internal/redis`    | State store + Pub/Sub operations                |
 | **Mongo Client**      | `internal/mongo`    | Database + change streams + replica set         |
@@ -195,7 +195,7 @@ curl -X POST http://localhost:8080/api/collections \
     "old_image": true,
     "ttl_attribute": "expiresAt",
     "deletion_protection": true,
-    "destinations": [
+    "sinks": [
       {
         "type": "http",
         "endpoint": "http://localhost:3000/events",
@@ -228,7 +228,7 @@ curl -X POST http://localhost:8080/api/collections \
   "old_image": true,
   "ttl_attribute": "expiresAt",
   "deletion_protection": true,
-  "destinations": [
+  "sinks": [
     {
       "type": "http",
       "endpoint": "http://localhost:3000/events",
@@ -249,7 +249,7 @@ curl -X POST http://localhost:8080/api/collections \
 | `old_image`           | bool   | false   | Include old document state in change events |
 | `ttl_attribute`       | string | -       | Field name for TTL expiration               |
 | `deletion_protection` | bool   | true    | Prevent accidental deletion (default: true) |
-| `destinations`        | array  | []      | List of event destinations                  |
+| `sinks`        | array  | []      | List of event sinks                  |
 
 Key schema rules:
 
@@ -257,13 +257,13 @@ Key schema rules:
 - `partition_key` and `sort_key` can use any user-defined field names
 - If both are omitted, collection runs in MongoDB-native mode
 
-**Destination Configuration:**
+**Sink Configuration:**
 
 | Field             | Type     | Required | Description                                                 |
 | ----------------- | -------- | -------- | ----------------------------------------------------------- |
-| `type`            | string   | Yes      | Destination type: `http`, `eventbridge`, `meilisearch`      |
+| `type`            | string   | Yes      | Sink type: `http`, `eventbridge`, `meilisearch`      |
 | `event_types`     | []string | No       | Events to send: `INSERT`, `MODIFY`, `REMOVE` (default: all) |
-| `filter_criteria` | object   | No       | Per-destination filtering on `old_image` / `new_image`      |
+| `filter_criteria` | object   | No       | Per-sink filtering on `old_image` / `new_image`      |
 
 **HTTP-specific fields:**
 
@@ -296,7 +296,7 @@ Key schema rules:
 
 ### Example Requests
 
-**Create collection with streaming (HTTP destination):**
+**Create collection with streaming (HTTP sink):**
 
 ```bash
 curl -X POST http://localhost:8080/api/collections \
@@ -307,7 +307,7 @@ curl -X POST http://localhost:8080/api/collections \
     "old_image": true,
     "ttl_attribute": "expiresAt",
     "deletion_protection": true,
-    "destinations": [
+    "sinks": [
       {
         "type": "http",
         "endpoint": "http://localhost:3000/events",
@@ -328,7 +328,7 @@ curl -X POST http://localhost:8080/api/collections \
     "old_image": true,
     "ttl_attribute": "expiresAt",
     "deletion_protection": true,
-    "destinations": [
+    "sinks": [
       {
         "type": "http",
         "endpoint": "http://localhost:3000/events",
@@ -339,7 +339,7 @@ curl -X POST http://localhost:8080/api/collections \
   }'
 ```
 
-**Create collection with multiple destinations:**
+**Create collection with multiple sinks:**
 
 ```bash
 curl -X POST http://localhost:8080/api/collections \
@@ -350,7 +350,7 @@ curl -X POST http://localhost:8080/api/collections \
     "old_image": true,
     "ttl_attribute": "expiresAt",
     "deletion_protection": true,
-    "destinations": [
+    "sinks": [
       {
         "type": "http",
         "endpoint": "http://localhost:3000/events",
@@ -376,7 +376,7 @@ curl -X PUT http://localhost:8080/api/collections/orders \
     "old_image": false,
     "ttl_attribute": "expiresAt",
     "deletion_protection": true,
-    "destinations": [
+    "sinks": [
       {
         "type": "http",
         "endpoint": "http://localhost:3000/events",
@@ -396,7 +396,7 @@ curl -X PUT http://localhost:8080/api/collections/orders \
     "collection_name": "orders",
     "stream_enabled": true,
     "deletion_protection": false,
-    "destinations": [
+    "sinks": [
       {
         "type": "http",
         "endpoint": "http://localhost:3000/events",
@@ -612,7 +612,7 @@ conduit/
 │   ├── api/              # Control plane API (Gin)
 │   └── worker/           # Data plane CDC worker
 ├── internal/
-│   ├── dispatch/         # Event dispatcher + destinations
+│   ├── dispatch/         # Event dispatcher + sinks
 │   ├── mongo/            # MongoDB client wrapper
 │   ├── redis/            # Redis client wrapper
 │   ├── retry/            # Retry processor with backoff

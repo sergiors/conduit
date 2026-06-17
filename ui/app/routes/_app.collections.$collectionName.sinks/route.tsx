@@ -27,10 +27,10 @@ import { Separator } from "~/components/ui/separator";
 import type { Route } from "./+types/route";
 import {
   conditionOptions,
-  destinationsFormSchema,
+  sinksFormSchema,
   numericOperators,
   type Condition,
-  type DestinationsForm,
+  type SinksForm,
   type FieldFilter,
   type FilterCriteria,
 } from "./schema";
@@ -39,22 +39,22 @@ export { clientLoader } from "./loader.client";
 
 export const handle = {
   breadcrumb: ({ params }: Route.LoaderArgs) => (
-    <>{params.collectionName} › Destinations</>
+    <>{params.collectionName} › Sinks</>
   ),
 };
 
 export default function Route({ params, loaderData }: Route.ComponentProps) {
   const { collectionName } = params;
-  const { destinations } = loaderData;
+  const { sinks } = loaderData;
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Destinations: {collectionName}</h1>
+      <h1 className="text-2xl font-bold">Sinks: {collectionName}</h1>
 
       <Card>
         <CardContent className="pt-6">
-          <DestinationsForm
-            initialData={destinations}
+          <SinksForm
+            initialData={sinks}
             collectionName={collectionName}
           />
         </CardContent>
@@ -165,7 +165,7 @@ function apiToFormCriteria(criteria: FilterCriteria | undefined): {
 interface FilterCriteriaEditorProps {
   imageType: "old_image" | "new_image";
   destIndex: number;
-  control: ReturnType<typeof useForm<DestinationsForm>>["control"];
+  control: ReturnType<typeof useForm<SinksForm>>["control"];
 }
 
 function FilterCriteriaEditor({
@@ -175,7 +175,7 @@ function FilterCriteriaEditor({
 }: FilterCriteriaEditorProps) {
   const { fields, append, remove } = useFieldArray({
     control,
-    name: `destinations.${destIndex}.filter_criteria.${imageType}` as const,
+    name: `sinks.${destIndex}.filter_criteria.${imageType}` as const,
   });
 
   const addField = () => {
@@ -208,7 +208,7 @@ function FilterCriteriaEditor({
           <div className="flex items-center gap-2">
             <Controller
               name={
-                `destinations.${destIndex}.filter_criteria.${imageType}.${fieldIndex}.field` as const
+                `sinks.${destIndex}.filter_criteria.${imageType}.${fieldIndex}.field` as const
               }
               control={control}
               render={({ field: fieldProps }) => (
@@ -232,7 +232,7 @@ function FilterCriteriaEditor({
 
           <Controller
             name={
-              `destinations.${destIndex}.filter_criteria.${imageType}.${fieldIndex}.conditions` as const
+              `sinks.${destIndex}.filter_criteria.${imageType}.${fieldIndex}.conditions` as const
             }
             control={control}
             render={({ field: conditionsProps }) => {
@@ -261,7 +261,7 @@ function FilterCriteriaEditor({
                       {condition.type === "exists" ? (
                         <Controller
                           name={
-                            `destinations.${destIndex}.filter_criteria.${imageType}.${fieldIndex}.conditions.${conditionIndex}.value` as const
+                            `sinks.${destIndex}.filter_criteria.${imageType}.${fieldIndex}.conditions.${conditionIndex}.value` as const
                           }
                           control={control}
                           render={({ field }) => (
@@ -283,7 +283,7 @@ function FilterCriteriaEditor({
                         <>
                           <Controller
                             name={
-                              `destinations.${destIndex}.filter_criteria.${imageType}.${fieldIndex}.conditions.${conditionIndex}.numericOp` as const
+                              `sinks.${destIndex}.filter_criteria.${imageType}.${fieldIndex}.conditions.${conditionIndex}.numericOp` as const
                             }
                             control={control}
                             render={({ field }) => (
@@ -306,7 +306,7 @@ function FilterCriteriaEditor({
                           />
                           <Controller
                             name={
-                              `destinations.${destIndex}.filter_criteria.${imageType}.${fieldIndex}.conditions.${conditionIndex}.value` as const
+                              `sinks.${destIndex}.filter_criteria.${imageType}.${fieldIndex}.conditions.${conditionIndex}.value` as const
                             }
                             control={control}
                             render={({ field }) => (
@@ -322,7 +322,7 @@ function FilterCriteriaEditor({
                       ) : (
                         <Controller
                           name={
-                            `destinations.${destIndex}.filter_criteria.${imageType}.${fieldIndex}.conditions.${conditionIndex}.value` as const
+                            `sinks.${destIndex}.filter_criteria.${imageType}.${fieldIndex}.conditions.${conditionIndex}.value` as const
                           }
                           control={control}
                           render={({ field }) => (
@@ -390,17 +390,17 @@ function FilterCriteriaEditor({
 
 import { PlusIcon, Trash2Icon } from "lucide-react";
 
-// --- Destinations Form Component ---
+// --- Sinks Form Component ---
 
-interface DestinationsFormProps {
+interface SinksFormProps {
   initialData: any[];
   collectionName: string;
 }
 
-function DestinationsForm({
+function SinksForm({
   initialData,
   collectionName,
-}: DestinationsFormProps) {
+}: SinksFormProps) {
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const {
@@ -409,10 +409,10 @@ function DestinationsForm({
     formState: { errors, isSubmitting },
     watch,
     setValue,
-  } = useForm<DestinationsForm>({
-    resolver: zodResolver(destinationsFormSchema),
+  } = useForm<SinksForm>({
+    resolver: zodResolver(sinksFormSchema),
     defaultValues: {
-      destinations: initialData
+      sinks: initialData
         ? initialData.map((d) => ({
             type: d.type as "http" | "eventbridge" | "meilisearch",
             endpoint: d.endpoint ?? "",
@@ -436,12 +436,12 @@ function DestinationsForm({
     },
   });
 
-  const destinations = watch("destinations");
+  const sinks = watch("sinks");
   const addedInitialRef = useRef(false);
 
   useEffect(() => {
-    if (destinations.length === 0 && !addedInitialRef.current) {
-      setValue("destinations", [
+    if (sinks.length === 0 && !addedInitialRef.current) {
+      setValue("sinks", [
         {
           type: "http" as const,
           endpoint: "",
@@ -452,12 +452,12 @@ function DestinationsForm({
       ]);
       addedInitialRef.current = true;
     }
-  }, [destinations.length, setValue]);
+  }, [sinks.length, setValue]);
 
-  const submitHandler = async (data: DestinationsForm) => {
+  const submitHandler = async (data: SinksForm) => {
     setSubmitError(null);
 
-    const payload = data.destinations.map((dest) => ({
+    const payload = data.sinks.map((dest) => ({
       type: dest.type,
       endpoint: dest.endpoint,
       bearer_token: dest.bearer_token,
@@ -471,7 +471,7 @@ function DestinationsForm({
 
     try {
       const res = await fetch(
-        `/api/collections/${collectionName}/destinations`,
+        `/api/collections/${collectionName}/sinks`,
         {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -480,21 +480,21 @@ function DestinationsForm({
       );
 
       if (res.ok) {
-        // Reload the page to show updated destinations
+        // Reload the page to show updated sinks
         window.location.reload();
       } else {
         const error = await res.json();
-        setSubmitError(error.error || "Failed to update destinations");
+        setSubmitError(error.error || "Failed to update sinks");
       }
     } catch (err) {
-      setSubmitError("Failed to update destinations");
-      console.error("Failed to update destinations:", err);
+      setSubmitError("Failed to update sinks");
+      console.error("Failed to update sinks:", err);
     }
   };
 
-  const addDestination = () => {
-    setValue("destinations", [
-      ...destinations,
+  const addSink = () => {
+    setValue("sinks", [
+      ...sinks,
       {
         type: "http" as const,
         endpoint: "",
@@ -509,10 +509,10 @@ function DestinationsForm({
     ]);
   };
 
-  const removeDestination = (index: number) => {
+  const removeSink = (index: number) => {
     setValue(
-      "destinations",
-      destinations.filter((_, i) => i !== index),
+      "sinks",
+      sinks.filter((_, i) => i !== index),
     );
   };
 
@@ -520,15 +520,15 @@ function DestinationsForm({
     <form onSubmit={handleSubmit(submitHandler)} className="space-y-6">
       <FieldGroup>
         <div className="space-y-6">
-          {destinations.map((dest, index) => (
+          {sinks.map((dest, index) => (
             <Card key={index} className="relative">
               <CardContent className="space-y-6">
-                {destinations.length > 1 && (
+                {sinks.length > 1 && (
                   <Button
                     type="button"
                     variant="ghost"
                     size="icon-sm"
-                    onClick={() => removeDestination(index)}
+                    onClick={() => removeSink(index)}
                     className="absolute top-4 right-4"
                   >
                     <XIcon />
@@ -538,7 +538,7 @@ function DestinationsForm({
                 <Field>
                   <FieldLabel>Type</FieldLabel>
                   <Controller
-                    name={`destinations.${index}.type` as const}
+                    name={`sinks.${index}.type` as const}
                     control={control}
                     render={({ field }) => (
                       <Select
@@ -570,18 +570,18 @@ function DestinationsForm({
                     <Field className="col-span-2">
                       <FieldLabel>Endpoint *</FieldLabel>
                       <Controller
-                        name={`destinations.${index}.endpoint` as const}
+                        name={`sinks.${index}.endpoint` as const}
                         control={control}
                         render={({ field }) => <Input {...field} />}
                       />
                       <FieldError
-                        errors={[errors.destinations?.[index]?.endpoint]}
+                        errors={[errors.sinks?.[index]?.endpoint]}
                       />
                     </Field>
                     <Field>
                       <FieldLabel>Bearer Token</FieldLabel>
                       <Controller
-                        name={`destinations.${index}.bearer_token` as const}
+                        name={`sinks.${index}.bearer_token` as const}
                         control={control}
                         render={({ field }) => (
                           <Input {...field} type="password" />
@@ -597,7 +597,7 @@ function DestinationsForm({
                       <Field>
                         <FieldLabel>Region *</FieldLabel>
                         <Controller
-                          name={`destinations.${index}.region` as const}
+                          name={`sinks.${index}.region` as const}
                           control={control}
                           render={({ field }) => (
                             <Input {...field} placeholder="us-east-1" />
@@ -607,7 +607,7 @@ function DestinationsForm({
                       <Field>
                         <FieldLabel>Event Bus Name *</FieldLabel>
                         <Controller
-                          name={`destinations.${index}.event_bus_name` as const}
+                          name={`sinks.${index}.event_bus_name` as const}
                           control={control}
                           render={({ field }) => (
                             <Input {...field} placeholder="my-event-bus" />
@@ -618,7 +618,7 @@ function DestinationsForm({
                     <Field>
                       <FieldLabel>Source</FieldLabel>
                       <Controller
-                        name={`destinations.${index}.source` as const}
+                        name={`sinks.${index}.source` as const}
                         control={control}
                         render={({ field }) => (
                           <Input {...field} placeholder="conduit-mongodb" />
@@ -634,7 +634,7 @@ function DestinationsForm({
                       <Field className="col-span-2">
                         <FieldLabel>Host *</FieldLabel>
                         <Controller
-                          name={`destinations.${index}.endpoint` as const}
+                          name={`sinks.${index}.endpoint` as const}
                           control={control}
                           render={({ field }) => (
                             <Input
@@ -644,13 +644,13 @@ function DestinationsForm({
                           )}
                         />
                         <FieldError
-                          errors={[errors.destinations?.[index]?.endpoint]}
+                          errors={[errors.sinks?.[index]?.endpoint]}
                         />
                       </Field>
                       <Field>
                         <FieldLabel>API Key</FieldLabel>
                         <Controller
-                          name={`destinations.${index}.bearer_token` as const}
+                          name={`sinks.${index}.bearer_token` as const}
                           control={control}
                           render={({ field }) => (
                             <Input {...field} type="password" />
@@ -661,7 +661,7 @@ function DestinationsForm({
                     <Field>
                       <FieldLabel>Index Name</FieldLabel>
                       <Controller
-                        name={`destinations.${index}.index_name` as const}
+                        name={`sinks.${index}.index_name` as const}
                         control={control}
                         render={({ field }) => (
                           <Input
@@ -677,7 +677,7 @@ function DestinationsForm({
                 <Field>
                   <FieldLabel>Event Types *</FieldLabel>
                   <Controller
-                    name={`destinations.${index}.event_types` as const}
+                    name={`sinks.${index}.event_types` as const}
                     control={control}
                     render={({ field }) => (
                       <div className="flex flex-wrap gap-4">
@@ -702,7 +702,7 @@ function DestinationsForm({
                     )}
                   />
                   <FieldError
-                    errors={[errors.destinations?.[index]?.event_types]}
+                    errors={[errors.sinks?.[index]?.event_types]}
                   />
                 </Field>
 
@@ -726,8 +726,8 @@ function DestinationsForm({
           ))}
         </div>
 
-        <Button type="button" variant="outline" onClick={addDestination}>
-          Add Destination
+        <Button type="button" variant="outline" onClick={addSink}>
+          Add Sink
         </Button>
       </FieldGroup>
 
@@ -738,7 +738,7 @@ function DestinationsForm({
           <Link to="/">Cancel</Link>
         </Button>
         <Button type="submit" disabled={isSubmitting}>
-          {isSubmitting ? "Updating..." : "Update Destinations"}
+          {isSubmitting ? "Updating..." : "Update Sinks"}
         </Button>
       </div>
     </form>

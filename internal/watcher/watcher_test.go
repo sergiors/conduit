@@ -142,47 +142,47 @@ func TestManagerCreation(t *testing.T) {
 	})
 }
 
-func TestDestinationName(t *testing.T) {
-	t.Run("http destination uses only endpoint", func(t *testing.T) {
-		dest := collections.DestinationConfig{
+func TestSinkName(t *testing.T) {
+	t.Run("http sink uses only endpoint", func(t *testing.T) {
+		sink := collections.SinkConfig{
 			Type:     "http",
 			Endpoint: "https://webhook.example.com",
 		}
-		name := destinationName(dest)
+		name := sinkName(sink)
 		assert.Equal(t, "https://webhook.example.com", name)
 	})
 
-	// TODO: Re-enable tests when EventBridge and Meilisearch destinations are enabled
-	// t.Run("eventbridge destination matches Name() format", func(t *testing.T) {
-	// 	dest := collections.DestinationConfig{
+	// TODO: Re-enable tests when EventBridge and Meilisearch sinks are enabled
+	// t.Run("eventbridge sink matches Name() format", func(t *testing.T) {
+	// 	sink := collections.SinkConfig{
 	// 		Type:        "eventbridge",
 	// 		Region:      "us-east-1",
 	// 		EventBusName: "default",
 	// 	}
-	// 	name := destinationName(dest)
+	// 	name := sinkName(sink)
 	// 	assert.Equal(t, "eventbridge:default@us-east-1", name)
 	// })
 	//
-	// t.Run("meilisearch destination matches Name() format", func(t *testing.T) {
-	// 	dest := collections.DestinationConfig{
+	// t.Run("meilisearch sink matches Name() format", func(t *testing.T) {
+	// 	sink := collections.SinkConfig{
 	// 		Type:      "meilisearch",
 	// 		Endpoint:  "http://localhost:7700",
 	// 		IndexName: "users",
 	// 	}
-	// 	name := destinationName(dest)
+	// 	name := sinkName(sink)
 	// 	assert.Equal(t, "meilisearch:http://localhost:7700/users", name)
 	// })
 }
 
 func TestConfigEqual(t *testing.T) {
 	t.Run("identical configs are equal", func(t *testing.T) {
-		a := collections.DestinationConfig{
+		a := collections.SinkConfig{
 			Type:        "http",
 			Endpoint:    "https://webhook.example.com",
 			BearerToken: "token123",
 			EventTypes:  []string{"INSERT", "MODIFY"},
 		}
-		b := collections.DestinationConfig{
+		b := collections.SinkConfig{
 			Type:        "http",
 			Endpoint:    "https://webhook.example.com",
 			BearerToken: "token123",
@@ -192,12 +192,12 @@ func TestConfigEqual(t *testing.T) {
 	})
 
 	t.Run("different event types order are equal", func(t *testing.T) {
-		a := collections.DestinationConfig{
+		a := collections.SinkConfig{
 			Type:       "http",
 			Endpoint:   "https://webhook.example.com",
 			EventTypes: []string{"INSERT", "MODIFY"},
 		}
-		b := collections.DestinationConfig{
+		b := collections.SinkConfig{
 			Type:       "http",
 			Endpoint:   "https://webhook.example.com",
 			EventTypes: []string{"MODIFY", "INSERT"},
@@ -206,11 +206,11 @@ func TestConfigEqual(t *testing.T) {
 	})
 
 	t.Run("different endpoints are not equal", func(t *testing.T) {
-		a := collections.DestinationConfig{
+		a := collections.SinkConfig{
 			Type:     "http",
 			Endpoint: "https://webhook.example.com",
 		}
-		b := collections.DestinationConfig{
+		b := collections.SinkConfig{
 			Type:     "http",
 			Endpoint: "https://other.example.com",
 		}
@@ -218,12 +218,12 @@ func TestConfigEqual(t *testing.T) {
 	})
 
 	t.Run("different event types are not equal", func(t *testing.T) {
-		a := collections.DestinationConfig{
+		a := collections.SinkConfig{
 			Type:       "http",
 			Endpoint:   "https://webhook.example.com",
 			EventTypes: []string{"INSERT"},
 		}
-		b := collections.DestinationConfig{
+		b := collections.SinkConfig{
 			Type:       "http",
 			Endpoint:   "https://webhook.example.com",
 			EventTypes: []string{"INSERT", "MODIFY"},
@@ -232,11 +232,11 @@ func TestConfigEqual(t *testing.T) {
 	})
 
 	t.Run("different filter criteria are not equal", func(t *testing.T) {
-		a := collections.DestinationConfig{
+		a := collections.SinkConfig{
 			Type:     "http",
 			Endpoint: "https://webhook.example.com",
 		}
-		b := collections.DestinationConfig{
+		b := collections.SinkConfig{
 			Type:     "http",
 			Endpoint: "https://webhook.example.com",
 			FilterCriteria: collections.FilterCriteria{
@@ -250,7 +250,6 @@ func TestConfigEqual(t *testing.T) {
 		assert.False(t, configEqual(a, b))
 	})
 }
-
 
 func TestManagerConfig(t *testing.T) {
 	t.Run("default config has sensible values", func(t *testing.T) {

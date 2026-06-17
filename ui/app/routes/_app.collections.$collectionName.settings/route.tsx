@@ -221,12 +221,12 @@ export default function EditCollectionRoute({
 
               {streamEnabled && (
                 <p className="text-sm text-muted-foreground">
-                  Configure destinations in the{" "}
+                  Configure sinks in the{" "}
                   <Link
-                    to={`/collections/${collectionName}/destinations`}
+                    to={`/collections/${collectionName}/sinks`}
                     className="underline"
                   >
-                    Destinations page
+                    Sinks page
                   </Link>
                 </p>
               )}

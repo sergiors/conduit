@@ -8,34 +8,34 @@ import (
 	"github.com/sergiors/conduit/internal/streams"
 )
 
-// Dispatcher routes stream records to configured destinations.
+// Dispatcher routes stream records to configured sinks.
 type Dispatcher struct {
-	destinations map[string][]Destination
-	mu           sync.RWMutex
+	sinks map[string][]Sink
+	mu    sync.RWMutex
 }
 
 // NewDispatcher creates a new event dispatcher.
 func NewDispatcher() *Dispatcher {
 	return &Dispatcher{
-		destinations: make(map[string][]Destination),
+		sinks: make(map[string][]Sink),
 	}
 }
 
-// Register adds a destination for a collection.
-func (d *Dispatcher) Register(collection string, dest Destination) {
+// Register adds a sink for a collection.
+func (d *Dispatcher) Register(collection string, sink Sink) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	if d.destinations[collection] == nil {
-		d.destinations[collection] = make([]Destination, 0)
+	if d.sinks[collection] == nil {
+		d.sinks[collection] = make([]Sink, 0)
 	}
-	d.destinations[collection] = append(d.destinations[collection], dest)
+	d.sinks[collection] = append(d.sinks[collection], sink)
 }
 
-// Dispatch sends a stream record to all configured destinations.
+// Dispatch sends a stream record to all configured sinks.
 func (d *Dispatcher) Dispatch(ctx context.Context, collection string, record streams.StreamRecord) error {
 	d.mu.RLock()
-	dests, ok := d.destinations[collection]
+	sinks, ok := d.sinks[collection]
 	d.mu.RUnlock()
 
 	if !ok {
@@ -43,25 +43,25 @@ func (d *Dispatcher) Dispatch(ctx context.Context, collection string, record str
 	}
 
 	var lastErr error
-	for _, dest := range dests {
-		if err := dest.Send(ctx, record); err != nil {
+	for _, sink := range sinks {
+		if err := sink.Send(ctx, record); err != nil {
 			lastErr = err
-			log.Printf("dispatch to %s failed: %v", dest.Name(), err)
+			log.Printf("dispatch to %s failed: %v", sink.Name(), err)
 		}
 	}
 
 	return lastErr
 }
 
-// Close all destinations.
+// Close all sinks.
 func (d *Dispatcher) Close() error {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 
 	var lastErr error
-	for _, dests := range d.destinations {
-		for _, dest := range dests {
-			if err := dest.Close(); err != nil {
+	for _, sinks := range d.sinks {
+		for _, sink := range sinks {
+			if err := sink.Close(); err != nil {
 				lastErr = err
 			}
 		}
@@ -69,37 +69,37 @@ func (d *Dispatcher) Close() error {
 	return lastErr
 }
 
-// Remove removes a single destination by name, closing it first.
+// Remove removes a single sink by name, closing it first.
 func (d *Dispatcher) Remove(collection, name string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	dests, ok := d.destinations[collection]
+	sinks, ok := d.sinks[collection]
 	if !ok {
 		return
 	}
 
-	for i, dest := range dests {
-		if dest.Name() == name {
-			dest.Close()
-			d.destinations[collection] = append(dests[:i], dests[i+1:]...)
-			if len(d.destinations[collection]) == 0 {
-				delete(d.destinations, collection)
+	for i, sink := range sinks {
+		if sink.Name() == name {
+			sink.Close()
+			d.sinks[collection] = append(sinks[:i], sinks[i+1:]...)
+			if len(d.sinks[collection]) == 0 {
+				delete(d.sinks, collection)
 			}
 			return
 		}
 	}
 }
 
-// Clear removes all destinations for a collection (used when config changes).
+// Clear removes all sinks for a collection (used when config changes).
 func (d *Dispatcher) Clear(collection string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	if dests, ok := d.destinations[collection]; ok {
-		for _, dest := range dests {
-			dest.Close()
+	if sinks, ok := d.sinks[collection]; ok {
+		for _, sink := range sinks {
+			sink.Close()
 		}
-		delete(d.destinations, collection)
+		delete(d.sinks, collection)
 	}
 }

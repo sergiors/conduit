@@ -383,7 +383,7 @@ Requirements:
 
 ---
 
-## Destinations
+## Sinks
 
 Supported sinks:
 
@@ -392,7 +392,7 @@ Supported sinks:
 -   HTTP Webhooks
 -   Meilisearch
 
-The destination architecture MUST remain pluggable.
+The sink architecture MUST remain pluggable.
 
 ---
 

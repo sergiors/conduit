@@ -8,7 +8,7 @@ export async function clientAction({
   const body = await request.json();
 
   const response = await fetch(
-    `/api/collections/${collectionName}/destinations`,
+    `/api/collections/${collectionName}/sinks`,
     {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -18,7 +18,7 @@ export async function clientAction({
 
   if (!response.ok) {
     const error = await response.json();
-    return { error: error.error || "Failed to update destinations" };
+    return { error: error.error || "Failed to update sinks" };
   }
 
   return { success: true };

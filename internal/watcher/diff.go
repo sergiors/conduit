@@ -9,16 +9,16 @@ import (
 	"github.com/sergiors/conduit/internal/dispatch"
 )
 
-// DestinationChange represents a change to a destination
-type DestinationChange struct {
+// SinkChange represents a change to a sink
+type SinkChange struct {
 	Type       ChangeType
 	Name       string
-	Config     collections.DestinationConfig
-	OldConfig  collections.DestinationConfig // Only for updates
-	ChangeDesc string                        // Human-readable description
+	Config     collections.SinkConfig
+	OldConfig  collections.SinkConfig // Only for updates
+	ChangeDesc string                 // Human-readable description
 }
 
-// ChangeType represents the type of destination change
+// ChangeType represents the type of sink change
 type ChangeType string
 
 const (
@@ -27,9 +27,9 @@ const (
 	ChangeUpdate ChangeType = "update"
 )
 
-// DiffResult holds the result of comparing destination configurations
+// DiffResult holds the result of comparing sink configurations
 type DiffResult struct {
-	Changes []DestinationChange
+	Changes []SinkChange
 }
 
 // Summary returns a human-readable summary of changes
@@ -48,35 +48,35 @@ func (d *DiffResult) Summary() string {
 	return fmt.Sprintf("%d added, %d removed, %d updated", adds, removes, updates)
 }
 
-// DiffDestinations compares current and desired destination configs
+// DiffSinks compares current and desired sink configs
 // and returns a structured diff result
-func DiffDestinations(current, desired []collections.DestinationConfig) *DiffResult {
-	currentByKey := make(map[string]collections.DestinationConfig, len(current))
+func DiffSinks(current, desired []collections.SinkConfig) *DiffResult {
+	currentByKey := make(map[string]collections.SinkConfig, len(current))
 	for _, c := range current {
-		currentByKey[destinationName(c)] = c
+		currentByKey[sinkName(c)] = c
 	}
 
-	desiredByKey := make(map[string]collections.DestinationConfig, len(desired))
+	desiredByKey := make(map[string]collections.SinkConfig, len(desired))
 	for _, d := range desired {
-		desiredByKey[destinationName(d)] = d
+		desiredByKey[sinkName(d)] = d
 	}
 
 	result := &DiffResult{
-		Changes: make([]DestinationChange, 0),
+		Changes: make([]SinkChange, 0),
 	}
 
 	// Find removals and updates
 	for key, cur := range currentByKey {
 		des, exists := desiredByKey[key]
 		if !exists {
-			result.Changes = append(result.Changes, DestinationChange{
+			result.Changes = append(result.Changes, SinkChange{
 				Type:       ChangeRemove,
 				Name:       key,
 				Config:     cur,
-				ChangeDesc: fmt.Sprintf("Remove destination %s", key),
+				ChangeDesc: fmt.Sprintf("Remove sink %s", key),
 			})
 		} else if !configEqual(cur, des) {
-			result.Changes = append(result.Changes, DestinationChange{
+			result.Changes = append(result.Changes, SinkChange{
 				Type:       ChangeUpdate,
 				Name:       key,
 				Config:     des,
@@ -89,11 +89,11 @@ func DiffDestinations(current, desired []collections.DestinationConfig) *DiffRes
 	// Find additions
 	for key, des := range desiredByKey {
 		if _, exists := currentByKey[key]; !exists {
-			result.Changes = append(result.Changes, DestinationChange{
+			result.Changes = append(result.Changes, SinkChange{
 				Type:       ChangeAdd,
 				Name:       key,
 				Config:     des,
-				ChangeDesc: fmt.Sprintf("Add destination %s", key),
+				ChangeDesc: fmt.Sprintf("Add sink %s", key),
 			})
 		}
 	}
@@ -102,7 +102,7 @@ func DiffDestinations(current, desired []collections.DestinationConfig) *DiffRes
 }
 
 // describeChange returns a human-readable description of what changed
-func describeChange(old, new collections.DestinationConfig) string {
+func describeChange(old, new collections.SinkConfig) string {
 	changes := ""
 
 	if old.Endpoint != new.Endpoint {
@@ -198,6 +198,7 @@ func ptrBoolEqual(a, b *bool) bool {
 		return false
 	}
 	return *a == *b
+
 }
 
 func deepEqual(a, b any) bool {
@@ -211,7 +212,7 @@ func (d *DiffResult) ApplyChanges(ctx context.Context, collectionName string, di
 		case ChangeRemove:
 			disp.Remove(collectionName, change.Name)
 		case ChangeAdd, ChangeUpdate:
-			if created := dispatch.BuildDestination(ctx, collectionName, change.Config); created != nil {
+			if created := dispatch.BuildSink(ctx, collectionName, change.Config); created != nil {
 				if change.Type == ChangeUpdate {
 					disp.Remove(collectionName, change.Name)
 				}
@@ -221,9 +222,9 @@ func (d *DiffResult) ApplyChanges(ctx context.Context, collectionName string, di
 	}
 }
 
-// dispatcher is a minimal interface for applying destination changes
+// dispatcher is a minimal interface for applying sink changes
 type dispatcher interface {
-	Register(collection string, dest dispatch.Destination)
+	Register(collection string, sink dispatch.Sink)
 	Remove(collection, name string)
 }
 
@@ -232,11 +233,11 @@ func (d *DiffResult) LogChanges(collectionName string) {
 	for _, change := range d.Changes {
 		switch change.Type {
 		case ChangeAdd:
-			log.Printf("Added destination %s for collection %s", change.Name, collectionName)
+			log.Printf("Added sink %s for collection %s", change.Name, collectionName)
 		case ChangeRemove:
-			log.Printf("Removed destination %s for collection %s", change.Name, collectionName)
+			log.Printf("Removed sink %s for collection %s", change.Name, collectionName)
 		case ChangeUpdate:
-			log.Printf("Updated destination %s for collection %s: %s", change.Name, collectionName, change.ChangeDesc)
+			log.Printf("Updated sink %s for collection %s: %s", change.Name, collectionName, change.ChangeDesc)
 		}
 	}
 }

@@ -18,7 +18,7 @@ export const filterCriteriaSchema = z.object({
   new_image: z.array(fieldFilterSchema),
 });
 
-export const destinationSchema = z
+export const sinkSchema = z
   .object({
     type: z.enum(["http", "eventbridge", "meilisearch"]),
     endpoint: z.string().optional(),
@@ -40,7 +40,7 @@ export const destinationSchema = z
       return true;
     },
     {
-      message: "Endpoint is required for all destination types",
+      message: "Endpoint is required for all sink types",
       path: ["endpoint"],
     },
   )
@@ -57,11 +57,11 @@ export const destinationSchema = z
     },
   );
 
-export const destinationsFormSchema = z.object({
-  destinations: z.array(destinationSchema),
+export const sinksFormSchema = z.object({
+  sinks: z.array(sinkSchema),
 });
 
-export type DestinationsForm = z.infer<typeof destinationsFormSchema>;
+export type SinksForm = z.infer<typeof sinksFormSchema>;
 
 export interface FilterCondition {
   prefix?: string;
@@ -80,7 +80,7 @@ export interface FilterCriteria {
   new_image?: ImageFilter;
 }
 
-export interface DestinationConfig {
+export interface SinkConfig {
   type: string;
   endpoint?: string;
   bearer_token?: string;

@@ -10,7 +10,7 @@ import (
 
 	"github.com/sergiors/conduit/internal/collections"
 	"github.com/sergiors/conduit/internal/dispatch"
-	_ "github.com/sergiors/conduit/internal/dispatch/destinations" // Register destination builders via init()
+	_ "github.com/sergiors/conduit/internal/dispatch/sinks" // Register sink builders via init()
 	"github.com/sergiors/conduit/internal/mongo"
 	"github.com/sergiors/conduit/internal/redis"
 	"github.com/sergiors/conduit/internal/retry"

@@ -15,8 +15,8 @@ import (
 	"github.com/sergiors/conduit/internal/collections"
 	"github.com/sergiors/conduit/internal/mongo"
 	"github.com/sergiors/conduit/internal/redis"
-	"github.com/swaggo/gin-swagger"
 	"github.com/swaggo/files"
+	"github.com/swaggo/gin-swagger"
 	"go.mongodb.org/mongo-driver/bson"
 
 	_ "github.com/sergiors/conduit/docs"
@@ -93,9 +93,9 @@ func main() {
 	router.PUT("/api/collections/:name", server.updateCollection)
 	router.DELETE("/api/collections/:name", server.deleteCollection)
 
-	// Collection destinations
-	router.GET("/api/collections/:name/destinations", server.getDestinations)
-	router.PUT("/api/collections/:name/destinations", server.updateDestinations)
+	// Collection sinks
+	router.GET("/api/collections/:name/sinks", server.getSinks)
+	router.PUT("/api/collections/:name/sinks", server.updateSinks)
 
 	// Collection documents CRUD (data plane)
 	router.GET("/api/collections/:name/documents", server.listDocuments)
@@ -236,63 +236,63 @@ func (s *Server) updateCollection(c *gin.Context) {
 	c.JSON(http.StatusOK, collection)
 }
 
-// @Summary Get collection destinations
-// @Description Get destinations for a collection
+// @Summary Get collection sinks
+// @Description Get sinks for a collection
 // @Produce json
 // @Param name path string true "Collection name"
-// @Success 200 {array} collections.DestinationConfig
+// @Success 200 {array} collections.SinkConfig
 // @Failure 404 {object} map[string]string
-// @Router /api/collections/{name}/destinations [get]
-func (s *Server) getDestinations(c *gin.Context) {
+// @Router /api/collections/{name}/sinks [get]
+func (s *Server) getSinks(c *gin.Context) {
 	ctx := c.Request.Context()
 	name := c.Param("name")
 
-	destinations, err := s.collectionStore.GetDestinations(ctx, name)
+	sinks, err := s.collectionStore.GetSinks(ctx, name)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Collection not found"})
 		return
 	}
 
-	c.JSON(http.StatusOK, destinations)
+	c.JSON(http.StatusOK, sinks)
 }
 
-// @Summary Update collection destinations
-// @Description Replace destinations for a collection (stream_enabled must be true)
+// @Summary Update collection sinks
+// @Description Replace sinks for a collection (stream_enabled must be true)
 // @Accept json
 // @Produce json
 // @Param name path string true "Collection name"
-// @Param destinations body []collections.DestinationConfig true "Destinations data"
-// @Success 200 {array} collections.DestinationConfig
+// @Param sinks body []collections.SinkConfig true "Sinks data"
+// @Success 200 {array} collections.SinkConfig
 // @Failure 400 {object} map[string]string
 // @Failure 404 {object} map[string]string
-// @Router /api/collections/{name}/destinations [put]
-func (s *Server) updateDestinations(c *gin.Context) {
+// @Router /api/collections/{name}/sinks [put]
+func (s *Server) updateSinks(c *gin.Context) {
 	ctx := c.Request.Context()
 	name := c.Param("name")
 
-	var destinations []collections.DestinationConfig
-	if err := c.ShouldBindJSON(&destinations); err != nil {
+	var sinks []collections.SinkConfig
+	if err := c.ShouldBindJSON(&sinks); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
 		return
 	}
 
-	// Validate destinations
-	for i, dest := range destinations {
-		if dest.Endpoint == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("destination[%d]: endpoint is required", i)})
+	// Validate sinks
+	for i, sink := range sinks {
+		if sink.Endpoint == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("sink[%d]: endpoint is required", i)})
 			return
 		}
-		if len(dest.EventTypes) == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("destination[%d]: at least one event type is required", i)})
+		if len(sink.EventTypes) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("sink[%d]: at least one event type is required", i)})
 			return
 		}
-		if err := dest.ValidateEventTypes(); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("destination[%d]: %v", i, err)})
+		if err := sink.ValidateEventTypes(); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("sink[%d]: %v", i, err)})
 			return
 		}
 	}
 
-	if err := s.collectionStore.UpdateDestinations(ctx, name, destinations); err != nil {
+	if err := s.collectionStore.UpdateSinks(ctx, name, sinks); err != nil {
 		if err.Error() == "collection not found" {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Collection not found"})
 			return
@@ -306,7 +306,7 @@ func (s *Server) updateDestinations(c *gin.Context) {
 		log.Printf("Failed to publish config change: %v", err)
 	}
 
-	c.JSON(http.StatusOK, destinations)
+	c.JSON(http.StatusOK, sinks)
 }
 
 // @Summary Delete collection
@@ -355,7 +355,6 @@ func (s *Server) deleteCollection(c *gin.Context) {
 func (s *Server) handleHealth(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
-
 
 // @Summary List documents
 // @Description List documents in a collection with pagination and filtering

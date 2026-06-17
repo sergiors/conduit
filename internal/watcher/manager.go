@@ -19,18 +19,18 @@ import (
 
 // Manager manages CDC watchers for all enabled collections
 type Manager struct {
-	mongoClient         *mongo.Client
-	database            string
-	collectionStore     *collections.Store
-	redisClient         *redisclient.Client
-	dispatcher          Dispatcher
-	retryProcessor      *retry.Processor
-	watchers            map[string]*Watcher
-	currentDestinations map[string][]collections.DestinationConfig
-	mu                  sync.RWMutex
-	syncInterval        time.Duration
-	pubsub              *redis.PubSub
-	configChan          <-chan *redis.Message
+	mongoClient     *mongo.Client
+	database        string
+	collectionStore *collections.Store
+	redisClient     *redisclient.Client
+	dispatcher      Dispatcher
+	retryProcessor  *retry.Processor
+	watchers        map[string]*Watcher
+	currentSinks    map[string][]collections.SinkConfig
+	mu              sync.RWMutex
+	syncInterval    time.Duration
+	pubsub          *redis.PubSub
+	configChan      <-chan *redis.Message
 }
 
 // Dispatcher interface for decoupling
@@ -41,7 +41,7 @@ type Dispatcher interface {
 // Config holds watcher manager configuration
 type Config struct {
 	SyncInterval time.Duration // How often to sync with config.collections
-	HTTPEndpoint string        // HTTP endpoint for creating destinations
+	HTTPEndpoint string        // HTTP endpoint for creating sinks
 }
 
 // DefaultConfig returns sensible defaults
@@ -62,15 +62,15 @@ func NewManager(
 	cfg Config,
 ) *Manager {
 	return &Manager{
-		mongoClient:         mongoClient,
-		database:            database,
-		collectionStore:     collectionStore,
-		redisClient:         redisClient,
-		dispatcher:          dispatcher,
-		retryProcessor:      retryProcessor,
-		watchers:            make(map[string]*Watcher),
-		currentDestinations: make(map[string][]collections.DestinationConfig),
-		syncInterval:        cfg.SyncInterval,
+		mongoClient:     mongoClient,
+		database:        database,
+		collectionStore: collectionStore,
+		redisClient:     redisClient,
+		dispatcher:      dispatcher,
+		retryProcessor:  retryProcessor,
+		watchers:        make(map[string]*Watcher),
+		currentSinks:    make(map[string][]collections.SinkConfig),
+		syncInterval:    cfg.SyncInterval,
 	}
 }
 
@@ -149,11 +149,11 @@ func (m *Manager) startWatcher(ctx context.Context, collection collections.Colle
 
 	log.Printf("Starting watcher for collection: %s", collection.CollectionName)
 
-	// Register destinations for this collection
-	if err := m.registerDestinations(ctx, collection.CollectionName, collection.Destinations); err != nil {
-		log.Printf("Failed to register destinations for %s: %v", collection.CollectionName, err)
+	// Register sinks for this collection
+	if err := m.registerSinks(ctx, collection.CollectionName, collection.Sinks); err != nil {
+		log.Printf("Failed to register sinks for %s: %v", collection.CollectionName, err)
 	}
-	m.currentDestinations[collection.CollectionName] = collection.Destinations
+	m.currentSinks[collection.CollectionName] = collection.Sinks
 
 	// Get resume token from Redis
 	resumeToken, err := m.redisClient.GetResumeToken(ctx, collection.CollectionName)
@@ -201,14 +201,14 @@ func (m *Manager) stopWatcher(ctx context.Context, collectionName string) error 
 
 	// Remove from map BEFORE stopping to prevent duplicate stop attempts
 	delete(m.watchers, collectionName)
-	delete(m.currentDestinations, collectionName)
+	delete(m.currentSinks, collectionName)
 	m.mu.Unlock()
 
 	if err := watcher.Stop(ctx); err != nil {
 		return err
 	}
 
-	// Clear destinations from dispatcher
+	// Clear sinks from dispatcher
 	if d, ok := m.dispatcher.(*dispatch.Dispatcher); ok {
 		d.Clear(collectionName)
 	}
@@ -248,7 +248,7 @@ func (m *Manager) handleEvent(ctx context.Context, collectionName string, record
 		return nil
 	}
 
-	// Dispatch to destinations
+	// Dispatch to sinks
 	if err := m.dispatcher.Dispatch(ctx, collectionName, record); err != nil {
 		log.Printf("Dispatch failed for %s: %v", eventID, err)
 		// Queue for retry
@@ -329,7 +329,7 @@ func (m *Manager) handleCollectionChange(ctx context.Context, collectionName str
 
 	// Collection enabled
 	if !watcherExists {
-		// New collection - start watcher with destinations
+		// New collection - start watcher with sinks
 		log.Printf("Collection %s enabled, starting watcher", collectionName)
 		if err := m.startWatcher(ctx, *collection); err != nil {
 			log.Printf("Failed to start watcher for %s: %v", collectionName, err)
@@ -349,9 +349,9 @@ func (m *Manager) handleCollectionChange(ctx context.Context, collectionName str
 		}
 	}
 
-	// Always refresh destinations for existing watchers
-	if err := m.refreshDestinations(ctx, collectionName); err != nil {
-		log.Printf("Failed to refresh destinations for %s: %v", collectionName, err)
+	// Always refresh sinks for existing watchers
+	if err := m.refreshSinks(ctx, collectionName); err != nil {
+		log.Printf("Failed to refresh sinks for %s: %v", collectionName, err)
 	}
 }
 
@@ -395,13 +395,13 @@ func (m *Manager) syncWithCollections(ctx context.Context) {
 	}
 	m.mu.RUnlock()
 
-	// Start watchers for new collections and register destinations
+	// Start watchers for new collections and register sinks
 	for collectionName, collection := range enabledSet {
 		existingWatcher, exists := currentWatchers[collectionName]
 		if !exists {
-			// New collection - register destinations and start watcher
-			if err := m.registerDestinations(ctx, collectionName, collection.Destinations); err != nil {
-				log.Printf("Failed to register destinations for %s: %v", collectionName, err)
+			// New collection - register sinks and start watcher
+			if err := m.registerSinks(ctx, collectionName, collection.Sinks); err != nil {
+				log.Printf("Failed to register sinks for %s: %v", collectionName, err)
 			}
 
 			if err := m.startWatcher(ctx, collection); err != nil {
@@ -415,9 +415,9 @@ func (m *Manager) syncWithCollections(ctx context.Context) {
 					log.Printf("Failed to restart watcher for %s: %v", collectionName, err)
 				}
 			}
-			// Always refresh destinations for existing collections
-			if err := m.refreshDestinations(ctx, collectionName); err != nil {
-				log.Printf("Failed to refresh destinations for %s: %v", collectionName, err)
+			// Always refresh sinks for existing collections
+			if err := m.refreshSinks(ctx, collectionName); err != nil {
+				log.Printf("Failed to refresh sinks for %s: %v", collectionName, err)
 			}
 		}
 	}
@@ -434,8 +434,8 @@ func (m *Manager) syncWithCollections(ctx context.Context) {
 	log.Printf("Sync complete: %d active watchers", len(enabledSet))
 }
 
-// refreshDestinations diffs current vs desired destinations and only updates what changed
-func (m *Manager) refreshDestinations(ctx context.Context, collectionName string) error {
+// refreshSinks diffs current vs desired sinks and only updates what changed
+func (m *Manager) refreshSinks(ctx context.Context, collectionName string) error {
 	collection, err := m.collectionStore.Get(ctx, collectionName)
 	if err != nil {
 		log.Printf("Failed to fetch collection %s for refresh: %v", collectionName, err)
@@ -448,55 +448,55 @@ func (m *Manager) refreshDestinations(ctx context.Context, collectionName string
 	}
 
 	m.mu.RLock()
-	current := m.currentDestinations[collectionName]
+	current := m.currentSinks[collectionName]
 	m.mu.RUnlock()
 
-	desired := collection.Destinations
+	desired := collection.Sinks
 
-	// If desired is empty, remove all current destinations
+	// If desired is empty, remove all current sinks
 	if len(desired) == 0 {
-		diff := DiffDestinations(current, desired)
+		diff := DiffSinks(current, desired)
 		diff.LogChanges(collectionName)
 		diff.ApplyChanges(ctx, collectionName, d)
 
 		m.mu.Lock()
-		delete(m.currentDestinations, collectionName)
+		delete(m.currentSinks, collectionName)
 		m.mu.Unlock()
 
 		if len(diff.Changes) > 0 {
-			log.Printf("Removed all destinations for collection %s", collectionName)
+			log.Printf("Removed all sinks for collection %s", collectionName)
 		}
 		return nil
 	}
 
 	// Compute diff and apply changes
-	diff := DiffDestinations(current, desired)
+	diff := DiffSinks(current, desired)
 	diff.LogChanges(collectionName)
 	diff.ApplyChanges(ctx, collectionName, d)
 
 	// Update state
 	m.mu.Lock()
-	m.currentDestinations[collectionName] = desired
+	m.currentSinks[collectionName] = desired
 	m.mu.Unlock()
 
 	if len(diff.Changes) > 0 {
-		log.Printf("Refreshed destinations for collection %s: %s", collectionName, diff.Summary())
+		log.Printf("Refreshed sinks for collection %s: %s", collectionName, diff.Summary())
 	}
 
 	return nil
 }
 
-// registerDestinations registers event destinations for a collection
-func (m *Manager) registerDestinations(ctx context.Context, collectionName string, destinations []collections.DestinationConfig) error {
+// registerSinks registers event sinks for a collection
+func (m *Manager) registerSinks(ctx context.Context, collectionName string, sinks []collections.SinkConfig) error {
 	d, ok := m.dispatcher.(*dispatch.Dispatcher)
 	if !ok {
 		return nil
 	}
 
-	for _, dest := range destinations {
-		if created := dispatch.BuildDestination(ctx, collectionName, dest); created != nil {
+	for _, dest := range sinks {
+		if created := dispatch.BuildSink(ctx, collectionName, dest); created != nil {
 			d.Register(collectionName, created)
-			log.Printf("Registered %s destination for collection %s", dest.Type, collectionName)
+			log.Printf("Registered %s sink for collection %s", dest.Type, collectionName)
 		}
 	}
 	return nil
@@ -530,19 +530,19 @@ type WatcherStats struct {
 	LastErrorTime   time.Time
 }
 
-// diffDestinations compares current and desired destination configs, returning which to add/remove
-func diffDestinations(current, desired []collections.DestinationConfig) (toAdd, toRemove []collections.DestinationConfig) {
-	currentByKey := make(map[string]collections.DestinationConfig, len(current))
+// diffSinks compares current and desired sink configs, returning which to add/remove
+func diffSinks(current, desired []collections.SinkConfig) (toAdd, toRemove []collections.SinkConfig) {
+	currentByKey := make(map[string]collections.SinkConfig, len(current))
 	for _, c := range current {
-		currentByKey[destinationName(c)] = c
+		currentByKey[sinkName(c)] = c
 	}
 
-	desiredByKey := make(map[string]collections.DestinationConfig, len(desired))
+	desiredByKey := make(map[string]collections.SinkConfig, len(desired))
 	for _, d := range desired {
-		desiredByKey[destinationName(d)] = d
+		desiredByKey[sinkName(d)] = d
 	}
 
-	// Find destinations to remove: in current but not in desired, or config changed
+	// Find sinks to remove: in current but not in desired, or config changed
 	for key, cur := range currentByKey {
 		des, exists := desiredByKey[key]
 		if !exists || !configEqual(cur, des) {
@@ -550,7 +550,7 @@ func diffDestinations(current, desired []collections.DestinationConfig) (toAdd, 
 		}
 	}
 
-	// Find destinations to add: in desired but not in current, or config changed
+	// Find sinks to add: in desired but not in current, or config changed
 	for key, des := range desiredByKey {
 		cur, exists := currentByKey[key]
 		if !exists || !configEqual(cur, des) {
@@ -561,9 +561,9 @@ func diffDestinations(current, desired []collections.DestinationConfig) (toAdd, 
 	return
 }
 
-// destinationName builds the internal name for a destination config.
-// This MUST match exactly what Destination.Name() returns for Remove() to work correctly.
-func destinationName(dest collections.DestinationConfig) string {
+// sinkName builds the internal name for a sink config.
+// This MUST match exactly what Sink.Name() returns for Remove() to work correctly.
+func sinkName(dest collections.SinkConfig) string {
 	switch dest.Type {
 	case "eventbridge":
 		// Matches: "eventbridge:" + eventBusName + "@" + region
@@ -577,9 +577,9 @@ func destinationName(dest collections.DestinationConfig) string {
 	}
 }
 
-// configEqual compares two destination configs ignoring event type order.
+// configEqual compares two sink configs ignoring event type order.
 // It checks both common fields and type-specific fields.
-func configEqual(a, b collections.DestinationConfig) bool {
+func configEqual(a, b collections.SinkConfig) bool {
 	if a.Type != b.Type || a.Endpoint != b.Endpoint || a.BearerToken != b.BearerToken {
 		return false
 	}
@@ -601,4 +601,3 @@ func configEqual(a, b collections.DestinationConfig) bool {
 	return imageFilterEqual(a.FilterCriteria.OldImage, b.FilterCriteria.OldImage) &&
 		imageFilterEqual(a.FilterCriteria.NewImage, b.FilterCriteria.NewImage)
 }
-

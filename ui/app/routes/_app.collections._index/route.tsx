@@ -184,9 +184,9 @@ export default function Route() {
                         asChild
                       >
                         <Link
-                          to={`/collections/${collection.collection_name}/destinations`}
+                          to={`/collections/${collection.collection_name}/sinks`}
                         >
-                          Destinations
+                          Sinks
                         </Link>
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />
@@ -261,10 +261,10 @@ export default function Route() {
                     </span>
                   </div>
                 </div>
-                {(collection.destinations || []).length > 0 && (
+                {(collection.sinks || []).length > 0 && (
                   <div className="mt-3 pt-3 border-t">
                     <div className="flex items-center gap-1 flex-wrap">
-                      {(collection.destinations || []).map((dest, idx) => (
+                      {(collection.sinks || []).map((dest, idx) => (
                         <span
                           key={idx}
                           className="text-xs bg-secondary text-secondary-foreground px-2 py-0.5 rounded-full"
