@@ -2,6 +2,7 @@ package collections
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -117,8 +118,8 @@ func (d *Document) Get(ctx context.Context, id string) (bson.M, error) {
 		result := coll.FindOne(ctx, bson.M{"_id": id})
 		var doc bson.M
 		if err := result.Decode(&doc); err != nil {
-			if err == mongo.ErrNoDocuments {
-				return nil, fmt.Errorf("document not found")
+			if errors.Is(err, mongo.ErrNoDocuments) {
+				return nil, ErrDocumentNotFound
 			}
 			return nil, fmt.Errorf("find document: %w", err)
 		}
@@ -128,8 +129,8 @@ func (d *Document) Get(ctx context.Context, id string) (bson.M, error) {
 	result := coll.FindOne(ctx, bson.M{"_id": objectID})
 	var doc bson.M
 	if err := result.Decode(&doc); err != nil {
-		if err == mongo.ErrNoDocuments {
-			return nil, fmt.Errorf("document not found")
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, ErrDocumentNotFound
 		}
 		return nil, fmt.Errorf("find document: %w", err)
 	}
@@ -174,7 +175,7 @@ func (d *Document) Update(ctx context.Context, id string, data bson.M) (bson.M, 
 	}
 
 	if result.MatchedCount == 0 {
-		return nil, fmt.Errorf("document not found")
+		return nil, ErrDocumentNotFound
 	}
 
 	// Return updated document with ID
@@ -198,7 +199,7 @@ func (d *Document) Delete(ctx context.Context, id string) error {
 	}
 
 	if result.DeletedCount == 0 {
-		return fmt.Errorf("document not found")
+		return ErrDocumentNotFound
 	}
 	return nil
 }

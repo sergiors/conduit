@@ -179,48 +179,6 @@ paths:
               type: string
             type: object
       summary: Get collection
-    put:
-      consumes:
-      - application/json
-      description: Update a collection configuration
-      parameters:
-      - description: Collection name
-        in: path
-        name: name
-        required: true
-        type: string
-      - description: Collection data
-        in: body
-        name: collection
-        required: true
-        schema:
-          $ref: '#/definitions/collections.Collection'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/collections.Collection'
-        "400":
-          description: Bad Request
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "404":
-          description: Not Found
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "500":
-          description: Internal Server Error
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      summary: Update collection
   /api/collections/{name}/documents:
     get:
       description: List documents in a collection with pagination and filtering
@@ -414,6 +372,55 @@ paths:
               type: string
             type: object
       summary: Update document
+  /api/collections/{name}/protection:
+    delete:
+      description: Disable deletion protection for a collection (idempotent)
+      parameters:
+      - description: Collection name
+        in: path
+        name: name
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Disable deletion protection
+    put:
+      description: Enable deletion protection for a collection (idempotent)
+      parameters:
+      - description: Collection name
+        in: path
+        name: name
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Enable deletion protection
   /api/collections/{name}/sinks:
     get:
       description: Get sinks for a collection
@@ -479,6 +486,139 @@ paths:
               type: string
             type: object
       summary: Update collection sinks
+  /api/collections/{name}/stream:
+    delete:
+      description: Disable the CDC stream (and old_image) for a collection
+      parameters:
+      - description: Collection name
+        in: path
+        name: name
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Disable collection stream
+    put:
+      consumes:
+      - application/json
+      description: Enable the CDC stream for a collection and configure old_image
+      parameters:
+      - description: Collection name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: '{ \'
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Enable collection stream
+  /api/collections/{name}/ttl:
+    delete:
+      description: Drop the TTL index and clear the TTL attribute
+      parameters:
+      - description: Collection name
+        in: path
+        name: name
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Disable TTL
+    put:
+      consumes:
+      - application/json
+      description: Set the TTL attribute and create the TTL index (immutable once
+        set; delete to change)
+      parameters:
+      - description: Collection name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: '{ \'
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Enable TTL
   /health:
     get:
       description: Check if the API is running

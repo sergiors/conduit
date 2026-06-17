@@ -2,6 +2,7 @@ package collections
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -14,6 +15,33 @@ import (
 
 // ValidEventTypes are the allowed event types for sinks
 var ValidEventTypes = []string{"INSERT", "MODIFY", "REMOVE"}
+
+// Sentinel domain errors returned by the Store. Callers MUST identify them
+// with errors.Is (never by comparing err.Error()), so HTTP status mapping
+// does not depend on fragile string matching.
+var (
+	ErrCollectionNotFound        = errors.New("collection not found")
+	ErrDeletionProtectionEnabled = errors.New("deletion protection is enabled")
+	ErrDocumentNotFound          = errors.New("document not found")
+	ErrTTLAttributeImmutable     = errors.New("TTL attribute is immutable")
+	ErrValidation                = errors.New("validation failed")
+)
+
+// ValidationError wraps a dynamic client-validation message while remaining
+// identifiable via errors.Is(err, ErrValidation). Use NewValidationError so
+// HTTP handlers can map all validation errors to 400 through internal/apierr
+// without repeating messages or comparing strings.
+type ValidationError struct {
+	Message string
+}
+
+func (e *ValidationError) Error() string        { return e.Message }
+func (e *ValidationError) Is(target error) bool { return target == ErrValidation }
+
+// NewValidationError returns a validation error with a formatted message.
+func NewValidationError(format string, args ...any) error {
+	return &ValidationError{Message: fmt.Sprintf(format, args...)}
+}
 
 // SinkConfig represents a sink configuration.
 // Common fields are used by all sinks; type-specific fields are
@@ -215,8 +243,12 @@ func (s *Store) Get(ctx context.Context, name string) (*Collection, error) {
 	var collection Collection
 	err := s.collection.FindOne(ctx, bson.M{"collection_name": name}).Decode(&collection)
 	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, ErrCollectionNotFound
+		}
 		return nil, err
 	}
+
 	return &collection, nil
 }
 
@@ -235,44 +267,137 @@ func (s *Store) List(ctx context.Context) ([]Collection, error) {
 	return collections, nil
 }
 
-// Update modifies an existing collection configuration by collection name
-func (s *Store) Update(ctx context.Context, collection *Collection) error {
-	name := collection.CollectionName
-
-	// Get existing collection to validate changes
-	existing, err := s.Get(ctx, name)
-	if err != nil {
-		return fmt.Errorf("collection not found")
+// SetDeletionProtection enables or disables deletion protection for a collection.
+// It is idempotent: setting a collection to its current protection state is a no-op.
+// Returns ErrCollectionNotFound if the collection does not exist.
+func (s *Store) SetDeletionProtection(ctx context.Context, name string, enabled bool) error {
+	if _, err := s.Get(ctx, name); err != nil {
+		return err
 	}
 
-	// TTL attribute cannot be changed once set
-	if existing.TTLAttribute != "" && collection.TTLAttribute != existing.TTLAttribute {
-		return fmt.Errorf("TTL attribute cannot be changed once set: '%s' -> '%s'", existing.TTLAttribute, collection.TTLAttribute)
-	}
-
-	update := bson.M{
-		"stream_enabled":      collection.StreamEnabled,
-		"old_image":           collection.OldImage,
-		"ttl_attribute":       collection.TTLAttribute,
-		"deletion_protection": collection.DeletionProtection,
-		"updated_at":          time.Now(),
-	}
-
-	_, err = s.collection.UpdateOne(ctx, bson.M{"collection_name": name}, bson.M{"$set": update})
+	_, err := s.collection.UpdateOne(
+		ctx,
+		bson.M{"collection_name": name},
+		bson.M{"$set": bson.M{
+			"deletion_protection": enabled,
+			"updated_at":          time.Now(),
+		}},
+	)
 	return err
 }
 
-// Delete removes a collection configuration and its MongoDB collection by collection name
+// SetStream enables the CDC stream for a collection and configures old_image.
+// oldImage controls whether change events include the pre-image. Idempotent.
+// Returns ErrCollectionNotFound if the collection does not exist.
+func (s *Store) SetStream(ctx context.Context, name string, oldImage bool) error {
+	if _, err := s.Get(ctx, name); err != nil {
+		return err
+	}
+	_, err := s.collection.UpdateOne(
+		ctx,
+		bson.M{"collection_name": name},
+		bson.M{"$set": bson.M{
+			"stream_enabled": true,
+			"old_image":      oldImage,
+			"updated_at":     time.Now(),
+		}},
+	)
+	return err
+}
+
+// DisableStream disables the CDC stream and old_image for a collection.
+// Idempotent. Returns ErrCollectionNotFound if the collection does not exist.
+func (s *Store) DisableStream(ctx context.Context, name string) error {
+	if _, err := s.Get(ctx, name); err != nil {
+		return err
+	}
+	_, err := s.collection.UpdateOne(
+		ctx,
+		bson.M{"collection_name": name},
+		bson.M{"$set": bson.M{
+			"stream_enabled": false,
+			"old_image":      false,
+			"updated_at":     time.Now(),
+		}},
+	)
+	return err
+}
+
+// SetTTL sets the collection TTL attribute. The TTL index itself is created
+// by the caller via mongo.Client.CreateTTLIndex; the Store only persists the
+// configuration and validates it.
+// The attribute is immutable: if a different attribute is already set,
+// ErrTTLAttributeImmutable is returned (delete it first). Idempotent for the
+// same attribute. An empty attribute returns ErrValidation.
+func (s *Store) SetTTL(ctx context.Context, name, attribute string) error {
+	if attribute == "" {
+		return NewValidationError("ttl attribute is required")
+	}
+
+	collection, err := s.Get(ctx, name)
+	if err != nil {
+		return err
+	}
+
+	if collection.TTLAttribute != "" && collection.TTLAttribute != attribute {
+		return ErrTTLAttributeImmutable
+	}
+
+	_, err = s.collection.UpdateOne(
+		ctx,
+		bson.M{"collection_name": name},
+		bson.M{"$set": bson.M{
+			"ttl_attribute": attribute,
+			"updated_at":    time.Now(),
+		}},
+	)
+	if err != nil {
+		return fmt.Errorf("set ttl attribute: %w", err)
+	}
+	return nil
+}
+
+// DisableTTL clears the TTL attribute and returns the previously-set attribute
+// ("" if none), so the caller can drop the TTL index via mongo.Client.DropTTLIndex.
+// Idempotent. Returns ErrCollectionNotFound if the collection does not exist.
+func (s *Store) DisableTTL(ctx context.Context, name string) (string, error) {
+	collection, err := s.Get(ctx, name)
+	if err != nil {
+		return "", err
+	}
+
+	if collection.TTLAttribute == "" {
+		return "", nil
+	}
+
+	_, err = s.collection.UpdateOne(
+		ctx,
+		bson.M{"collection_name": name},
+		bson.M{"$set": bson.M{
+			"ttl_attribute": "",
+			"updated_at":    time.Now(),
+		}},
+	)
+	if err != nil {
+		return "", err
+	}
+
+	return collection.TTLAttribute, nil
+}
+
+// Delete removes a collection configuration and its MongoDB collection by collection name.
+// Returns ErrCollectionNotFound if the collection does not exist, or
+// ErrDeletionProtectionEnabled if deletion protection is on.
 func (s *Store) Delete(ctx context.Context, name string) error {
 	// Get collection to check deletion protection
 	collection, err := s.Get(ctx, name)
 	if err != nil {
-		return fmt.Errorf("collection not found")
+		return err
 	}
 
 	// Check deletion protection
 	if collection.DeletionProtection {
-		return fmt.Errorf("deletion protection is enabled")
+		return ErrDeletionProtectionEnabled
 	}
 
 	// Drop the MongoDB collection
@@ -314,7 +439,7 @@ func (s *Store) GetSinks(ctx context.Context, collectionName string) ([]SinkConf
 func (s *Store) UpdateSinks(ctx context.Context, collectionName string, sinks []SinkConfig) error {
 	collection, err := s.Get(ctx, collectionName)
 	if err != nil {
-		return fmt.Errorf("collection not found")
+		return ErrCollectionNotFound
 	}
 
 	if !collection.StreamEnabled {

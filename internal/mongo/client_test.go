@@ -176,6 +176,57 @@ func TestClientCreateTTLIndex(t *testing.T) {
 	})
 }
 
+func TestClientDropTTLIndex(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	client, err := NewClient(ctx, Config{
+		URI:      "mongodb://localhost:27017",
+		Database: "conduit",
+		Timeout:  10 * time.Second,
+	})
+	if err != nil {
+		t.Skipf("MongoDB not available: %v", err)
+	}
+	defer client.Close(ctx)
+
+	collection := "test_ttl_drop"
+	_ = client.Collection(collection).Drop(ctx)
+
+	t.Run("drop existing ttl index", func(t *testing.T) {
+		require.NoError(t, client.CreateTTLIndex(ctx, collection, "expiresAt"))
+		require.True(t, ttlIndexExists(ctx, client, collection, "expiresAt_1"))
+
+		require.NoError(t, client.DropTTLIndex(ctx, collection, "expiresAt"))
+		assert.False(t, ttlIndexExists(ctx, client, collection, "expiresAt_1"))
+	})
+
+	t.Run("drop missing ttl index is tolerant", func(t *testing.T) {
+		// No index on this field; dropping must not error (idempotent).
+		require.NoError(t, client.DropTTLIndex(ctx, collection, "neverSet"))
+	})
+
+	_ = client.Collection(collection).Drop(ctx)
+}
+
+// ttlIndexExists reports whether the collection has an index with the given name.
+func ttlIndexExists(ctx context.Context, client *Client, collection, name string) bool {
+	idxs, err := client.Collection(collection).Indexes().ListSpecifications(ctx)
+	if err != nil {
+		return false
+	}
+	for _, idx := range idxs {
+		if idx.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
 func TestClientEnableStreams(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")

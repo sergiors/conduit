@@ -3,20 +3,21 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/sergiors/conduit/internal/apierr"
 	"github.com/sergiors/conduit/internal/collections"
 	"github.com/sergiors/conduit/internal/mongo"
 	"github.com/sergiors/conduit/internal/redis"
-	"github.com/swaggo/files"
-	"github.com/swaggo/gin-swagger"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 	"go.mongodb.org/mongo-driver/bson"
 
 	_ "github.com/sergiors/conduit/docs"
@@ -90,14 +91,25 @@ func main() {
 	router.GET("/api/collections", server.listCollections)
 	router.POST("/api/collections", server.createCollection)
 	router.GET("/api/collections/:name", server.getCollection)
-	router.PUT("/api/collections/:name", server.updateCollection)
 	router.DELETE("/api/collections/:name", server.deleteCollection)
 
 	// Collection sinks
 	router.GET("/api/collections/:name/sinks", server.getSinks)
 	router.PUT("/api/collections/:name/sinks", server.updateSinks)
 
-	// Collection documents CRUD (data plane)
+	// Collection stream (CDC enable/disable)
+	router.PUT("/api/collections/:name/stream", server.enableStream)
+	router.DELETE("/api/collections/:name/stream", server.disableStream)
+
+	// Collection TTL (enable/disable)
+	router.PUT("/api/collections/:name/ttl", server.enableTTL)
+	router.DELETE("/api/collections/:name/ttl", server.disableTTL)
+
+	// Collection deletion protection
+	router.PUT("/api/collections/:name/protection", server.enableProtection)
+	router.DELETE("/api/collections/:name/protection", server.disableProtection)
+
+	// Collection documents CRUD
 	router.GET("/api/collections/:name/documents", server.listDocuments)
 	router.POST("/api/collections/:name/documents", server.createDocument)
 	router.GET("/api/collections/:name/documents/:id", server.getDocument)
@@ -149,7 +161,7 @@ func (s *Server) getCollection(c *gin.Context) {
 
 	collection, err := s.collectionStore.Get(ctx, name)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Collection not found"})
+		writeStoreError(c, err)
 		return
 	}
 
@@ -190,52 +202,6 @@ func (s *Server) createCollection(c *gin.Context) {
 	c.JSON(http.StatusCreated, collection)
 }
 
-// @Summary Update collection
-// @Description Update a collection configuration
-// @Accept json
-// @Produce json
-// @Param name path string true "Collection name"
-// @Param collection body collections.Collection true "Collection data"
-// @Success 200 {object} collections.Collection
-// @Failure 400 {object} map[string]string
-// @Failure 404 {object} map[string]string
-// @Failure 500 {object} map[string]string
-// @Router /api/collections/{name} [put]
-func (s *Server) updateCollection(c *gin.Context) {
-	ctx := c.Request.Context()
-	name := c.Param("name")
-
-	var collection collections.Collection
-	if err := c.ShouldBindJSON(&collection); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
-		return
-	}
-	collection.CollectionName = name
-
-	if err := s.collectionStore.Update(ctx, &collection); err != nil {
-		if err.Error() == "collection not found" {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Collection not found"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	// Apply TTL index if configured (create or update)
-	if collection.TTLAttribute != "" {
-		if err := s.mongoClient.CreateTTLIndex(ctx, name, collection.TTLAttribute); err != nil {
-			log.Printf("Failed to create/update TTL index for %s: %v", name, err)
-		}
-	}
-
-	// Notify worker of config change
-	if err := s.redisClient.PublishConfigChange(ctx, name); err != nil {
-		log.Printf("Failed to publish config change: %v", err)
-	}
-
-	c.JSON(http.StatusOK, collection)
-}
-
 // @Summary Get collection sinks
 // @Description Get sinks for a collection
 // @Produce json
@@ -249,7 +215,7 @@ func (s *Server) getSinks(c *gin.Context) {
 
 	sinks, err := s.collectionStore.GetSinks(ctx, name)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Collection not found"})
+		writeStoreError(c, err)
 		return
 	}
 
@@ -293,8 +259,8 @@ func (s *Server) updateSinks(c *gin.Context) {
 	}
 
 	if err := s.collectionStore.UpdateSinks(ctx, name, sinks); err != nil {
-		if err.Error() == "collection not found" {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Collection not found"})
+		if errors.Is(err, collections.ErrCollectionNotFound) {
+			writeStoreError(c, err)
 			return
 		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -324,18 +290,12 @@ func (s *Server) deleteCollection(c *gin.Context) {
 	// Get collection to check deletion protection and get collection name for notification
 	collection, err := s.collectionStore.Get(ctx, name)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Collection not found"})
-		return
-	}
-
-	// Check deletion protection
-	if collection.DeletionProtection {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Deletion protection is enabled. Disable it before deleting the collection."})
+		writeStoreError(c, err)
 		return
 	}
 
 	if err := s.collectionStore.Delete(ctx, name); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeStoreError(c, err)
 		return
 	}
 
@@ -344,6 +304,169 @@ func (s *Server) deleteCollection(c *gin.Context) {
 		log.Printf("Failed to publish config change: %v", err)
 	}
 
+	c.Status(http.StatusNoContent)
+}
+
+// @Summary Enable deletion protection
+// @Description Enable deletion protection for a collection (idempotent)
+// @Param name path string true "Collection name"
+// @Success 204
+// @Failure 404 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /api/collections/{name}/protection [put]
+func (s *Server) enableProtection(c *gin.Context) {
+	s.setProtection(c, true)
+}
+
+// @Summary Disable deletion protection
+// @Description Disable deletion protection for a collection (idempotent)
+// @Param name path string true "Collection name"
+// @Success 204
+// @Failure 404 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /api/collections/{name}/protection [delete]
+func (s *Server) disableProtection(c *gin.Context) {
+	s.setProtection(c, false)
+}
+
+// setProtection toggles deletion protection for a collection and returns 204 on success.
+func (s *Server) setProtection(c *gin.Context, enabled bool) {
+	ctx := c.Request.Context()
+	name := c.Param("name")
+	if err := s.collectionStore.SetDeletionProtection(ctx, name, enabled); err != nil {
+		writeStoreError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// writeStoreError writes the HTTP response for a domain error. The actual
+// status/message mapping lives in internal/apierr (single source of truth,
+// unit-tested), so handlers never repeat it and never compare error strings.
+func writeStoreError(c *gin.Context, err error) {
+	status, message := apierr.ResponseFor(err)
+	c.JSON(status, gin.H{"error": message})
+}
+
+// @Summary Enable collection stream
+// @Description Enable the CDC stream for a collection and configure old_image
+// @Accept json
+// @Param name path string true "Collection name"
+// @Param body body object true "{ \"old_image\": true }"
+// @Success 204
+// @Failure 400 {object} map[string]string
+// @Failure 404 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /api/collections/{name}/stream [put]
+func (s *Server) enableStream(c *gin.Context) {
+	ctx := c.Request.Context()
+	name := c.Param("name")
+
+	var body struct {
+		OldImage *bool `json:"old_image"`
+	}
+
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		return
+	}
+
+	if body.OldImage == nil {
+		writeStoreError(c, collections.NewValidationError("old_image is required"))
+		return
+	}
+
+	if err := s.collectionStore.SetStream(ctx, name, *body.OldImage); err != nil {
+		writeStoreError(c, err)
+		return
+	}
+
+	// Notify worker of config change
+	if err := s.redisClient.PublishConfigChange(ctx, name); err != nil {
+		log.Printf("Failed to publish config change: %v", err)
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
+// @Summary Disable collection stream
+// @Description Disable the CDC stream (and old_image) for a collection
+// @Param name path string true "Collection name"
+// @Success 204
+// @Failure 404 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /api/collections/{name}/stream [delete]
+func (s *Server) disableStream(c *gin.Context) {
+	ctx := c.Request.Context()
+	name := c.Param("name")
+
+	if err := s.collectionStore.DisableStream(ctx, name); err != nil {
+		writeStoreError(c, err)
+		return
+	}
+
+	// Notify worker of config change
+	if err := s.redisClient.PublishConfigChange(ctx, name); err != nil {
+		log.Printf("Failed to publish config change: %v", err)
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
+// @Summary Enable TTL
+// @Description Set the TTL attribute and create the TTL index (immutable once set; delete to change)
+// @Accept json
+// @Param name path string true "Collection name"
+// @Param body body object true "{ \"attribute\": \"expiresAt\" }"
+// @Success 204
+// @Failure 400 {object} map[string]string
+// @Failure 404 {object} map[string]string
+// @Failure 409 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /api/collections/{name}/ttl [put]
+func (s *Server) enableTTL(c *gin.Context) {
+	ctx := c.Request.Context()
+	name := c.Param("name")
+
+	var body struct {
+		Attribute string `json:"attribute"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		return
+	}
+	if err := s.collectionStore.SetTTL(ctx, name, body.Attribute); err != nil {
+		writeStoreError(c, err)
+		return
+	}
+	if err := s.mongoClient.CreateTTLIndex(ctx, name, body.Attribute); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// @Summary Disable TTL
+// @Description Drop the TTL index and clear the TTL attribute
+// @Param name path string true "Collection name"
+// @Success 204
+// @Failure 404 {object} map[string]string
+// @Failure 500 {object} map[string]string
+// @Router /api/collections/{name}/ttl [delete]
+func (s *Server) disableTTL(c *gin.Context) {
+	ctx := c.Request.Context()
+	name := c.Param("name")
+	previous, err := s.collectionStore.DisableTTL(ctx, name)
+	if err != nil {
+		writeStoreError(c, err)
+		return
+	}
+	if previous != "" {
+		if err := s.mongoClient.DropTTLIndex(ctx, name, previous); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	}
 	c.Status(http.StatusNoContent)
 }
 
@@ -439,11 +562,7 @@ func (s *Server) getDocument(c *gin.Context) {
 
 	doc, err := store.Get(ctx, id)
 	if err != nil {
-		if err.Error() == "document not found" || strings.Contains(err.Error(), "not found") {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Document not found"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeStoreError(c, err)
 		return
 	}
 
@@ -473,7 +592,7 @@ func (s *Server) createDocument(c *gin.Context) {
 
 	collectionConfig, err := s.collectionStore.Get(ctx, collectionName)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Collection not found"})
+		writeStoreError(c, err)
 		return
 	}
 
@@ -532,11 +651,7 @@ func (s *Server) updateDocument(c *gin.Context) {
 
 	result, err := store.Update(ctx, id, data)
 	if err != nil {
-		if err.Error() == "document not found" || strings.Contains(err.Error(), "not found") {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Document not found"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeStoreError(c, err)
 		return
 	}
 
@@ -560,11 +675,7 @@ func (s *Server) deleteDocument(c *gin.Context) {
 
 	opErr := store.Delete(ctx, id)
 	if opErr != nil {
-		if opErr.Error() == "document not found" || strings.Contains(opErr.Error(), "not found") {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Document not found"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": opErr.Error()})
+		writeStoreError(c, opErr)
 		return
 	}
 

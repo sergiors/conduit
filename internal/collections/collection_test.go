@@ -2,6 +2,7 @@ package collections
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -140,8 +141,7 @@ func TestStoreCRUD(t *testing.T) {
 	for _, name := range []string{"test_table", "protected_table", "collection_table", "stream_table", "no_stream_table", "fresh_table", "new_collection_name"} {
 		if table, err := store.Get(ctx, name); err == nil {
 			if table.DeletionProtection {
-				table.DeletionProtection = false
-				_ = store.Update(ctx, table)
+				_ = store.SetDeletionProtection(ctx, name, false)
 			}
 			_ = store.Delete(ctx, name)
 		}
@@ -189,56 +189,6 @@ func TestStoreCRUD(t *testing.T) {
 		assert.NotEmpty(t, tables)
 	})
 
-	t.Run("update table", func(t *testing.T) {
-		table, err := store.Get(ctx, "test_table")
-		require.NoError(t, err)
-
-		table.StreamEnabled = false
-		table.Sinks = []SinkConfig{{Type: "http", Endpoint: "http://localhost:3001/audit"}}
-
-		err = store.Update(ctx, table)
-		require.NoError(t, err)
-
-		updated, _ := store.Get(ctx, "test_table")
-		assert.False(t, updated.StreamEnabled)
-		assert.Equal(t, []SinkConfig{{Type: "http", Endpoint: "http://localhost:3001/audit"}}, updated.Sinks)
-		assert.True(t, updated.UpdatedAt.After(table.UpdatedAt))
-	})
-
-	t.Run("update collection name fails", func(t *testing.T) {
-		// Create a fresh table for this test
-		freshTable := &Collection{
-			CollectionName:     "fresh_table",
-			StreamEnabled:      true,
-			DeletionProtection: false,
-			Sinks:              []SinkConfig{{Type: "http", Endpoint: "http://localhost:3000/events"}},
-		}
-		err := store.Create(ctx, freshTable)
-		require.NoError(t, err)
-
-		// Get the existing table and try to change its name
-		existing, err := store.Get(ctx, "fresh_table")
-		require.NoError(t, err)
-
-		// Try to update with a different collection name - should fail
-		existing.CollectionName = "new_collection_name"
-		err = store.Update(ctx, existing)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "collection not found")
-
-		// Verify collection name was not changed - original should still exist
-		updated, err := store.Get(ctx, "fresh_table")
-		require.NoError(t, err)
-		assert.Equal(t, "fresh_table", updated.CollectionName)
-
-		// New collection name should not exist
-		_, err = store.Get(ctx, "new_collection_name")
-		assert.Error(t, err)
-
-		// Cleanup
-		_ = store.Delete(ctx, "fresh_table")
-	})
-
 	t.Run("delete table with deletion protection enabled fails", func(t *testing.T) {
 		// Create table with deletion protection enabled
 		protectedTable := &Collection{
@@ -261,8 +211,7 @@ func TestStoreCRUD(t *testing.T) {
 		assert.NotNil(t, exists)
 
 		// Cleanup - disable protection first
-		protectedTable.DeletionProtection = false
-		err = store.Update(ctx, protectedTable)
+		err = store.SetDeletionProtection(ctx, protectedTable.CollectionName, false)
 		require.NoError(t, err)
 		err = store.Delete(ctx, protectedTable.CollectionName)
 		require.NoError(t, err)
@@ -299,12 +248,11 @@ func TestStoreCRUD(t *testing.T) {
 	})
 
 	t.Run("delete table", func(t *testing.T) {
-		// Get the existing test_table and update deletion protection to false
+		// Get the existing test_table and disable deletion protection before deleting
 		table, err := store.Get(ctx, "test_table")
 		require.NoError(t, err)
 
-		table.DeletionProtection = false
-		err = store.Update(ctx, table)
+		err = store.SetDeletionProtection(ctx, table.CollectionName, false)
 		require.NoError(t, err)
 
 		err = store.Delete(ctx, table.CollectionName)
@@ -313,6 +261,192 @@ func TestStoreCRUD(t *testing.T) {
 		_, err = store.Get(ctx, "test_table")
 		assert.Error(t, err)
 	})
+}
+
+func TestStoreSetDeletionProtection(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI("mongodb://localhost:27017"))
+	if err != nil {
+		t.Skipf("MongoDB not available: %v", err)
+	}
+	defer client.Disconnect(ctx)
+
+	store := NewStore(client, "conduit_test")
+
+	// Cleanup any leftover from previous runs
+	if tbl, err := store.Get(ctx, "protection_toggle_table"); err == nil {
+		if tbl.DeletionProtection {
+			_ = store.SetDeletionProtection(ctx, "protection_toggle_table", false)
+		}
+		_ = store.Delete(ctx, "protection_toggle_table")
+	}
+
+	table := &Collection{
+		CollectionName:     "protection_toggle_table",
+		StreamEnabled:      true,
+		DeletionProtection: false,
+	}
+	require.NoError(t, store.Create(ctx, table))
+
+	t.Run("enable protection", func(t *testing.T) {
+		require.NoError(t, store.SetDeletionProtection(ctx, "protection_toggle_table", true))
+		got, err := store.Get(ctx, "protection_toggle_table")
+		require.NoError(t, err)
+		assert.True(t, got.DeletionProtection, "protection should be enabled")
+	})
+
+	t.Run("enable is idempotent", func(t *testing.T) {
+		require.NoError(t, store.SetDeletionProtection(ctx, "protection_toggle_table", true))
+		got, _ := store.Get(ctx, "protection_toggle_table")
+		assert.True(t, got.DeletionProtection)
+	})
+
+	t.Run("delete blocked while protected", func(t *testing.T) {
+		err := store.Delete(ctx, "protection_toggle_table")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "deletion protection")
+	})
+
+	t.Run("disable protection", func(t *testing.T) {
+		require.NoError(t, store.SetDeletionProtection(ctx, "protection_toggle_table", false))
+		got, _ := store.Get(ctx, "protection_toggle_table")
+		assert.False(t, got.DeletionProtection, "protection should be disabled")
+	})
+
+	t.Run("disable is idempotent", func(t *testing.T) {
+		require.NoError(t, store.SetDeletionProtection(ctx, "protection_toggle_table", false))
+		got, _ := store.Get(ctx, "protection_toggle_table")
+		assert.False(t, got.DeletionProtection)
+	})
+
+	t.Run("unknown collection returns not found", func(t *testing.T) {
+		err := store.SetDeletionProtection(ctx, "does_not_exist_table", true)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "collection not found")
+		assert.True(t, errors.Is(err, ErrCollectionNotFound), "should match ErrCollectionNotFound")
+	})
+
+	t.Run("delete protected returns ErrDeletionProtectionEnabled", func(t *testing.T) {
+		require.NoError(t, store.SetDeletionProtection(ctx, "protection_toggle_table", true))
+		err := store.Delete(ctx, "protection_toggle_table")
+		assert.Error(t, err)
+		assert.True(t, errors.Is(err, ErrDeletionProtectionEnabled), "should match ErrDeletionProtectionEnabled")
+		// Restore to unprotected so the cleanup below can delete it.
+		require.NoError(t, store.SetDeletionProtection(ctx, "protection_toggle_table", false))
+	})
+
+	// Cleanup
+	require.NoError(t, store.Delete(ctx, "protection_toggle_table"))
+}
+
+func TestStoreStreamAndTTL(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI("mongodb://localhost:27017"))
+	if err != nil {
+		t.Skipf("MongoDB not available: %v", err)
+	}
+	defer client.Disconnect(ctx)
+
+	store := NewStore(client, "conduit_test")
+
+	// Cleanup leftovers
+	if _, err := store.Get(ctx, "stream_ttl_table"); err == nil {
+		_, _ = store.DisableTTL(ctx, "stream_ttl_table")
+		_ = store.SetDeletionProtection(ctx, "stream_ttl_table", false)
+		_ = store.Delete(ctx, "stream_ttl_table")
+	}
+
+	table := &Collection{
+		CollectionName: "stream_ttl_table",
+		StreamEnabled:  false,
+	}
+	require.NoError(t, store.Create(ctx, table))
+
+	t.Run("enable stream with old_image", func(t *testing.T) {
+		require.NoError(t, store.SetStream(ctx, "stream_ttl_table", true))
+		got, err := store.Get(ctx, "stream_ttl_table")
+		require.NoError(t, err)
+		assert.True(t, got.StreamEnabled)
+		assert.True(t, got.OldImage)
+	})
+
+	t.Run("enable stream without old_image", func(t *testing.T) {
+		require.NoError(t, store.SetStream(ctx, "stream_ttl_table", false))
+		got, _ := store.Get(ctx, "stream_ttl_table")
+		assert.True(t, got.StreamEnabled)
+		assert.False(t, got.OldImage)
+	})
+
+	t.Run("disable stream resets both", func(t *testing.T) {
+		require.NoError(t, store.DisableStream(ctx, "stream_ttl_table"))
+		got, _ := store.Get(ctx, "stream_ttl_table")
+		assert.False(t, got.StreamEnabled)
+		assert.False(t, got.OldImage)
+	})
+
+	t.Run("enable ttl sets attribute", func(t *testing.T) {
+		require.NoError(t, store.SetTTL(ctx, "stream_ttl_table", "expiresAt"))
+		got, _ := store.Get(ctx, "stream_ttl_table")
+		assert.Equal(t, "expiresAt", got.TTLAttribute)
+	})
+
+	t.Run("enable ttl idempotent same attribute", func(t *testing.T) {
+		require.NoError(t, store.SetTTL(ctx, "stream_ttl_table", "expiresAt"))
+		got, _ := store.Get(ctx, "stream_ttl_table")
+		assert.Equal(t, "expiresAt", got.TTLAttribute)
+	})
+
+	t.Run("enable ttl different attribute is immutable", func(t *testing.T) {
+		err := store.SetTTL(ctx, "stream_ttl_table", "ttl")
+		assert.Error(t, err)
+		assert.True(t, errors.Is(err, ErrTTLAttributeImmutable), "should match ErrTTLAttributeImmutable")
+		// Attribute is unchanged
+		got, _ := store.Get(ctx, "stream_ttl_table")
+		assert.Equal(t, "expiresAt", got.TTLAttribute)
+	})
+
+	t.Run("enable ttl empty attribute is validation error", func(t *testing.T) {
+		err := store.SetTTL(ctx, "stream_ttl_table", "")
+		assert.Error(t, err)
+		assert.True(t, errors.Is(err, ErrValidation), "should match ErrValidation")
+	})
+
+	t.Run("disable ttl clears attribute and returns previous", func(t *testing.T) {
+		previous, err := store.DisableTTL(ctx, "stream_ttl_table")
+		require.NoError(t, err)
+		assert.Equal(t, "expiresAt", previous)
+		got, _ := store.Get(ctx, "stream_ttl_table")
+		assert.Equal(t, "", got.TTLAttribute)
+	})
+
+	t.Run("disable ttl idempotent", func(t *testing.T) {
+		previous, err := store.DisableTTL(ctx, "stream_ttl_table")
+		require.NoError(t, err)
+		assert.Equal(t, "", previous)
+	})
+
+	t.Run("stream and ttl on unknown collection return not found", func(t *testing.T) {
+		assert.True(t, errors.Is(store.SetStream(ctx, "does_not_exist", true), ErrCollectionNotFound))
+		assert.True(t, errors.Is(store.DisableStream(ctx, "does_not_exist"), ErrCollectionNotFound))
+		assert.True(t, errors.Is(store.SetTTL(ctx, "does_not_exist", "expiresAt"), ErrCollectionNotFound))
+		_, err := store.DisableTTL(ctx, "does_not_exist")
+		assert.True(t, errors.Is(err, ErrCollectionNotFound))
+	})
+
+	// Cleanup
+	require.NoError(t, store.Delete(ctx, "stream_ttl_table"))
 }
 
 func TestStoreListStreamEnabled(t *testing.T) {
