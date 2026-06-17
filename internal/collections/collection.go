@@ -24,6 +24,7 @@ var (
 	ErrDeletionProtectionEnabled = errors.New("deletion protection is enabled")
 	ErrDocumentNotFound          = errors.New("document not found")
 	ErrTTLAttributeImmutable     = errors.New("TTL attribute is immutable")
+	ErrOldImageImmutable         = errors.New("old_image is immutable once the stream is enabled")
 	ErrValidation                = errors.New("validation failed")
 )
 
@@ -287,25 +288,48 @@ func (s *Store) SetDeletionProtection(ctx context.Context, name string, enabled 
 }
 
 // SetStream enables the CDC stream for a collection and configures old_image.
-// oldImage controls whether change events include the pre-image. Idempotent.
+// oldImage controls whether change events include the pre-image.
+//
+// old_image is immutable once the stream is enabled: if the stream is already
+// enabled, any subsequent SetStream returns ErrOldImageImmutable, even with the
+// same old_image value. To change it, disable the stream first via DisableStream.
 // Returns ErrCollectionNotFound if the collection does not exist.
 func (s *Store) SetStream(ctx context.Context, name string, oldImage bool) error {
-	if _, err := s.Get(ctx, name); err != nil {
-		return err
+	// Atomic conditional update. It only succeeds when the stream is not enabled
+	// yet. Once enabled, old_image cannot be redefined through this route.
+	filter := bson.M{
+		"collection_name": name,
+		"stream_enabled":  bson.M{"$ne": true},
 	}
-	_, err := s.collection.UpdateOne(
-		ctx,
-		bson.M{"collection_name": name},
-		bson.M{"$set": bson.M{
+
+	update := bson.M{
+		"$set": bson.M{
 			"stream_enabled": true,
 			"old_image":      oldImage,
 			"updated_at":     time.Now(),
-		}},
-	)
-	return err
+		},
+	}
+
+	result, err := s.collection.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return fmt.Errorf("set stream: %w", err)
+	}
+
+	if result.MatchedCount > 0 {
+		return nil
+	}
+
+	// MatchedCount == 0 means either the collection does not exist or the
+	// stream is already enabled. Fetch once to return the correct domain error.
+	_, err = s.Get(ctx, name)
+	if err != nil {
+		return err
+	}
+
+	return ErrOldImageImmutable
 }
 
-// DisableStream disables the CDC stream and old_image for a collection.
+// DisableStream disables the CDC stream and clears old_image for a collection.
 // Idempotent. Returns ErrCollectionNotFound if the collection does not exist.
 func (s *Store) DisableStream(ctx context.Context, name string) error {
 	if _, err := s.Get(ctx, name); err != nil {
@@ -326,9 +350,10 @@ func (s *Store) DisableStream(ctx context.Context, name string) error {
 // SetTTL sets the collection TTL attribute. The TTL index itself is created
 // by the caller via mongo.Client.CreateTTLIndex; the Store only persists the
 // configuration and validates it.
-// The attribute is immutable: if a different attribute is already set,
-// ErrTTLAttributeImmutable is returned (delete it first). Idempotent for the
-// same attribute. An empty attribute returns ErrValidation.
+//
+// The attribute is immutable: once it is set, any subsequent SetTTL returns
+// ErrTTLAttributeImmutable, even with the same value. To change it, disable
+// TTL first via DisableTTL. An empty attribute returns ErrValidation.
 func (s *Store) SetTTL(ctx context.Context, name, attribute string) error {
 	if attribute == "" {
 		return NewValidationError("ttl attribute is required")
@@ -339,7 +364,7 @@ func (s *Store) SetTTL(ctx context.Context, name, attribute string) error {
 		return err
 	}
 
-	if collection.TTLAttribute != "" && collection.TTLAttribute != attribute {
+	if collection.TTLAttribute != "" {
 		return ErrTTLAttributeImmutable
 	}
 

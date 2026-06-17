@@ -488,7 +488,7 @@ paths:
       summary: Update collection sinks
   /api/collections/{name}/stream:
     delete:
-      description: Disable the CDC stream (and old_image) for a collection
+      description: Disable the CDC stream and clear old_image for a collection.
       parameters:
       - description: Collection name
         in: path
@@ -514,19 +514,29 @@ paths:
     put:
       consumes:
       - application/json
-      description: Enable the CDC stream for a collection and configure old_image
+      description: |-
+        Enable the CDC stream for a collection and configure old_image.
+        old_image is immutable once the stream is enabled: calling this
+        route again returns 409, even with the same value. Disable the
+        stream first to change it.
       parameters:
       - description: Collection name
         in: path
         name: name
         required: true
         type: string
-      - description: '{ \'
+      - description: Enable stream options
         in: body
         name: body
         required: true
         schema:
           type: object
+      - description: Whether to include the pre-image (old image) in CDC events
+        in: body
+        name: old_image
+        required: true
+        schema:
+          type: boolean
       responses:
         "204":
           description: No Content
@@ -538,6 +548,12 @@ paths:
             type: object
         "404":
           description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: stream already enabled; old_image is immutable
           schema:
             additionalProperties:
               type: string
@@ -577,20 +593,28 @@ paths:
     put:
       consumes:
       - application/json
-      description: Set the TTL attribute and create the TTL index (immutable once
-        set; delete to change)
+      description: |-
+        Set the TTL attribute and create the TTL index. The attribute is
+        immutable once set: calling this route again returns 409, even with
+        the same value. Disable TTL first to change it.
       parameters:
       - description: Collection name
         in: path
         name: name
         required: true
         type: string
-      - description: '{ \'
+      - description: Enable TTL options
         in: body
         name: body
         required: true
         schema:
           type: object
+      - description: Name of the TTL attribute (e.g. expiresAt)
+        in: body
+        name: attribute
+        required: true
+        schema:
+          type: string
       responses:
         "204":
           description: No Content
@@ -607,7 +631,7 @@ paths:
               type: string
             type: object
         "409":
-          description: Conflict
+          description: TTL attribute already set
           schema:
             additionalProperties:
               type: string

@@ -34,6 +34,8 @@ func ResponseFor(err error) (status int, message string) {
 		return http.StatusBadRequest, err.Error()
 	case errors.Is(err, collections.ErrTTLAttributeImmutable):
 		return http.StatusConflict, err.Error()
+	case errors.Is(err, collections.ErrOldImageImmutable):
+		return http.StatusConflict, err.Error()
 	default:
 		return http.StatusInternalServerError, err.Error()
 	}

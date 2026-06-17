@@ -26,6 +26,7 @@ func TestResponseFor(t *testing.T) {
 		{"validation error is 400", collections.NewValidationError("bad input"), http.StatusBadRequest, "bad input"},
 		{"wrapped validation error is 400", fmt.Errorf("ctx: %w", collections.NewValidationError("bad")), http.StatusBadRequest, "ctx: bad"},
 		{"ttl immutable is 409", collections.ErrTTLAttributeImmutable, http.StatusConflict, "TTL attribute is immutable"},
+		{"old_image immutable is 409", collections.ErrOldImageImmutable, http.StatusConflict, "old_image is immutable once the stream is enabled"},
 		{"unknown error is 500", errors.New("boom"), http.StatusInternalServerError, "boom"},
 	}
 

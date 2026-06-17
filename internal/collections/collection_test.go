@@ -382,14 +382,36 @@ func TestStoreStreamAndTTL(t *testing.T) {
 		assert.True(t, got.OldImage)
 	})
 
-	t.Run("enable stream without old_image", func(t *testing.T) {
-		require.NoError(t, store.SetStream(ctx, "stream_ttl_table", false))
+	t.Run("re-enable stream with same old_image is immutable", func(t *testing.T) {
+		err := store.SetStream(ctx, "stream_ttl_table", true)
+		assert.Error(t, err)
+		assert.True(t, errors.Is(err, ErrOldImageImmutable), "should match ErrOldImageImmutable")
 		got, _ := store.Get(ctx, "stream_ttl_table")
+		assert.True(t, got.StreamEnabled)
+		assert.True(t, got.OldImage)
+	})
+
+	t.Run("change old_image after enabled is immutable", func(t *testing.T) {
+		err := store.SetStream(ctx, "stream_ttl_table", false)
+		assert.Error(t, err)
+		assert.True(t, errors.Is(err, ErrOldImageImmutable), "should match ErrOldImageImmutable")
+		got, _ := store.Get(ctx, "stream_ttl_table")
+		assert.True(t, got.OldImage, "old_image should remain unchanged")
+	})
+
+	t.Run("disable stream resets both and allows redefinition", func(t *testing.T) {
+		require.NoError(t, store.DisableStream(ctx, "stream_ttl_table"))
+		got, _ := store.Get(ctx, "stream_ttl_table")
+		assert.False(t, got.StreamEnabled)
+		assert.False(t, got.OldImage)
+
+		require.NoError(t, store.SetStream(ctx, "stream_ttl_table", false))
+		got, _ = store.Get(ctx, "stream_ttl_table")
 		assert.True(t, got.StreamEnabled)
 		assert.False(t, got.OldImage)
 	})
 
-	t.Run("disable stream resets both", func(t *testing.T) {
+	t.Run("disable stream is idempotent", func(t *testing.T) {
 		require.NoError(t, store.DisableStream(ctx, "stream_ttl_table"))
 		got, _ := store.Get(ctx, "stream_ttl_table")
 		assert.False(t, got.StreamEnabled)
@@ -402,8 +424,10 @@ func TestStoreStreamAndTTL(t *testing.T) {
 		assert.Equal(t, "expiresAt", got.TTLAttribute)
 	})
 
-	t.Run("enable ttl idempotent same attribute", func(t *testing.T) {
-		require.NoError(t, store.SetTTL(ctx, "stream_ttl_table", "expiresAt"))
+	t.Run("re-enable ttl with same attribute is immutable", func(t *testing.T) {
+		err := store.SetTTL(ctx, "stream_ttl_table", "expiresAt")
+		assert.Error(t, err)
+		assert.True(t, errors.Is(err, ErrTTLAttributeImmutable), "should match ErrTTLAttributeImmutable")
 		got, _ := store.Get(ctx, "stream_ttl_table")
 		assert.Equal(t, "expiresAt", got.TTLAttribute)
 	})

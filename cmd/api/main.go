@@ -349,13 +349,18 @@ func writeStoreError(c *gin.Context, err error) {
 }
 
 // @Summary Enable collection stream
-// @Description Enable the CDC stream for a collection and configure old_image
+// @Description Enable the CDC stream for a collection and configure old_image.
+// @Description old_image is immutable once the stream is enabled: calling this
+// @Description route again returns 409, even with the same value. Disable the
+// @Description stream first to change it.
 // @Accept json
 // @Param name path string true "Collection name"
-// @Param body body object true "{ \"old_image\": true }"
+// @Param body body object true "Enable stream options"
+// @Param old_image body bool true "Whether to include the pre-image (old image) in CDC events"
 // @Success 204
 // @Failure 400 {object} map[string]string
 // @Failure 404 {object} map[string]string
+// @Failure 409 {object} map[string]string "stream already enabled; old_image is immutable"
 // @Failure 500 {object} map[string]string
 // @Router /api/collections/{name}/stream [put]
 func (s *Server) enableStream(c *gin.Context) {
@@ -390,7 +395,7 @@ func (s *Server) enableStream(c *gin.Context) {
 }
 
 // @Summary Disable collection stream
-// @Description Disable the CDC stream (and old_image) for a collection
+// @Description Disable the CDC stream and clear old_image for a collection.
 // @Param name path string true "Collection name"
 // @Success 204
 // @Failure 404 {object} map[string]string
@@ -414,14 +419,17 @@ func (s *Server) disableStream(c *gin.Context) {
 }
 
 // @Summary Enable TTL
-// @Description Set the TTL attribute and create the TTL index (immutable once set; delete to change)
+// @Description Set the TTL attribute and create the TTL index. The attribute is
+// @Description immutable once set: calling this route again returns 409, even with
+// @Description the same value. Disable TTL first to change it.
 // @Accept json
 // @Param name path string true "Collection name"
-// @Param body body object true "{ \"attribute\": \"expiresAt\" }"
+// @Param body body object true "Enable TTL options"
+// @Param attribute body string true "Name of the TTL attribute (e.g. expiresAt)"
 // @Success 204
 // @Failure 400 {object} map[string]string
 // @Failure 404 {object} map[string]string
-// @Failure 409 {object} map[string]string
+// @Failure 409 {object} map[string]string "TTL attribute already set"
 // @Failure 500 {object} map[string]string
 // @Router /api/collections/{name}/ttl [put]
 func (s *Server) enableTTL(c *gin.Context) {

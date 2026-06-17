@@ -621,7 +621,7 @@ const docTemplate = `{
         },
         "/api/collections/{name}/stream": {
             "put": {
-                "description": "Enable the CDC stream for a collection and configure old_image",
+                "description": "Enable the CDC stream for a collection and configure old_image.\nold_image is immutable once the stream is enabled: calling this\nroute again returns 409, even with the same value. Disable the\nstream first to change it.",
                 "consumes": [
                     "application/json"
                 ],
@@ -635,12 +635,21 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "{ \\",
+                        "description": "Enable stream options",
                         "name": "body",
                         "in": "body",
                         "required": true,
                         "schema": {
                             "type": "object"
+                        }
+                    },
+                    {
+                        "description": "Whether to include the pre-image (old image) in CDC events",
+                        "name": "old_image",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "boolean"
                         }
                     }
                 ],
@@ -666,6 +675,15 @@ const docTemplate = `{
                             }
                         }
                     },
+                    "409": {
+                        "description": "stream already enabled; old_image is immutable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
@@ -678,7 +696,7 @@ const docTemplate = `{
                 }
             },
             "delete": {
-                "description": "Disable the CDC stream (and old_image) for a collection",
+                "description": "Disable the CDC stream and clear old_image for a collection.",
                 "summary": "Disable collection stream",
                 "parameters": [
                     {
@@ -716,7 +734,7 @@ const docTemplate = `{
         },
         "/api/collections/{name}/ttl": {
             "put": {
-                "description": "Set the TTL attribute and create the TTL index (immutable once set; delete to change)",
+                "description": "Set the TTL attribute and create the TTL index. The attribute is\nimmutable once set: calling this route again returns 409, even with\nthe same value. Disable TTL first to change it.",
                 "consumes": [
                     "application/json"
                 ],
@@ -730,12 +748,21 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "{ \\",
+                        "description": "Enable TTL options",
                         "name": "body",
                         "in": "body",
                         "required": true,
                         "schema": {
                             "type": "object"
+                        }
+                    },
+                    {
+                        "description": "Name of the TTL attribute (e.g. expiresAt)",
+                        "name": "attribute",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
                         }
                     }
                 ],
@@ -762,7 +789,7 @@ const docTemplate = `{
                         }
                     },
                     "409": {
-                        "description": "Conflict",
+                        "description": "TTL attribute already set",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
