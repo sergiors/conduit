@@ -39,9 +39,9 @@ func (s *Server) Router() *gin.Engine {
 	return r
 }
 
-// notifyConfigChange publishes a configuration change notification to workers.
+// publishConfigChange publishes a configuration change event.
 // Errors are logged but never returned to the client.
-func (s *Server) notifyConfigChange(ctx context.Context, name string) {
+func (s *Server) publishConfigChange(ctx context.Context, name string) {
 	if err := s.deps.RedisClient.PublishConfigChange(ctx, name); err != nil {
 		log.Printf("Failed to publish config change: %v", err)
 	}

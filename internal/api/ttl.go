@@ -27,7 +27,7 @@ func (s *Server) enableTTL(c *gin.Context) {
 		return
 	}
 
-	s.notifyConfigChange(ctx, name)
+	s.publishConfigChange(ctx, name)
 	c.Status(http.StatusNoContent)
 }
 
@@ -48,6 +48,6 @@ func (s *Server) disableTTL(c *gin.Context) {
 		}
 	}
 
-	s.notifyConfigChange(ctx, name)
+	s.publishConfigChange(ctx, name)
 	c.Status(http.StatusNoContent)
 }

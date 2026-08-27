@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sergiors/conduit/internal/collections"
+	"github.com/sergiors/conduit/internal/config"
 	"github.com/sergiors/conduit/internal/dispatch"
 	_ "github.com/sergiors/conduit/internal/dispatch/sinks" // Register sink builders via init()
 	"github.com/sergiors/conduit/internal/mongo"
@@ -26,19 +27,14 @@ type Worker struct {
 	retryProcessor  *retry.Processor
 }
 
-func NewWorker() (*Worker, error) {
-	// Get config from environment (REQUIRED - no defaults)
-	mongoURI := getRequiredEnv("MONGODB_URI")
-	mongoDatabase := getRequiredEnv("MONGODB_DATABASE")
-	redisURI := getRequiredEnv("REDIS_URI") // Redis URI for client (used for resume tokens, idempotency, pub/sub)
-
+func NewWorker(cfg config.Config) (*Worker, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	// Initialize MongoDB client
 	mongoClient, err := mongo.NewClient(ctx, mongo.Config{
-		URI:      mongoURI,
-		Database: mongoDatabase,
+		URI:      cfg.MongoDBURI,
+		Database: cfg.MongoDBDatabase,
 		Timeout:  10 * time.Second,
 	})
 	if err != nil {
@@ -52,7 +48,7 @@ func NewWorker() (*Worker, error) {
 
 	// Initialize Redis client with URI/DSN
 	redisClient, err := redis.NewClient(ctx, redis.Config{
-		URI:    redisURI,
+		URI:    cfg.RedisURI,
 		Prefix: "cdc:",
 	})
 	if err != nil {
@@ -61,7 +57,7 @@ func NewWorker() (*Worker, error) {
 	}
 
 	// Initialize collection store
-	store := collections.NewStore(mongoClient.Client, mongoDatabase)
+	store := collections.NewStore(mongoClient.Client, cfg.MongoDBDatabase)
 
 	// Initialize dispatcher
 	dispatcher := dispatch.NewDispatcher()
@@ -76,7 +72,7 @@ func NewWorker() (*Worker, error) {
 	// Initialize watcher manager
 	watcherManager := watcher.NewManager(
 		mongoClient.Client,
-		mongoDatabase,
+		cfg.MongoDBDatabase,
 		store,
 		redisClient,
 		dispatcher,
@@ -136,7 +132,9 @@ func (w *Worker) Run(ctx context.Context) error {
 }
 
 func main() {
-	worker, err := NewWorker()
+	cfg := config.Load()
+
+	worker, err := NewWorker(cfg)
 	if err != nil {
 		log.Fatalf("Failed to create worker: %v", err)
 	}
@@ -160,21 +158,4 @@ func main() {
 	// Give time for graceful shutdown
 	time.Sleep(2 * time.Second)
 	log.Println("Worker stopped")
-}
-
-// getRequiredEnv gets a required environment variable or exits
-func getRequiredEnv(key string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	log.Fatalf("Required environment variable %s is not set", key)
-	return ""
-}
-
-// getEnv gets an environment variable with a default value
-func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
 }

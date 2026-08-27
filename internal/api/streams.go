@@ -26,7 +26,7 @@ func (s *Server) enableStream(c *gin.Context) {
 		return
 	}
 
-	s.notifyConfigChange(ctx, name)
+	s.publishConfigChange(ctx, name)
 	c.Status(http.StatusNoContent)
 }
 
@@ -39,6 +39,6 @@ func (s *Server) disableStream(c *gin.Context) {
 		return
 	}
 
-	s.notifyConfigChange(ctx, name)
+	s.publishConfigChange(ctx, name)
 	c.Status(http.StatusNoContent)
 }
