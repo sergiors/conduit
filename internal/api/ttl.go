@@ -6,7 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func (s *Server) enableTTL(c *gin.Context) {
+func (s *Server) createTTL(c *gin.Context) {
 	ctx := c.Request.Context()
 	name := c.Param("name")
 
@@ -23,10 +23,10 @@ func (s *Server) enableTTL(c *gin.Context) {
 	}
 
 	s.publishConfigChange(ctx, name)
-	c.Status(http.StatusNoContent)
+	c.Status(http.StatusCreated)
 }
 
-func (s *Server) disableTTL(c *gin.Context) {
+func (s *Server) deleteTTL(c *gin.Context) {
 	ctx := c.Request.Context()
 	name := c.Param("name")
 

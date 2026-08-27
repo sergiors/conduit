@@ -15,16 +15,16 @@ func (s *Server) registerRoutes(r *gin.Engine) {
 	r.DELETE("/api/collections/:name", s.deleteCollection)
 
 	// Collection streams
-	r.PUT("/api/collections/:name/stream", s.enableStream)
-	r.DELETE("/api/collections/:name/stream", s.disableStream)
+	r.POST("/api/collections/:name/stream", s.createStream)
+	r.DELETE("/api/collections/:name/stream", s.deleteStream)
 
 	// Collection TTL
-	r.PUT("/api/collections/:name/ttl", s.enableTTL)
-	r.DELETE("/api/collections/:name/ttl", s.disableTTL)
+	r.POST("/api/collections/:name/ttl", s.createTTL)
+	r.DELETE("/api/collections/:name/ttl", s.deleteTTL)
 
 	// Collection deletion protection
-	r.PUT("/api/collections/:name/protection", s.enableProtection)
-	r.DELETE("/api/collections/:name/protection", s.disableProtection)
+	r.POST("/api/collections/:name/protection", s.createProtection)
+	r.DELETE("/api/collections/:name/protection", s.deleteProtection)
 
 	// Collection sinks
 	r.GET("/api/collections/:name/sinks", s.getSinks)

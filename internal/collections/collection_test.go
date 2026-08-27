@@ -99,7 +99,7 @@ func TestSettingsCRUD(t *testing.T) {
 	for _, name := range []string{"test_table", "protected_table", "collection_table", "stream_table", "no_stream_table", "fresh_table", "new_collection_name"} {
 		if table, err := settings.Get(ctx, name); err == nil {
 			if table.DeletionProtection {
-				_ = settings.SetDeletionProtection(ctx, name, false)
+				_ = settings.DisableDeletionProtection(ctx, name)
 			}
 			_ = settings.Delete(ctx, name)
 		}
@@ -167,7 +167,7 @@ func TestSettingsCRUD(t *testing.T) {
 		assert.NotNil(t, exists)
 
 		// Cleanup - disable protection first
-		err = settings.SetDeletionProtection(ctx, protectedTable.CollectionName, false)
+		err = settings.DisableDeletionProtection(ctx, protectedTable.CollectionName)
 		require.NoError(t, err)
 		err = settings.Delete(ctx, protectedTable.CollectionName)
 		require.NoError(t, err)
@@ -190,6 +190,8 @@ func TestSettingsCRUD(t *testing.T) {
 		assert.Contains(t, collections, "collection_table")
 
 		// Delete table
+		err = settings.DisableDeletionProtection(ctx, tableWithCollection.CollectionName)
+		require.NoError(t, err)
 		err = settings.Delete(ctx, tableWithCollection.CollectionName)
 		require.NoError(t, err)
 
@@ -208,7 +210,7 @@ func TestSettingsCRUD(t *testing.T) {
 		table, err := settings.Get(ctx, "test_table")
 		require.NoError(t, err)
 
-		err = settings.SetDeletionProtection(ctx, table.CollectionName, false)
+		err = settings.DisableDeletionProtection(ctx, table.CollectionName)
 		require.NoError(t, err)
 
 		err = settings.Delete(ctx, table.CollectionName)

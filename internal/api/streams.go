@@ -6,7 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func (s *Server) enableStream(c *gin.Context) {
+func (s *Server) createStream(c *gin.Context) {
 	ctx := c.Request.Context()
 	name := c.Param("name")
 
@@ -27,10 +27,10 @@ func (s *Server) enableStream(c *gin.Context) {
 	}
 
 	s.publishConfigChange(ctx, name)
-	c.Status(http.StatusNoContent)
+	c.Status(http.StatusCreated)
 }
 
-func (s *Server) disableStream(c *gin.Context) {
+func (s *Server) deleteStream(c *gin.Context) {
 	ctx := c.Request.Context()
 	name := c.Param("name")
 

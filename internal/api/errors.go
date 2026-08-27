@@ -61,19 +61,21 @@ func responseFor(err error) (int, string, string) {
 	case errors.As(err, &badRequest):
 		return http.StatusBadRequest, "invalid_request", badRequest.Error()
 	case errors.Is(err, collections.ErrCollectionNotFound):
-		return http.StatusNotFound, "collection_not_found", "Collection not found."
+		return http.StatusNotFound, "collection_not_found", err.Error()
 	case errors.Is(err, collections.ErrDocumentNotFound):
-		return http.StatusNotFound, "document_not_found", "Document not found."
+		return http.StatusNotFound, "document_not_found", err.Error()
 	case errors.Is(err, collections.ErrSinkNotFound):
-		return http.StatusNotFound, "sink_not_found", "Sink not found."
+		return http.StatusNotFound, "sink_not_found", err.Error()
 	case errors.Is(err, collections.ErrDeletionProtectionEnabled):
-		return http.StatusForbidden, "deletion_protection_enabled", "Deletion protection is enabled. Disable it before deleting the collection."
+		return http.StatusForbidden, "deletion_protection_enabled", err.Error()
 	case errors.Is(err, collections.ErrValidation):
 		return http.StatusBadRequest, "validation_error", err.Error()
-	case errors.Is(err, collections.ErrTTLAttributeImmutable):
-		return http.StatusConflict, "ttl_attribute_immutable", err.Error()
-	case errors.Is(err, collections.ErrOldImageImmutable):
-		return http.StatusConflict, "old_image_immutable", err.Error()
+	case errors.Is(err, collections.ErrStreamAlreadyExists):
+		return http.StatusConflict, "stream_already_exists", err.Error()
+	case errors.Is(err, collections.ErrTTLAlreadyExists):
+		return http.StatusConflict, "ttl_already_exists", err.Error()
+	case errors.Is(err, collections.ErrProtectionAlreadyExists):
+		return http.StatusConflict, "protection_already_exists", err.Error()
 	default:
 		return http.StatusInternalServerError, "internal_error", err.Error()
 	}

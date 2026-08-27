@@ -14,7 +14,7 @@ func TestSettingsTTL(t *testing.T) {
 	// Cleanup leftovers
 	if _, err := settings.Get(ctx, "ttl_test_table"); err == nil {
 		_ = settings.DisableTTL(ctx, "ttl_test_table")
-		_ = settings.SetDeletionProtection(ctx, "ttl_test_table", false)
+		_ = settings.DisableDeletionProtection(ctx, "ttl_test_table")
 		_ = settings.Delete(ctx, "ttl_test_table")
 	}
 
@@ -33,7 +33,7 @@ func TestSettingsTTL(t *testing.T) {
 	t.Run("re-enable ttl with same attribute is immutable", func(t *testing.T) {
 		err := settings.SetTTL(ctx, "ttl_test_table", "expiresAt")
 		assert.Error(t, err)
-		assert.True(t, errors.Is(err, ErrTTLAttributeImmutable), "should match ErrTTLAttributeImmutable")
+		assert.True(t, errors.Is(err, ErrTTLAlreadyExists), "should match ErrTTLAlreadyExists")
 		got, _ := settings.Get(ctx, "ttl_test_table")
 		assert.Equal(t, "expiresAt", got.TTLAttribute)
 	})
@@ -41,7 +41,7 @@ func TestSettingsTTL(t *testing.T) {
 	t.Run("enable ttl different attribute is immutable", func(t *testing.T) {
 		err := settings.SetTTL(ctx, "ttl_test_table", "ttl")
 		assert.Error(t, err)
-		assert.True(t, errors.Is(err, ErrTTLAttributeImmutable), "should match ErrTTLAttributeImmutable")
+		assert.True(t, errors.Is(err, ErrTTLAlreadyExists), "should match ErrTTLAlreadyExists")
 		// Attribute is unchanged
 		got, _ := settings.Get(ctx, "ttl_test_table")
 		assert.Equal(t, "expiresAt", got.TTLAttribute)
@@ -70,5 +70,6 @@ func TestSettingsTTL(t *testing.T) {
 	})
 
 	// Cleanup
+	require.NoError(t, settings.DisableDeletionProtection(ctx, "ttl_test_table"))
 	require.NoError(t, settings.Delete(ctx, "ttl_test_table"))
 }

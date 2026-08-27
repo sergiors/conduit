@@ -37,7 +37,7 @@ func TestSettingsSinkCRUD(t *testing.T) {
 	// Cleanup any leftover from previous runs
 	if c, err := settings.Get(ctx, "sink_test_table"); err == nil {
 		if c.DeletionProtection {
-			_ = settings.SetDeletionProtection(ctx, "sink_test_table", false)
+			_ = settings.DisableDeletionProtection(ctx, "sink_test_table")
 		}
 		_ = settings.Delete(ctx, "sink_test_table")
 	}
@@ -90,7 +90,7 @@ func TestSettingsSinkCRUD(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		require.NoError(t, settings.SetDeletionProtection(ctx, "sink_test_table", false))
+		require.NoError(t, settings.DisableDeletionProtection(ctx, "sink_test_table"))
 		require.NoError(t, settings.Delete(ctx, "sink_test_table"))
 
 		count, err := client.Database("conduit_test").Collection("config.sinks").
@@ -102,7 +102,7 @@ func TestSettingsSinkCRUD(t *testing.T) {
 	// Cleanup
 	if c, err := settings.Get(ctx, "sink_test_table"); err == nil {
 		if c.DeletionProtection {
-			_ = settings.SetDeletionProtection(ctx, "sink_test_table", false)
+			_ = settings.DisableDeletionProtection(ctx, "sink_test_table")
 		}
 		_ = settings.Delete(ctx, "sink_test_table")
 	}

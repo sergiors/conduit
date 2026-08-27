@@ -12,10 +12,10 @@ import (
 // EnableStream enables the CDC stream for a collection and configures old_image.
 // oldImage controls whether change events include the pre-image.
 //
-// old_image is immutable once the stream is enabled: if the stream is already
-// enabled, any subsequent EnableStream returns ErrOldImageImmutable, even with
-// the same old_image value. To change it, disable the stream first via
-// DisableStream. Returns ErrCollectionNotFound if the collection does not exist.
+// The stream configuration is immutable: if the stream is already enabled, any
+// subsequent EnableStream returns ErrStreamAlreadyExists, even with the same
+// old_image value. To change it, disable the stream first via DisableStream.
+// Returns ErrCollectionNotFound if the collection does not exist.
 func (s *Settings) EnableStream(ctx context.Context, name string, oldImage bool) error {
 	// Atomic conditional update. It only succeeds when the stream is not enabled
 	// yet. Once enabled, old_image cannot be redefined through this route.
@@ -44,7 +44,7 @@ func (s *Settings) EnableStream(ctx context.Context, name string, oldImage bool)
 		if err != nil {
 			return err
 		}
-		return ErrOldImageImmutable
+		return ErrStreamAlreadyExists
 	}
 
 	// Configure changeStreamPreAndPostImages on the physical collection.

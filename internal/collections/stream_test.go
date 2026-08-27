@@ -13,7 +13,7 @@ func TestSettingsStream(t *testing.T) {
 
 	// Cleanup leftovers
 	if _, err := settings.Get(ctx, "stream_test_table"); err == nil {
-		_ = settings.SetDeletionProtection(ctx, "stream_test_table", false)
+		_ = settings.DisableDeletionProtection(ctx, "stream_test_table")
 		_ = settings.Delete(ctx, "stream_test_table")
 	}
 
@@ -34,7 +34,7 @@ func TestSettingsStream(t *testing.T) {
 	t.Run("re-enable stream with same old_image is immutable", func(t *testing.T) {
 		err := settings.EnableStream(ctx, "stream_test_table", true)
 		assert.Error(t, err)
-		assert.True(t, errors.Is(err, ErrOldImageImmutable), "should match ErrOldImageImmutable")
+		assert.True(t, errors.Is(err, ErrStreamAlreadyExists), "should match ErrStreamAlreadyExists")
 		got, _ := settings.Get(ctx, "stream_test_table")
 		assert.True(t, got.StreamEnabled)
 		assert.True(t, got.OldImage)
@@ -43,7 +43,7 @@ func TestSettingsStream(t *testing.T) {
 	t.Run("change old_image after enabled is immutable", func(t *testing.T) {
 		err := settings.EnableStream(ctx, "stream_test_table", false)
 		assert.Error(t, err)
-		assert.True(t, errors.Is(err, ErrOldImageImmutable), "should match ErrOldImageImmutable")
+		assert.True(t, errors.Is(err, ErrStreamAlreadyExists), "should match ErrStreamAlreadyExists")
 		got, _ := settings.Get(ctx, "stream_test_table")
 		assert.True(t, got.OldImage, "old_image should remain unchanged")
 	})
@@ -73,6 +73,7 @@ func TestSettingsStream(t *testing.T) {
 	})
 
 	// Cleanup
+	require.NoError(t, settings.DisableDeletionProtection(ctx, "stream_test_table"))
 	require.NoError(t, settings.Delete(ctx, "stream_test_table"))
 }
 

@@ -6,19 +6,23 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func (s *Server) enableProtection(c *gin.Context) {
-	s.setProtection(c, true)
-}
-
-func (s *Server) disableProtection(c *gin.Context) {
-	s.setProtection(c, false)
-}
-
-func (s *Server) setProtection(c *gin.Context, enabled bool) {
+func (s *Server) createProtection(c *gin.Context) {
 	ctx := c.Request.Context()
 	name := c.Param("name")
 
-	if err := s.deps.CollectionSettings.SetDeletionProtection(ctx, name, enabled); err != nil {
+	if err := s.deps.CollectionSettings.EnableDeletionProtection(ctx, name); err != nil {
+		writeError(c, err)
+		return
+	}
+
+	c.Status(http.StatusCreated)
+}
+
+func (s *Server) deleteProtection(c *gin.Context) {
+	ctx := c.Request.Context()
+	name := c.Param("name")
+
+	if err := s.deps.CollectionSettings.DisableDeletionProtection(ctx, name); err != nil {
 		writeError(c, err)
 		return
 	}

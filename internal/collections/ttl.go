@@ -12,8 +12,8 @@ import (
 
 // SetTTL sets the collection TTL attribute and creates the TTL index.
 //
-// The attribute is immutable: once it is set, any subsequent SetTTL returns
-// ErrTTLAttributeImmutable, even with the same value. To change it, disable
+// The TTL configuration is immutable: once it is set, any subsequent SetTTL
+// returns ErrTTLAlreadyExists, even with the same value. To change it, disable
 // TTL first via DisableTTL. An empty attribute returns ErrValidation.
 func (s *Settings) SetTTL(ctx context.Context, name, attribute string) error {
 	if attribute == "" {
@@ -26,7 +26,7 @@ func (s *Settings) SetTTL(ctx context.Context, name, attribute string) error {
 	}
 
 	if collection.TTLAttribute != "" {
-		return ErrTTLAttributeImmutable
+		return ErrTTLAlreadyExists
 	}
 
 	if err := s.createTTLIndex(ctx, name, attribute); err != nil {

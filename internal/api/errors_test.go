@@ -20,15 +20,16 @@ func TestResponseFor(t *testing.T) {
 	}{
 		{"nil is empty", nil, 0, "", ""},
 		{"bad request", newBadRequest("missing name"), http.StatusBadRequest, "invalid_request", "missing name"},
-		{"collection not found", collections.ErrCollectionNotFound, http.StatusNotFound, "collection_not_found", "Collection not found."},
-		{"document not found", collections.ErrDocumentNotFound, http.StatusNotFound, "document_not_found", "Document not found."},
-		{"sink not found", collections.ErrSinkNotFound, http.StatusNotFound, "sink_not_found", "Sink not found."},
-		{"deletion protection enabled", collections.ErrDeletionProtectionEnabled, http.StatusForbidden, "deletion_protection_enabled", "Deletion protection is enabled. Disable it before deleting the collection."},
-		{"wrapped collection not found", fmt.Errorf("get: %w", collections.ErrCollectionNotFound), http.StatusNotFound, "collection_not_found", "Collection not found."},
+		{"collection not found", collections.ErrCollectionNotFound, http.StatusNotFound, "collection_not_found", "collection not found"},
+		{"document not found", collections.ErrDocumentNotFound, http.StatusNotFound, "document_not_found", "document not found"},
+		{"sink not found", collections.ErrSinkNotFound, http.StatusNotFound, "sink_not_found", "sink not found"},
+		{"deletion protection enabled", collections.ErrDeletionProtectionEnabled, http.StatusForbidden, "deletion_protection_enabled", "deletion protection is enabled"},
+		{"wrapped collection not found", fmt.Errorf("get: %w", collections.ErrCollectionNotFound), http.StatusNotFound, "collection_not_found", "get: collection not found"},
 		{"validation error is 400", collections.NewValidationError("bad input"), http.StatusBadRequest, "validation_error", "bad input"},
 		{"wrapped validation error is 400", fmt.Errorf("ctx: %w", collections.NewValidationError("bad")), http.StatusBadRequest, "validation_error", "ctx: bad"},
-		{"ttl immutable is 409", collections.ErrTTLAttributeImmutable, http.StatusConflict, "ttl_attribute_immutable", "TTL attribute is immutable"},
-		{"old_image immutable is 409", collections.ErrOldImageImmutable, http.StatusConflict, "old_image_immutable", "old_image is immutable once the stream is enabled"},
+		{"stream already exists is 409", collections.ErrStreamAlreadyExists, http.StatusConflict, "stream_already_exists", "stream is already enabled"},
+		{"ttl already exists is 409", collections.ErrTTLAlreadyExists, http.StatusConflict, "ttl_already_exists", "ttl is already enabled"},
+		{"protection already exists is 409", collections.ErrProtectionAlreadyExists, http.StatusConflict, "protection_already_exists", "deletion protection is already enabled"},
 		{"unknown error is 500", errors.New("boom"), http.StatusInternalServerError, "internal_error", "boom"},
 	}
 
