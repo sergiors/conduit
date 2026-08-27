@@ -26,7 +26,6 @@ func TestTableValidation(t *testing.T) {
 			SortKey:        "email",
 			StreamEnabled:  true,
 			OldImage:       false,
-			Sinks:          []SinkConfig{{Type: "http", Endpoint: "http://localhost:3000/events"}},
 		}
 
 		assert.Equal(t, "users", table.CollectionName)
@@ -34,7 +33,6 @@ func TestTableValidation(t *testing.T) {
 		assert.Equal(t, "email", table.SortKey)
 		assert.True(t, table.StreamEnabled)
 		assert.False(t, table.OldImage)
-		assert.Len(t, table.Sinks, 1)
 	})
 
 	t.Run("table with old image enabled", func(t *testing.T) {
@@ -42,11 +40,9 @@ func TestTableValidation(t *testing.T) {
 			CollectionName: "orders",
 			StreamEnabled:  true,
 			OldImage:       true,
-			Sinks:          []SinkConfig{{Type: "http", Endpoint: "http://localhost:3000/events"}, {Type: "eventbridge"}},
 		}
 
 		assert.True(t, table.OldImage, "OldImage should be true for tracking changes")
-		assert.Len(t, table.Sinks, 2)
 	})
 
 	t.Run("table with TTL field", func(t *testing.T) {
@@ -154,7 +150,6 @@ func TestStoreCRUD(t *testing.T) {
 			SortKey:        "sortKey",
 			StreamEnabled:  true,
 			OldImage:       true,
-			Sinks:          []SinkConfig{{Type: "http", Endpoint: "http://localhost:3000/events"}},
 		}
 
 		err := store.Create(ctx, table)
@@ -195,7 +190,6 @@ func TestStoreCRUD(t *testing.T) {
 			CollectionName:     "protected_table",
 			StreamEnabled:      true,
 			DeletionProtection: true,
-			Sinks:              []SinkConfig{{Type: "http", Endpoint: "http://localhost:3000/events"}},
 		}
 		err := store.Create(ctx, protectedTable)
 		require.NoError(t, err)
@@ -530,7 +524,6 @@ func TestTableBSONTags(t *testing.T) {
 			StreamEnabled:  true,
 			OldImage:       true,
 			TTLAttribute:   "expiresAt",
-			Sinks:          []SinkConfig{{Type: "http", Endpoint: "http://localhost:3000/events"}},
 		}
 
 		data, err := bson.Marshal(table)

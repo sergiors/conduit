@@ -150,10 +150,15 @@ func (m *Manager) startWatcher(ctx context.Context, collection collections.Colle
 	log.Printf("Starting watcher for collection: %s", collection.CollectionName)
 
 	// Register sinks for this collection
-	if err := m.registerSinks(ctx, collection.CollectionName, collection.Sinks); err != nil {
+	sinkConfigs, err := m.loadSinkConfigs(ctx, collection.CollectionName)
+	if err != nil {
+		log.Printf("Failed to load sinks for %s: %v", collection.CollectionName, err)
+		sinkConfigs = nil
+	}
+	if err := m.registerSinks(ctx, collection.CollectionName, sinkConfigs); err != nil {
 		log.Printf("Failed to register sinks for %s: %v", collection.CollectionName, err)
 	}
-	m.currentSinks[collection.CollectionName] = collection.Sinks
+	m.currentSinks[collection.CollectionName] = sinkConfigs
 
 	// Get resume token from Redis
 	resumeToken, err := m.redisClient.GetResumeToken(ctx, collection.CollectionName)
@@ -399,11 +404,7 @@ func (m *Manager) syncWithCollections(ctx context.Context) {
 	for collectionName, collection := range enabledSet {
 		existingWatcher, exists := currentWatchers[collectionName]
 		if !exists {
-			// New collection - register sinks and start watcher
-			if err := m.registerSinks(ctx, collectionName, collection.Sinks); err != nil {
-				log.Printf("Failed to register sinks for %s: %v", collectionName, err)
-			}
-
+			// New collection - start watcher (which also registers sinks)
 			if err := m.startWatcher(ctx, collection); err != nil {
 				log.Printf("Failed to start watcher for %s: %v", collectionName, err)
 			}
@@ -436,22 +437,20 @@ func (m *Manager) syncWithCollections(ctx context.Context) {
 
 // refreshSinks diffs current vs desired sinks and only updates what changed
 func (m *Manager) refreshSinks(ctx context.Context, collectionName string) error {
-	collection, err := m.collectionStore.Get(ctx, collectionName)
-	if err != nil {
-		log.Printf("Failed to fetch collection %s for refresh: %v", collectionName, err)
-		return err
-	}
-
 	d, ok := m.dispatcher.(*dispatch.Dispatcher)
 	if !ok {
 		return nil
 	}
 
+	desired, err := m.loadSinkConfigs(ctx, collectionName)
+	if err != nil {
+		log.Printf("Failed to load sinks for %s: %v", collectionName, err)
+		return err
+	}
+
 	m.mu.RLock()
 	current := m.currentSinks[collectionName]
 	m.mu.RUnlock()
-
-	desired := collection.Sinks
 
 	// If desired is empty, remove all current sinks
 	if len(desired) == 0 {
@@ -484,6 +483,19 @@ func (m *Manager) refreshSinks(ctx context.Context, collectionName string) error
 	}
 
 	return nil
+}
+
+// loadSinkConfigs loads the sink configs for a collection by name.
+func (m *Manager) loadSinkConfigs(ctx context.Context, collectionName string) ([]collections.SinkConfig, error) {
+	sinks, err := m.collectionStore.GetSinks(ctx, collectionName)
+	if err != nil {
+		return nil, err
+	}
+	configs := make([]collections.SinkConfig, 0, len(sinks))
+	for _, sink := range sinks {
+		configs = append(configs, sink.SinkConfig)
+	}
+	return configs, nil
 }
 
 // registerSinks registers event sinks for a collection

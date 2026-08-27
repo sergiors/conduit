@@ -64,6 +64,8 @@ func responseFor(err error) (int, string, string) {
 		return http.StatusNotFound, "collection_not_found", "Collection not found."
 	case errors.Is(err, collections.ErrDocumentNotFound):
 		return http.StatusNotFound, "document_not_found", "Document not found."
+	case errors.Is(err, collections.ErrSinkNotFound):
+		return http.StatusNotFound, "sink_not_found", "Sink not found."
 	case errors.Is(err, collections.ErrDeletionProtectionEnabled):
 		return http.StatusForbidden, "deletion_protection_enabled", "Deletion protection is enabled. Disable it before deleting the collection."
 	case errors.Is(err, collections.ErrValidation):

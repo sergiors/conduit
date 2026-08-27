@@ -13,9 +13,6 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-// ValidEventTypes are the allowed event types for sinks
-var ValidEventTypes = []string{"INSERT", "MODIFY", "REMOVE"}
-
 // Sentinel domain errors returned by the Store. Callers MUST identify them
 // with errors.Is (never by comparing err.Error()), so HTTP status mapping
 // does not depend on fragile string matching.
@@ -43,57 +40,6 @@ func NewValidationError(format string, args ...any) error {
 	return &ValidationError{Message: fmt.Sprintf(format, args...)}
 }
 
-// SinkConfig represents a sink configuration.
-// Common fields are used by all sinks; type-specific fields are
-// documented below and applied by the watcher manager when building each
-// sink.
-type SinkConfig struct {
-	Type           string         `bson:"type" json:"type"`
-	Endpoint       string         `bson:"endpoint,omitempty" json:"endpoint"`                   // HTTP URL or Meilisearch host or EventBridge event-bus name
-	BearerToken    string         `bson:"bearer_token,omitempty" json:"bearer_token,omitempty"` // HTTP auth token or Meilisearch API key
-	EventTypes     []string       `bson:"event_types,omitempty" json:"event_types"`
-	FilterCriteria FilterCriteria `bson:"filter_criteria,omitempty" json:"filter_criteria,omitempty"`
-
-	// EventBridge-specific
-	Region       string `bson:"region,omitempty" json:"region,omitempty"`                 // AWS region, e.g. "us-east-1"
-	EventBusName string `bson:"event_bus_name,omitempty" json:"event_bus_name,omitempty"` // EventBridge event bus name
-	Source       string `bson:"source,omitempty" json:"source,omitempty"`                 // Event source (default: "conduit-mongodb")
-
-	// Meilisearch-specific
-	IndexName string `bson:"index_name,omitempty" json:"index_name,omitempty"` // Target index (default: collection_name)
-}
-
-// ValidateEventTypes validates that all event types are valid.
-// An empty slice is treated as "all event types" and is valid.
-func (d *SinkConfig) ValidateEventTypes() error {
-	if len(d.EventTypes) == 0 {
-		return nil // Empty means all types, which is valid
-	}
-
-	validSet := make(map[string]bool)
-	for _, et := range ValidEventTypes {
-		validSet[et] = true
-	}
-
-	for _, et := range d.EventTypes {
-		if !validSet[et] {
-			return NewValidationError("invalid event type '%s': must be one of INSERT, MODIFY, REMOVE", et)
-		}
-	}
-	return nil
-}
-
-// Validate checks the common sink configuration required by every sink type.
-func (d *SinkConfig) Validate() error {
-	if d.Endpoint == "" {
-		return NewValidationError("endpoint is required")
-	}
-	if err := d.ValidateEventTypes(); err != nil {
-		return err
-	}
-	return nil
-}
-
 type Collection struct {
 	ID                 string       `bson:"_id,omitempty" json:"_id,omitempty"`
 	CollectionName     string       `bson:"collection_name,omitempty" json:"collection_name,omitempty"`
@@ -102,7 +48,6 @@ type Collection struct {
 	StreamEnabled      bool         `bson:"stream_enabled" json:"stream_enabled"`
 	OldImage           bool         `bson:"old_image" json:"old_image"`
 	TTLAttribute       string       `bson:"ttl_attribute,omitempty" json:"ttl_attribute,omitempty"`
-	Sinks              []SinkConfig `bson:"sinks" json:"sinks"`
 	DeletionProtection bool         `bson:"deletion_protection" json:"deletion_protection"`
 	CreatedAt          time.Time    `bson:"created_at" json:"created_at"`
 	UpdatedAt          time.Time    `bson:"updated_at" json:"updated_at"`
@@ -113,6 +58,7 @@ type Store struct {
 	client     *mongo.Client
 	database   string
 	collection *mongo.Collection
+	sinks      *mongo.Collection
 }
 
 // NewStore creates a new collection store
@@ -121,16 +67,24 @@ func NewStore(client *mongo.Client, database string) *Store {
 		client:     client,
 		database:   database,
 		collection: client.Database(database).Collection("config.collections"),
+		sinks:      client.Database(database).Collection("config.sinks"),
 	}
 }
 
-// CreateIndex creates the unique index on collection name
+// CreateIndex creates the indexes required by the store.
 func (s *Store) CreateIndex(ctx context.Context) error {
-	currentIndexModel := mongo.IndexModel{
+	collectionIndex := mongo.IndexModel{
 		Keys:    bson.D{{Key: "collection_name", Value: 1}},
 		Options: options.Index().SetUnique(true),
 	}
-	_, err := s.collection.Indexes().CreateOne(ctx, currentIndexModel)
+	if _, err := s.collection.Indexes().CreateOne(ctx, collectionIndex); err != nil {
+		return err
+	}
+
+	sinkIndex := mongo.IndexModel{
+		Keys: bson.D{{Key: "collection_id", Value: 1}},
+	}
+	_, err := s.sinks.Indexes().CreateOne(ctx, sinkIndex)
 	return err
 }
 
@@ -445,6 +399,11 @@ func (s *Store) Delete(ctx context.Context, name string) error {
 		return fmt.Errorf("drop collection: %w", err)
 	}
 
+	// Delete associated sinks
+	if err := s.deleteSinksByCollectionID(ctx, collection.ID); err != nil {
+		return err
+	}
+
 	// Delete the configuration
 	_, err = s.collection.DeleteOne(ctx, bson.M{"collection_name": name})
 	return err
@@ -463,39 +422,4 @@ func (s *Store) ListStreamEnabled(ctx context.Context) ([]Collection, error) {
 		return nil, err
 	}
 	return collections, nil
-}
-
-// GetSinks returns the sinks for a collection
-func (s *Store) GetSinks(ctx context.Context, collectionName string) ([]SinkConfig, error) {
-	collection, err := s.Get(ctx, collectionName)
-	if err != nil {
-		return nil, err
-	}
-	return collection.Sinks, nil
-}
-
-// UpdateSinks replaces the sinks for a collection.
-func (s *Store) UpdateSinks(ctx context.Context, collectionName string, sinks []SinkConfig) error {
-	collection, err := s.Get(ctx, collectionName)
-	if err != nil {
-		return err
-	}
-
-	if !collection.StreamEnabled {
-		return NewValidationError("stream_enabled must be true to configure sinks")
-	}
-
-	for i, sink := range sinks {
-		if err := sink.Validate(); err != nil {
-			return fmt.Errorf("sink[%d]: %w", i, err)
-		}
-	}
-
-	update := bson.M{
-		"sinks":      sinks,
-		"updated_at": time.Now(),
-	}
-
-	_, err = s.collection.UpdateOne(ctx, bson.M{"collection_name": collectionName}, bson.M{"$set": update})
-	return err
 }

@@ -20,20 +20,35 @@ func (s *Server) getSinks(c *gin.Context) {
 	c.JSON(http.StatusOK, sinks)
 }
 
-func (s *Server) updateSinks(c *gin.Context) {
+func (s *Server) createSink(c *gin.Context) {
 	ctx := c.Request.Context()
 	name := c.Param("name")
 
-	var sinks []collections.SinkConfig
-	if !bindJSON(c, &sinks) {
+	var config collections.SinkConfig
+	if !bindJSON(c, &config) {
 		return
 	}
 
-	if err := s.deps.CollectionStore.UpdateSinks(ctx, name, sinks); err != nil {
+	sink, err := s.deps.CollectionStore.CreateSink(ctx, name, config)
+	if err != nil {
 		writeError(c, err)
 		return
 	}
 
 	s.notifyConfigChange(ctx, name)
-	c.JSON(http.StatusOK, sinks)
+	c.JSON(http.StatusCreated, sink)
+}
+
+func (s *Server) deleteSink(c *gin.Context) {
+	ctx := c.Request.Context()
+	name := c.Param("name")
+	sinkID := c.Param("sinkId")
+
+	if err := s.deps.CollectionStore.DeleteSink(ctx, name, sinkID); err != nil {
+		writeError(c, err)
+		return
+	}
+
+	s.notifyConfigChange(ctx, name)
+	c.Status(http.StatusNoContent)
 }

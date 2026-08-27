@@ -22,6 +22,7 @@ func TestResponseFor(t *testing.T) {
 		{"bad request", newBadRequest("missing name"), http.StatusBadRequest, "invalid_request", "missing name"},
 		{"collection not found", collections.ErrCollectionNotFound, http.StatusNotFound, "collection_not_found", "Collection not found."},
 		{"document not found", collections.ErrDocumentNotFound, http.StatusNotFound, "document_not_found", "Document not found."},
+		{"sink not found", collections.ErrSinkNotFound, http.StatusNotFound, "sink_not_found", "Sink not found."},
 		{"deletion protection enabled", collections.ErrDeletionProtectionEnabled, http.StatusForbidden, "deletion_protection_enabled", "Deletion protection is enabled. Disable it before deleting the collection."},
 		{"wrapped collection not found", fmt.Errorf("get: %w", collections.ErrCollectionNotFound), http.StatusNotFound, "collection_not_found", "Collection not found."},
 		{"validation error is 400", collections.NewValidationError("bad input"), http.StatusBadRequest, "validation_error", "bad input"},
