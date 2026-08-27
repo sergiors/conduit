@@ -30,8 +30,7 @@ var (
 
 // ValidationError wraps a dynamic client-validation message while remaining
 // identifiable via errors.Is(err, ErrValidation). Use NewValidationError so
-// HTTP handlers can map all validation errors to 400 through internal/apierr
-// without repeating messages or comparing strings.
+// callers can map validation errors to HTTP 400 without comparing strings.
 type ValidationError struct {
 	Message string
 }
@@ -64,7 +63,8 @@ type SinkConfig struct {
 	IndexName string `bson:"index_name,omitempty" json:"index_name,omitempty"` // Target index (default: collection_name)
 }
 
-// ValidateEventTypes validates that all event types are valid
+// ValidateEventTypes validates that all event types are valid.
+// An empty slice is treated as "all event types" and is valid.
 func (d *SinkConfig) ValidateEventTypes() error {
 	if len(d.EventTypes) == 0 {
 		return nil // Empty means all types, which is valid
@@ -77,8 +77,19 @@ func (d *SinkConfig) ValidateEventTypes() error {
 
 	for _, et := range d.EventTypes {
 		if !validSet[et] {
-			return fmt.Errorf("invalid event type '%s': must be one of INSERT, MODIFY, REMOVE", et)
+			return NewValidationError("invalid event type '%s': must be one of INSERT, MODIFY, REMOVE", et)
 		}
+	}
+	return nil
+}
+
+// Validate checks the common sink configuration required by every sink type.
+func (d *SinkConfig) Validate() error {
+	if d.Endpoint == "" {
+		return NewValidationError("endpoint is required")
+	}
+	if err := d.ValidateEventTypes(); err != nil {
+		return err
 	}
 	return nil
 }
@@ -95,6 +106,31 @@ type Collection struct {
 	DeletionProtection bool         `bson:"deletion_protection" json:"deletion_protection"`
 	CreatedAt          time.Time    `bson:"created_at" json:"created_at"`
 	UpdatedAt          time.Time    `bson:"updated_at" json:"updated_at"`
+}
+
+// ValidateDocument checks that the provided document satisfies the collection's
+// key schema. Collections without a configured partition key skip validation.
+func (c *Collection) ValidateDocument(data bson.M) error {
+	if c.PartitionKey == "" {
+		return nil
+	}
+
+	rawPK, hasPK := data[c.PartitionKey]
+	pk, pkOK := rawPK.(string)
+	if !hasPK || !pkOK || pk == "" {
+		return NewValidationError("%s is required and must be a non-empty string", c.PartitionKey)
+	}
+
+	if c.SortKey == "" {
+		return nil
+	}
+
+	rawSK, hasSK := data[c.SortKey]
+	sk, skOK := rawSK.(string)
+	if !hasSK || !skOK || sk == "" {
+		return NewValidationError("%s is required and must be a non-empty string", c.SortKey)
+	}
+	return nil
 }
 
 // Store manages collection configurations in MongoDB
@@ -208,16 +244,19 @@ func (s *Store) ensureKeyIndex(ctx context.Context, collectionName, primaryKey, 
 func (s *Store) Create(ctx context.Context, collection *Collection) error {
 	name := collection.CollectionName
 	if name == "" {
-		return fmt.Errorf("collection name is required")
+		return NewValidationError("collection name is required")
 	}
 
 	if collection.SortKey != "" && collection.PartitionKey == "" {
-		return fmt.Errorf("partition_key is required when sort_key is defined")
+		return NewValidationError("partition_key is required when sort_key is defined")
 	}
 
 	if collection.PartitionKey != "" && collection.PartitionKey == collection.SortKey {
-		return fmt.Errorf("sort_key cannot be the same as primary_key")
+		return NewValidationError("sort_key cannot be the same as primary_key")
 	}
+
+	// Deletion protection is mandatory on create.
+	collection.DeletionProtection = true
 
 	now := time.Now()
 	collection.CreatedAt = now
@@ -460,19 +499,19 @@ func (s *Store) GetSinks(ctx context.Context, collectionName string) ([]SinkConf
 	return collection.Sinks, nil
 }
 
-// UpdateSinks replaces the sinks for a collection
+// UpdateSinks replaces the sinks for a collection.
 func (s *Store) UpdateSinks(ctx context.Context, collectionName string, sinks []SinkConfig) error {
 	collection, err := s.Get(ctx, collectionName)
 	if err != nil {
-		return ErrCollectionNotFound
+		return err
 	}
 
 	if !collection.StreamEnabled {
-		return fmt.Errorf("stream_enabled must be true to configure sinks")
+		return NewValidationError("stream_enabled must be true to configure sinks")
 	}
 
 	for i, sink := range sinks {
-		if err := sink.ValidateEventTypes(); err != nil {
+		if err := sink.Validate(); err != nil {
 			return fmt.Errorf("sink[%d]: %w", i, err)
 		}
 	}

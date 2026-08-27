@@ -98,6 +98,28 @@ func TestTableTimestamps(t *testing.T) {
 	})
 }
 
+func TestCollectionValidateDocument(t *testing.T) {
+	t.Run("no key schema allows any document", func(t *testing.T) {
+		c := Collection{}
+		assert.NoError(t, c.ValidateDocument(bson.M{"name": "foo"}))
+	})
+
+	t.Run("partition key required", func(t *testing.T) {
+		c := Collection{PartitionKey: "pk"}
+		assert.ErrorIs(t, c.ValidateDocument(bson.M{}), ErrValidation)
+		assert.ErrorIs(t, c.ValidateDocument(bson.M{"pk": ""}), ErrValidation)
+		assert.ErrorIs(t, c.ValidateDocument(bson.M{"pk": 123}), ErrValidation)
+		assert.NoError(t, c.ValidateDocument(bson.M{"pk": "value"}))
+	})
+
+	t.Run("partition and sort keys required", func(t *testing.T) {
+		c := Collection{PartitionKey: "pk", SortKey: "sk"}
+		assert.NoError(t, c.ValidateDocument(bson.M{"pk": "a", "sk": "b"}))
+		assert.ErrorIs(t, c.ValidateDocument(bson.M{"pk": "a"}), ErrValidation)
+		assert.ErrorIs(t, c.ValidateDocument(bson.M{"pk": "a", "sk": ""}), ErrValidation)
+	})
+}
+
 // Integration-style tests (require MongoDB connection)
 // These are skipped by default and run with: go test -tags=integration
 

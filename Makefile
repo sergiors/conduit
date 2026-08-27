@@ -1,4 +1,4 @@
-.PHONY: build test test-unit test-integration clean run-api run-worker fmt lint vet help docker-up docker-down deps openapi
+.PHONY: build test test-unit test-integration clean run-api run-worker fmt lint vet help docker-up docker-down deps
 
 GOCACHE := /tmp/go-build
 GO := go
@@ -97,16 +97,6 @@ clean: ## Clean build artifacts
 
 init: deps fmt vet ## Initialize project (first time setup)
 	@echo "Project initialized!"
-
-openapi: ## Generate OpenAPI documentation
-	@echo "Generating OpenAPI documentation..."
-	@if command -v swag >/dev/null 2>&1; then \
-		swag init -g cmd/api/main.go -o docs; \
-	elif [ -f $$HOME/go/bin/swag ]; then \
-		$$HOME/go/bin/swag init -g cmd/api/main.go -o docs; \
-	else \
-		echo "swag not installed. Run: go install github.com/swaggo/swag/cmd/swag@latest"; \
-	fi
 
 help: ## Show this help message
 	@echo "Conduit MongoDB CDC - Makefile Commands"
