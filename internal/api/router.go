@@ -32,8 +32,5 @@ func (s *Server) registerRoutes(r *gin.Engine) {
 
 	// Collection documents
 	r.GET("/api/collections/:name/documents", s.listDocuments)
-	r.POST("/api/collections/:name/documents", s.createDocument)
 	r.GET("/api/collections/:name/documents/:id", s.getDocument)
-	r.PUT("/api/collections/:name/documents/:id", s.updateDocument)
-	r.DELETE("/api/collections/:name/documents/:id", s.deleteDocument)
 }

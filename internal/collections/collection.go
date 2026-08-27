@@ -108,31 +108,6 @@ type Collection struct {
 	UpdatedAt          time.Time    `bson:"updated_at" json:"updated_at"`
 }
 
-// ValidateDocument checks that the provided document satisfies the collection's
-// key schema. Collections without a configured partition key skip validation.
-func (c *Collection) ValidateDocument(data bson.M) error {
-	if c.PartitionKey == "" {
-		return nil
-	}
-
-	rawPK, hasPK := data[c.PartitionKey]
-	pk, pkOK := rawPK.(string)
-	if !hasPK || !pkOK || pk == "" {
-		return NewValidationError("%s is required and must be a non-empty string", c.PartitionKey)
-	}
-
-	if c.SortKey == "" {
-		return nil
-	}
-
-	rawSK, hasSK := data[c.SortKey]
-	sk, skOK := rawSK.(string)
-	if !hasSK || !skOK || sk == "" {
-		return NewValidationError("%s is required and must be a non-empty string", c.SortKey)
-	}
-	return nil
-}
-
 // Store manages collection configurations in MongoDB
 type Store struct {
 	client     *mongo.Client
