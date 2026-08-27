@@ -21,7 +21,7 @@ import (
 type Worker struct {
 	mongoClient     *mongo.Client
 	redisClient     *redis.Client
-	collectionStore *collections.Store
+	collectionSettings *collections.Settings
 	dispatcher      *dispatch.Dispatcher
 	watcherManager  *watcher.Manager
 	retryProcessor  *retry.Processor
@@ -56,8 +56,8 @@ func NewWorker(cfg config.Config) (*Worker, error) {
 		return nil, err
 	}
 
-	// Initialize collection store
-	store := collections.NewStore(mongoClient.Client, cfg.MongoDBDatabase)
+	// Initialize collection settings
+	settings := collections.NewSettings(mongoClient.Client, cfg.MongoDBDatabase)
 
 	// Initialize dispatcher
 	dispatcher := dispatch.NewDispatcher()
@@ -73,7 +73,7 @@ func NewWorker(cfg config.Config) (*Worker, error) {
 	watcherManager := watcher.NewManager(
 		mongoClient.Client,
 		cfg.MongoDBDatabase,
-		store,
+		settings,
 		redisClient,
 		dispatcher,
 		retryProcessor,
@@ -85,7 +85,7 @@ func NewWorker(cfg config.Config) (*Worker, error) {
 	return &Worker{
 		mongoClient:     mongoClient,
 		redisClient:     redisClient,
-		collectionStore: store,
+		collectionSettings: settings,
 		dispatcher:      dispatcher,
 		watcherManager:  watcherManager,
 		retryProcessor:  retryProcessor,

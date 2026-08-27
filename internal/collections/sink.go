@@ -2,7 +2,6 @@ package collections
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -12,9 +11,6 @@ import (
 
 // ValidEventTypes are the allowed event types for sinks.
 var ValidEventTypes = []string{"INSERT", "MODIFY", "REMOVE"}
-
-// ErrSinkNotFound is returned when a sink does not exist.
-var ErrSinkNotFound = errors.New("sink not found")
 
 // SinkConfig represents a sink configuration.
 // Common fields are used by all sinks; type-specific fields are
@@ -79,7 +75,7 @@ type Sink struct {
 }
 
 // GetSinks returns the sinks for a collection identified by name.
-func (s *Store) GetSinks(ctx context.Context, collectionName string) ([]Sink, error) {
+func (s *Settings) GetSinks(ctx context.Context, collectionName string) ([]Sink, error) {
 	collection, err := s.Get(ctx, collectionName)
 	if err != nil {
 		return nil, err
@@ -102,7 +98,7 @@ func (s *Store) GetSinks(ctx context.Context, collectionName string) ([]Sink, er
 }
 
 // CreateSink creates a sink for a collection identified by name.
-func (s *Store) CreateSink(ctx context.Context, collectionName string, config SinkConfig) (*Sink, error) {
+func (s *Settings) CreateSink(ctx context.Context, collectionName string, config SinkConfig) (*Sink, error) {
 	collection, err := s.Get(ctx, collectionName)
 	if err != nil {
 		return nil, err
@@ -136,7 +132,7 @@ func (s *Store) CreateSink(ctx context.Context, collectionName string, config Si
 
 // DeleteSink deletes a sink by its ID, scoped to the collection identified by
 // name so a sink cannot be removed from a different collection.
-func (s *Store) DeleteSink(ctx context.Context, collectionName, sinkID string) error {
+func (s *Settings) DeleteSink(ctx context.Context, collectionName, sinkID string) error {
 	collection, err := s.Get(ctx, collectionName)
 	if err != nil {
 		return err
@@ -158,7 +154,7 @@ func (s *Store) DeleteSink(ctx context.Context, collectionName, sinkID string) e
 }
 
 // deleteSinksByCollectionID removes all sinks for a collection.
-func (s *Store) deleteSinksByCollectionID(ctx context.Context, collectionID string) error {
+func (s *Settings) deleteSinksByCollectionID(ctx context.Context, collectionID string) error {
 	_, err := s.sinks.DeleteMany(ctx, bson.M{"collection_id": collectionID})
 	if err != nil {
 		return fmt.Errorf("delete sinks: %w", err)

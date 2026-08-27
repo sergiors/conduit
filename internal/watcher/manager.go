@@ -21,7 +21,7 @@ import (
 type Manager struct {
 	mongoClient     *mongo.Client
 	database        string
-	collectionStore *collections.Store
+	collectionSettings *collections.Settings
 	redisClient     *redisclient.Client
 	dispatcher      Dispatcher
 	retryProcessor  *retry.Processor
@@ -55,7 +55,7 @@ func DefaultConfig() Config {
 func NewManager(
 	mongoClient *mongo.Client,
 	database string,
-	collectionStore *collections.Store,
+	collectionSettings *collections.Settings,
 	redisClient *redisclient.Client,
 	dispatcher Dispatcher,
 	retryProcessor *retry.Processor,
@@ -64,7 +64,7 @@ func NewManager(
 	return &Manager{
 		mongoClient:     mongoClient,
 		database:        database,
-		collectionStore: collectionStore,
+		collectionSettings: collectionSettings,
 		redisClient:     redisClient,
 		dispatcher:      dispatcher,
 		retryProcessor:  retryProcessor,
@@ -79,7 +79,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	log.Println("Watcher manager starting...")
 
 	// Initial load of stream-enabled collections
-	collections, err := m.collectionStore.ListStreamEnabled(ctx)
+	collections, err := m.collectionSettings.ListStreamEnabled(ctx)
 	if err != nil {
 		return fmt.Errorf("load collections: %w", err)
 	}
@@ -311,7 +311,7 @@ func (m *Manager) configChangeLoop(ctx context.Context) {
 
 // handleCollectionChange handles config changes for a single collection
 func (m *Manager) handleCollectionChange(ctx context.Context, collectionName string) {
-	collection, err := m.collectionStore.Get(ctx, collectionName)
+	collection, err := m.collectionSettings.Get(ctx, collectionName)
 	if err != nil {
 		log.Printf("Failed to fetch collection %s for config change: %v", collectionName, err)
 		return
@@ -380,7 +380,7 @@ func (m *Manager) syncWithCollections(ctx context.Context) {
 	log.Println("Syncing watchers with config.collections...")
 
 	// Fetch current stream-enabled collections
-	collectionList, err := m.collectionStore.ListStreamEnabled(ctx)
+	collectionList, err := m.collectionSettings.ListStreamEnabled(ctx)
 	if err != nil {
 		log.Printf("Failed to list collections: %v", err)
 		return
@@ -487,7 +487,7 @@ func (m *Manager) refreshSinks(ctx context.Context, collectionName string) error
 
 // loadSinkConfigs loads the sink configs for a collection by name.
 func (m *Manager) loadSinkConfigs(ctx context.Context, collectionName string) ([]collections.SinkConfig, error) {
-	sinks, err := m.collectionStore.GetSinks(ctx, collectionName)
+	sinks, err := m.collectionSettings.GetSinks(ctx, collectionName)
 	if err != nil {
 		return nil, err
 	}

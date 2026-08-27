@@ -10,7 +10,7 @@ import (
 func (s *Server) listCollections(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	list, err := s.deps.CollectionStore.List(ctx)
+	list, err := s.deps.CollectionSettings.List(ctx)
 	if err != nil {
 		writeError(c, err)
 		return
@@ -45,7 +45,7 @@ func (s *Server) createCollection(c *gin.Context) {
 		SortKey:        req.SortKey,
 	}
 
-	if err := s.deps.CollectionStore.Create(ctx, &collection); err != nil {
+	if err := s.deps.CollectionSettings.Create(ctx, &collection); err != nil {
 		writeError(c, err)
 		return
 	}
@@ -58,7 +58,7 @@ func (s *Server) getCollection(c *gin.Context) {
 	ctx := c.Request.Context()
 	name := c.Param("name")
 
-	collection, err := s.deps.CollectionStore.Get(ctx, name)
+	collection, err := s.deps.CollectionSettings.Get(ctx, name)
 	if err != nil {
 		writeError(c, err)
 		return
@@ -71,7 +71,7 @@ func (s *Server) deleteCollection(c *gin.Context) {
 	ctx := c.Request.Context()
 	name := c.Param("name")
 
-	if err := s.deps.CollectionStore.Delete(ctx, name); err != nil {
+	if err := s.deps.CollectionSettings.Delete(ctx, name); err != nil {
 		writeError(c, err)
 		return
 	}

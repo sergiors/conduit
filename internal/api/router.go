@@ -29,7 +29,7 @@ func (s *Server) registerRoutes(r *gin.Engine) {
 	// Collection sinks
 	r.GET("/api/collections/:name/sinks", s.getSinks)
 	r.POST("/api/collections/:name/sinks", s.createSink)
-	r.DELETE("/api/collections/:name/sinks/:sinkId", s.deleteSink)
+	r.DELETE("/api/collections/:name/sinks/:id", s.deleteSink)
 
 	// Collection documents
 	r.GET("/api/collections/:name/documents", s.listDocuments)

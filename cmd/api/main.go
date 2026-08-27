@@ -28,8 +28,8 @@ func main() {
 	}
 	defer mongoClient.Close(context.Background())
 
-	collectionStore := collections.NewStore(mongoClient.Client, cfg.MongoDBDatabase)
-	if err := collectionStore.CreateIndex(ctx); err != nil {
+	collectionSettings := collections.NewSettings(mongoClient.Client, cfg.MongoDBDatabase)
+	if err := collectionSettings.CreateIndex(ctx); err != nil {
 		log.Fatalf("Failed to create collection index: %v", err)
 	}
 
@@ -43,7 +43,7 @@ func main() {
 	defer redisClient.Close()
 
 	server := api.New(api.Dependencies{
-		CollectionStore: collectionStore,
+		CollectionSettings: collectionSettings,
 		MongoClient:     mongoClient,
 		RedisClient:     redisClient,
 	})

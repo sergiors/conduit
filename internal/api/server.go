@@ -12,7 +12,7 @@ import (
 
 // Dependencies holds the business/infrastructure packages the API layer needs.
 type Dependencies struct {
-	CollectionStore *collections.Store
+	CollectionSettings *collections.Settings
 	MongoClient     *mongo.Client
 	RedisClient     *redis.Client
 }

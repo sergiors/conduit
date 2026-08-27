@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -13,57 +12,30 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-// Sentinel domain errors returned by the Store. Callers MUST identify them
-// with errors.Is (never by comparing err.Error()), so HTTP status mapping
-// does not depend on fragile string matching.
-var (
-	ErrCollectionNotFound        = errors.New("collection not found")
-	ErrDeletionProtectionEnabled = errors.New("deletion protection is enabled")
-	ErrDocumentNotFound          = errors.New("document not found")
-	ErrTTLAttributeImmutable     = errors.New("TTL attribute is immutable")
-	ErrOldImageImmutable         = errors.New("old_image is immutable once the stream is enabled")
-	ErrValidation                = errors.New("validation failed")
-)
-
-// ValidationError wraps a dynamic client-validation message while remaining
-// identifiable via errors.Is(err, ErrValidation). Use NewValidationError so
-// callers can map validation errors to HTTP 400 without comparing strings.
-type ValidationError struct {
-	Message string
-}
-
-func (e *ValidationError) Error() string        { return e.Message }
-func (e *ValidationError) Is(target error) bool { return target == ErrValidation }
-
-// NewValidationError returns a validation error with a formatted message.
-func NewValidationError(format string, args ...any) error {
-	return &ValidationError{Message: fmt.Sprintf(format, args...)}
-}
-
 type Collection struct {
-	ID                 string       `bson:"_id,omitempty" json:"_id,omitempty"`
-	CollectionName     string       `bson:"collection_name,omitempty" json:"collection_name,omitempty"`
-	PartitionKey       string       `bson:"partition_key,omitempty" json:"partition_key,omitempty"`
-	SortKey            string       `bson:"sort_key,omitempty" json:"sort_key,omitempty"`
-	StreamEnabled      bool         `bson:"stream_enabled" json:"stream_enabled"`
-	OldImage           bool         `bson:"old_image" json:"old_image"`
-	TTLAttribute       string       `bson:"ttl_attribute,omitempty" json:"ttl_attribute,omitempty"`
-	DeletionProtection bool         `bson:"deletion_protection" json:"deletion_protection"`
-	CreatedAt          time.Time    `bson:"created_at" json:"created_at"`
-	UpdatedAt          time.Time    `bson:"updated_at" json:"updated_at"`
+	ID                 string    `bson:"_id,omitempty" json:"_id,omitempty"`
+	CollectionName     string    `bson:"collection_name,omitempty" json:"collection_name,omitempty"`
+	PartitionKey       string    `bson:"partition_key,omitempty" json:"partition_key,omitempty"`
+	SortKey            string    `bson:"sort_key,omitempty" json:"sort_key,omitempty"`
+	StreamEnabled      bool      `bson:"stream_enabled" json:"stream_enabled"`
+	OldImage           bool      `bson:"old_image" json:"old_image"`
+	TTLAttribute       string    `bson:"ttl_attribute,omitempty" json:"ttl_attribute,omitempty"`
+	DeletionProtection bool      `bson:"deletion_protection" json:"deletion_protection"`
+	CreatedAt          time.Time `bson:"created_at" json:"created_at"`
+	UpdatedAt          time.Time `bson:"updated_at" json:"updated_at"`
 }
 
-// Store manages collection configurations in MongoDB
-type Store struct {
+// Settings manages collection configurations in MongoDB
+type Settings struct {
 	client     *mongo.Client
 	database   string
 	collection *mongo.Collection
 	sinks      *mongo.Collection
 }
 
-// NewStore creates a new collection store
-func NewStore(client *mongo.Client, database string) *Store {
-	return &Store{
+// NewSettings creates a new collection settings manager
+func NewSettings(client *mongo.Client, database string) *Settings {
+	return &Settings{
 		client:     client,
 		database:   database,
 		collection: client.Database(database).Collection("config.collections"),
@@ -71,8 +43,8 @@ func NewStore(client *mongo.Client, database string) *Store {
 	}
 }
 
-// CreateIndex creates the indexes required by the store.
-func (s *Store) CreateIndex(ctx context.Context) error {
+// CreateIndex creates the indexes required by the settings.
+func (s *Settings) CreateIndex(ctx context.Context) error {
 	collectionIndex := mongo.IndexModel{
 		Keys:    bson.D{{Key: "collection_name", Value: 1}},
 		Options: options.Index().SetUnique(true),
@@ -88,8 +60,8 @@ func (s *Store) CreateIndex(ctx context.Context) error {
 	return err
 }
 
-// createCollection creates the actual MongoDB collection for CDC monitoring
-func (s *Store) createCollection(ctx context.Context, collection *Collection) error {
+// createCollection ensures the physical MongoDB collection exists.
+func (s *Settings) createCollection(ctx context.Context, collection *Collection) error {
 	db := s.client.Database(s.database)
 	collectionName := collection.CollectionName
 
@@ -100,23 +72,15 @@ func (s *Store) createCollection(ctx context.Context, collection *Collection) er
 	}
 
 	if len(collections) > 0 {
-		// Collection exists, enable changeStreamPreAndPostImages
-		err = db.RunCommand(ctx, bson.M{
-			"collMod":                      collectionName,
-			"changeStreamPreAndPostImages": bson.M{"enabled": true},
-		}).Err()
-		if err != nil {
-			log.Printf("Warning: Failed to enable changeStreamPreAndPostImages for %s: %v", collectionName, err)
-		}
-
+		// Collection already exists, just ensure the key index
 		if err := s.ensureKeyIndex(ctx, collectionName, collection.PartitionKey, collection.SortKey); err != nil {
 			return fmt.Errorf("ensure key index: %w", err)
 		}
 		return nil
 	}
 
-	// Create the collection with changeStreamPreAndPostImages enabled
-	err = db.CreateCollection(ctx, collectionName, options.CreateCollection().SetChangeStreamPreAndPostImages(bson.M{"enabled": true}))
+	// Create the collection
+	err = db.CreateCollection(ctx, collectionName)
 	if err != nil {
 		return fmt.Errorf("create collection: %w", err)
 	}
@@ -145,7 +109,7 @@ func (s *Store) createCollection(ctx context.Context, collection *Collection) er
 	return nil
 }
 
-func (s *Store) ensureKeyIndex(ctx context.Context, collectionName, primaryKey, sortKey string) error {
+func (s *Settings) ensureKeyIndex(ctx context.Context, collectionName, primaryKey, sortKey string) error {
 	if primaryKey == "" {
 		return nil
 	}
@@ -170,7 +134,7 @@ func (s *Store) ensureKeyIndex(ctx context.Context, collectionName, primaryKey, 
 }
 
 // Create inserts a new collection configuration and creates the MongoDB collection
-func (s *Store) Create(ctx context.Context, collection *Collection) error {
+func (s *Settings) Create(ctx context.Context, collection *Collection) error {
 	name := collection.CollectionName
 	if name == "" {
 		return NewValidationError("collection name is required")
@@ -208,7 +172,7 @@ func (s *Store) Create(ctx context.Context, collection *Collection) error {
 }
 
 // Get retrieves a collection by name
-func (s *Store) Get(ctx context.Context, name string) (*Collection, error) {
+func (s *Settings) Get(ctx context.Context, name string) (*Collection, error) {
 	var collection Collection
 	err := s.collection.FindOne(ctx, bson.M{"collection_name": name}).Decode(&collection)
 	if err != nil {
@@ -222,7 +186,7 @@ func (s *Store) Get(ctx context.Context, name string) (*Collection, error) {
 }
 
 // List returns all collection configurations
-func (s *Store) List(ctx context.Context) ([]Collection, error) {
+func (s *Settings) List(ctx context.Context) ([]Collection, error) {
 	cursor, err := s.collection.Find(ctx, bson.M{})
 	if err != nil {
 		return nil, err
@@ -236,152 +200,10 @@ func (s *Store) List(ctx context.Context) ([]Collection, error) {
 	return collections, nil
 }
 
-// SetDeletionProtection enables or disables deletion protection for a collection.
-// It is idempotent: setting a collection to its current protection state is a no-op.
-// Returns ErrCollectionNotFound if the collection does not exist.
-func (s *Store) SetDeletionProtection(ctx context.Context, name string, enabled bool) error {
-	if _, err := s.Get(ctx, name); err != nil {
-		return err
-	}
-
-	_, err := s.collection.UpdateOne(
-		ctx,
-		bson.M{"collection_name": name},
-		bson.M{"$set": bson.M{
-			"deletion_protection": enabled,
-			"updated_at":          time.Now(),
-		}},
-	)
-	return err
-}
-
-// SetStream enables the CDC stream for a collection and configures old_image.
-// oldImage controls whether change events include the pre-image.
-//
-// old_image is immutable once the stream is enabled: if the stream is already
-// enabled, any subsequent SetStream returns ErrOldImageImmutable, even with the
-// same old_image value. To change it, disable the stream first via DisableStream.
-// Returns ErrCollectionNotFound if the collection does not exist.
-func (s *Store) SetStream(ctx context.Context, name string, oldImage bool) error {
-	// Atomic conditional update. It only succeeds when the stream is not enabled
-	// yet. Once enabled, old_image cannot be redefined through this route.
-	filter := bson.M{
-		"collection_name": name,
-		"stream_enabled":  bson.M{"$ne": true},
-	}
-
-	update := bson.M{
-		"$set": bson.M{
-			"stream_enabled": true,
-			"old_image":      oldImage,
-			"updated_at":     time.Now(),
-		},
-	}
-
-	result, err := s.collection.UpdateOne(ctx, filter, update)
-	if err != nil {
-		return fmt.Errorf("set stream: %w", err)
-	}
-
-	if result.MatchedCount > 0 {
-		return nil
-	}
-
-	// MatchedCount == 0 means either the collection does not exist or the
-	// stream is already enabled. Fetch once to return the correct domain error.
-	_, err = s.Get(ctx, name)
-	if err != nil {
-		return err
-	}
-
-	return ErrOldImageImmutable
-}
-
-// DisableStream disables the CDC stream and clears old_image for a collection.
-// Idempotent. Returns ErrCollectionNotFound if the collection does not exist.
-func (s *Store) DisableStream(ctx context.Context, name string) error {
-	if _, err := s.Get(ctx, name); err != nil {
-		return err
-	}
-	_, err := s.collection.UpdateOne(
-		ctx,
-		bson.M{"collection_name": name},
-		bson.M{"$set": bson.M{
-			"stream_enabled": false,
-			"old_image":      false,
-			"updated_at":     time.Now(),
-		}},
-	)
-	return err
-}
-
-// SetTTL sets the collection TTL attribute. The TTL index itself is created
-// by the caller via mongo.Client.CreateTTLIndex; the Store only persists the
-// configuration and validates it.
-//
-// The attribute is immutable: once it is set, any subsequent SetTTL returns
-// ErrTTLAttributeImmutable, even with the same value. To change it, disable
-// TTL first via DisableTTL. An empty attribute returns ErrValidation.
-func (s *Store) SetTTL(ctx context.Context, name, attribute string) error {
-	if attribute == "" {
-		return NewValidationError("ttl attribute is required")
-	}
-
-	collection, err := s.Get(ctx, name)
-	if err != nil {
-		return err
-	}
-
-	if collection.TTLAttribute != "" {
-		return ErrTTLAttributeImmutable
-	}
-
-	_, err = s.collection.UpdateOne(
-		ctx,
-		bson.M{"collection_name": name},
-		bson.M{"$set": bson.M{
-			"ttl_attribute": attribute,
-			"updated_at":    time.Now(),
-		}},
-	)
-	if err != nil {
-		return fmt.Errorf("set ttl attribute: %w", err)
-	}
-	return nil
-}
-
-// DisableTTL clears the TTL attribute and returns the previously-set attribute
-// ("" if none), so the caller can drop the TTL index via mongo.Client.DropTTLIndex.
-// Idempotent. Returns ErrCollectionNotFound if the collection does not exist.
-func (s *Store) DisableTTL(ctx context.Context, name string) (string, error) {
-	collection, err := s.Get(ctx, name)
-	if err != nil {
-		return "", err
-	}
-
-	if collection.TTLAttribute == "" {
-		return "", nil
-	}
-
-	_, err = s.collection.UpdateOne(
-		ctx,
-		bson.M{"collection_name": name},
-		bson.M{"$set": bson.M{
-			"ttl_attribute": "",
-			"updated_at":    time.Now(),
-		}},
-	)
-	if err != nil {
-		return "", err
-	}
-
-	return collection.TTLAttribute, nil
-}
-
 // Delete removes a collection configuration and its MongoDB collection by collection name.
 // Returns ErrCollectionNotFound if the collection does not exist, or
 // ErrDeletionProtectionEnabled if deletion protection is on.
-func (s *Store) Delete(ctx context.Context, name string) error {
+func (s *Settings) Delete(ctx context.Context, name string) error {
 	// Get collection to check deletion protection
 	collection, err := s.Get(ctx, name)
 	if err != nil {
@@ -407,19 +229,4 @@ func (s *Store) Delete(ctx context.Context, name string) error {
 	// Delete the configuration
 	_, err = s.collection.DeleteOne(ctx, bson.M{"collection_name": name})
 	return err
-}
-
-// ListStreamEnabled returns collections with streams enabled
-func (s *Store) ListStreamEnabled(ctx context.Context) ([]Collection, error) {
-	cursor, err := s.collection.Find(ctx, bson.M{"stream_enabled": true})
-	if err != nil {
-		return nil, err
-	}
-	defer cursor.Close(ctx)
-
-	var collections []Collection
-	if err := cursor.All(ctx, &collections); err != nil {
-		return nil, err
-	}
-	return collections, nil
 }

@@ -18,7 +18,7 @@ func (s *Server) setProtection(c *gin.Context, enabled bool) {
 	ctx := c.Request.Context()
 	name := c.Param("name")
 
-	if err := s.deps.CollectionStore.SetDeletionProtection(ctx, name, enabled); err != nil {
+	if err := s.deps.CollectionSettings.SetDeletionProtection(ctx, name, enabled); err != nil {
 		writeError(c, err)
 		return
 	}
