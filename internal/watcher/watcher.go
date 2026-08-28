@@ -391,7 +391,7 @@ func (w *Watcher) OldImage() bool {
 // The MongoDB resume token (change event `_id._data`) is the primary source:
 // it is a hex string that uniquely identifies the change (it encodes
 // clusterTime, operation type and document key) and is identical when the
-// event is re-read from the oplog. If the token is missing or malfo	rmed,
+// event is re-read from the oplog. If the token is missing or malformed,
 // clusterTime plus documentKey are used as a fallback, still sourced purely
 // from change-stream data.
 //

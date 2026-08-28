@@ -15,24 +15,20 @@ func TestConfig(t *testing.T) {
 		cfg := Config{
 			URI:      "mongodb://localhost:27017",
 			Database: "conduit",
-			Timeout:  10 * time.Second,
 		}
 
 		assert.Equal(t, "mongodb://localhost:27017", cfg.URI)
 		assert.Equal(t, "conduit", cfg.Database)
-		assert.Equal(t, 10*time.Second, cfg.Timeout)
 	})
 
 	t.Run("custom configuration", func(t *testing.T) {
 		cfg := Config{
 			URI:      "mongodb://custom:27017",
 			Database: "mydb",
-			Timeout:  30 * time.Second,
 		}
 
 		assert.Equal(t, "mongodb://custom:27017", cfg.URI)
 		assert.Equal(t, "mydb", cfg.Database)
-		assert.Equal(t, 30*time.Second, cfg.Timeout)
 	})
 }
 
@@ -45,7 +41,6 @@ func TestClientCreation(t *testing.T) {
 		_, err := NewClient(ctx, Config{
 			URI:      "mongodb://invalid-host:27017",
 			Database: "test",
-			Timeout:  2 * time.Second,
 		})
 
 		assert.Error(t, err, "should fail with invalid host")
@@ -65,7 +60,6 @@ func TestClientIntegration(t *testing.T) {
 		client, err := NewClient(ctx, Config{
 			URI:      "mongodb://localhost:27017/?replicaSet=rs0",
 			Database: "conduit",
-			Timeout:  10 * time.Second,
 		})
 		if err != nil {
 			t.Skipf("MongoDB not available: %v", err)
@@ -83,7 +77,6 @@ func TestClientIntegration(t *testing.T) {
 		client, err := NewClient(ctx, Config{
 			URI:      "mongodb://localhost:27017/?replicaSet=rs0",
 			Database: "conduit",
-			Timeout:  10 * time.Second,
 		})
 		if err != nil {
 			t.Skipf("MongoDB not available: %v", err)

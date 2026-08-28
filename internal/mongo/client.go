@@ -21,7 +21,6 @@ type Client struct {
 type Config struct {
 	URI      string
 	Database string
-	Timeout  time.Duration
 }
 
 // NewClient creates a new MongoDB client.

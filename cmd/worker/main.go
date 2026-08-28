@@ -39,7 +39,6 @@ func NewWorker(cfg config.Config) (*Worker, error) {
 	mongoClient, err := mongo.NewClient(ctx, mongo.Config{
 		URI:      cfg.MongoDBURI,
 		Database: cfg.MongoDBDatabase,
-		Timeout:  60 * time.Second,
 	})
 	if err != nil {
 		return nil, err

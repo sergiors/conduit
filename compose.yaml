@@ -27,7 +27,6 @@ services:
       timeout: 5s
       retries: 5
 
-
   worker:
     build:
       context: .

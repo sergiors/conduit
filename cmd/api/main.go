@@ -23,7 +23,6 @@ func main() {
 	mongoClient, err := mongo.NewClient(ctx, mongo.Config{
 		URI:      cfg.MongoDBURI,
 		Database: cfg.MongoDBDatabase,
-		Timeout:  60 * time.Second,
 	})
 	if err != nil {
 		log.Fatalf("Failed to connect to MongoDB: %v", err)

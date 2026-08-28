@@ -121,7 +121,7 @@ MongoDB serves two roles:
 1. **Storage engine**: it holds the application collections, the `config.collections` settings, and the `config.sinks` configurations.
 2. **CDC source**: it emits change stream events that the worker consumes.
 
-MongoDB must run as a replica set for change streams to work. The worker initializes the replica set on startup if it is not already configured.
+MongoDB must run as a replica set for change streams to work. The application never creates or modifies the replica set: topology is managed externally (operators, administrators, or deployment tooling). On startup the application only waits for readiness — a writable PRIMARY that the client can reach — before serving traffic or starting watchers.
 
 ## How They Relate
 
@@ -380,13 +380,11 @@ Isolating Redis behind a domain-specific client prevents key-format errors from 
 
 ### Responsibility
 
-`mongo.Client` wraps the MongoDB driver and adds application-specific helpers such as replica-set initialization and change stream validation.
+`mongo.Client` wraps the MongoDB driver. It connects, waits for MongoDB readiness, and exposes database/collection accessors. It never manages replica-set topology.
 
 ### Public API
 
-- `NewClient(ctx, config)` connects and pings.
-- `InitializeReplicaSet(ctx)` sets up a single-node replica set when needed.
-- `EnableStreams(ctx, collection, oldImage)` validates that a collection can be watched.
+- `NewClient(ctx, config)` connects and blocks until MongoDB is ready: the `hello` command reports a writable PRIMARY (`ok: 1`, `isWritablePrimary: true`) and the replica-set-aware client can reach it (Ping). No topology commands are ever issued.
 - `Database()`, `Collection(name)` accessors.
 
 ### Dependencies
@@ -396,10 +394,11 @@ Isolating Redis behind a domain-specific client prevents key-format errors from 
 ### What it Must Never Do
 
 - Enforce collection configuration invariants. That is `collections.Settings`.
+- Create, initiate, or reconfigure replica sets. Topology is managed externally; the client is strictly read-only with respect to topology and only waits for readiness.
 
 ### Why it Exists
 
-MongoDB connectivity and replica-set management are infrastructure concerns. Wrapping them keeps the rest of the codebase free of driver boilerplate and ensures change streams have the prerequisites they need.
+MongoDB connectivity and readiness gating are infrastructure concerns. Wrapping them keeps the rest of the codebase free of driver boilerplate and ensures watchers never start against a node that cannot accept writes (e.g., during elections after a restart).
 
 ---
 
@@ -885,7 +884,7 @@ Redis wrapper.
 
 MongoDB wrapper.
 
-- `client.go`: Connection, replica-set initialization, change stream validation, collection access.
+- `client.go`: Connection, readiness wait (writable PRIMARY + client Ping), collection access.
 - `doc.go`: Package documentation.
 
 ## `internal/streams/`
