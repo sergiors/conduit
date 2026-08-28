@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -16,7 +15,6 @@ import (
 type Client struct {
 	*mongo.Client
 	database string
-	uri      string
 }
 
 // Config holds MongoDB connection configuration
@@ -26,7 +24,16 @@ type Config struct {
 	Timeout  time.Duration
 }
 
-// NewClient creates a new MongoDB client
+// NewClient creates a new MongoDB client.
+//
+// It connects and then waits until MongoDB is actually ready to serve change
+// streams: a writable PRIMARY must exist and the replica-set-mode client must
+// be able to reach it. This prevents NotPrimaryOrSecondary failures when MongoDB
+// is still electing a PRIMARY after a restart.
+//
+// The application never creates or modifies replica sets; it only waits for
+// readiness. Replica set topology is managed externally (by MongoDB
+// administrators or operators).
 func NewClient(ctx context.Context, cfg Config) (*Client, error) {
 	if cfg.URI == "" {
 		return nil, fmt.Errorf("MONGODB_URI is required")
@@ -36,22 +43,29 @@ func NewClient(ctx context.Context, cfg Config) (*Client, error) {
 	}
 
 	clientOpts := options.Client().ApplyURI(cfg.URI)
-
 	client, err := mongo.Connect(ctx, clientOpts)
 	if err != nil {
 		return nil, fmt.Errorf("connect to mongo: %w", err)
 	}
 
-	// Verify connection
-	if err := client.Ping(ctx, nil); err != nil {
-		return nil, fmt.Errorf("ping mongo: %w", err)
-	}
-
-	return &Client{
+	c := &Client{
 		Client:   client,
 		database: cfg.Database,
-		uri:      cfg.URI,
-	}, nil
+	}
+
+	// Wait until MongoDB is actually usable before returning. This is what
+	// prevents NotPrimaryOrSecondary failures when MongoDB is still electing a
+	// PRIMARY after a restart.
+	if err := waitForWritablePrimary(ctx, client); err != nil {
+		client.Disconnect(context.Background())
+		return nil, fmt.Errorf("wait for writable primary: %w", err)
+	}
+	if err := waitForClientReady(ctx, client); err != nil {
+		client.Disconnect(context.Background())
+		return nil, fmt.Errorf("wait for mongo client: %w", err)
+	}
+
+	return c, nil
 }
 
 // Database returns the database name
@@ -69,77 +83,50 @@ func (c *Client) Close(ctx context.Context) error {
 	return c.Client.Disconnect(ctx)
 }
 
-// EnableStreams configures a collection for change streams
-// Uses fullDocument=updateLookup and optionally fullDocumentBeforeChange
-func (c *Client) EnableStreams(ctx context.Context, collection string, oldImage bool) error {
-	// MongoDB change streams are enabled by default for replica sets
-	// This method validates the collection exists and logs the configuration
-	opts := options.ChangeStream()
-	opts.SetFullDocument(options.UpdateLookup)
-	if oldImage {
-		opts.SetFullDocumentBeforeChange(options.Required)
-	}
+// waitForWritablePrimary polls the hello command until the node reports itself
+// as the writable PRIMARY. Transient errors while the node is recovering or
+// electing a PRIMARY are retried until the context is done.
+func waitForWritablePrimary(ctx context.Context, client *mongo.Client) error {
+	helloCmd := bson.D{{Key: "hello", Value: 1}}
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
 
-	// Validate collection can be watched
-	coll := c.Collection(collection)
-	cursor, err := coll.Watch(ctx, mongo.Pipeline{}, opts)
-	if err != nil {
-		return err
+	for {
+		var hello struct {
+			IsWritablePrimary bool `bson:"isWritablePrimary"`
+		}
+		err := client.Database("admin").RunCommand(ctx, helloCmd).Decode(&hello)
+
+		if err == nil && hello.IsWritablePrimary {
+			log.Println("MongoDB node is writable PRIMARY")
+			return nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("wait for writable primary: %w", ctx.Err())
+		case <-ticker.C:
+		}
 	}
-	return cursor.Close(ctx)
 }
 
-// InitializeReplicaSet initializes a MongoDB replica set if not already initialized
-// This is required for change streams to work
-func (c *Client) InitializeReplicaSet(ctx context.Context) error {
-	// Check if replica set is already initialized
-	rsStatusCmd := bson.D{{Key: "replSetGetStatus", Value: 1}}
-	result := c.Client.Database("admin").RunCommand(ctx, rsStatusCmd)
+// waitForClientReady pings the client until it can reach a server, ensuring the
+// replica-set-mode client has discovered the PRIMARY. Transient errors are
+// retried until the context is done.
+func waitForClientReady(ctx context.Context, client *mongo.Client) error {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
 
-	var rsStatus bson.M
-	if err := result.Decode(&rsStatus); err == nil {
-		// Replica set already initialized
-		log.Println("Replica set already initialized")
-		return nil
-	}
+	for {
+		if err := client.Ping(ctx, nil); err == nil {
+			log.Println("MongoDB client ready")
+			return nil
+		}
 
-	// Check if error is "not initialized" vs other errors
-	// If not initialized, proceed with initialization
-	log.Println("Initializing replica set...")
-
-	// Extract host from URI (similar to redis.ParseURL)
-	host := strings.TrimPrefix(c.uri, "mongodb://")
-	host = strings.TrimPrefix(host, "mongodb+srv://")
-	if idx := strings.Index(host, "@"); idx != -1 {
-		host = host[idx+1:]
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("wait for mongo client: %w", ctx.Err())
+		case <-ticker.C:
+		}
 	}
-	if idx := strings.Index(host, "/"); idx != -1 {
-		host = host[:idx]
-	}
-	if idx := strings.Index(host, "?"); idx != -1 {
-		host = host[:idx]
-	}
-
-	// Initialize replica set
-	initCmd := bson.D{
-		{Key: "replSetInitiate", Value: 1},
-		{Key: "conf", Value: bson.D{
-			{Key: "_id", Value: "rs0"},
-			{Key: "members", Value: bson.A{
-				bson.D{
-					{Key: "_id", Value: 0},
-					{Key: "host", Value: host},
-				},
-			}},
-		}},
-	}
-
-	res := c.Client.Database("admin").RunCommand(ctx, initCmd)
-	var initResult bson.M
-	if err := res.Decode(&initResult); err != nil {
-		return fmt.Errorf("initiate replica set: %w", err)
-	}
-
-	log.Println("Replica set initialized successfully")
-	return nil
 }

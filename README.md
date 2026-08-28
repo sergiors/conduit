@@ -182,10 +182,8 @@ New sinks can be added by implementing the `Sink` interface and registering a bu
 
 ### Environment
 
-Copy `.env.example` to `.env` and set the required variables:
-
 ```bash
-MONGODB_URI=mongodb://localhost:27017
+MONGODB_URI=mongodb://localhost:27017/?replicaSet=rs0
 MONGODB_DATABASE=conduit
 REDIS_URI=redis://localhost:6379
 PORT=8080

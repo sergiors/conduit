@@ -13,8 +13,8 @@
 //
 // Supported transports:
 //   - http: POST events to a webhook endpoint
-//   - eventbridge: Publish to AWS EventBridge (skeleton)
-//   - meilisearch: Index documents in Meilisearch (skeleton)
+//   - eventbridge: Publish to AWS EventBridge
+//   - meilisearch: Index documents in Meilisearch
 //
 // To add a new transport, create a new file in this package, define its own
 // Spec struct, and call RegisterTransport in an init() function.

@@ -28,22 +28,21 @@ type Worker struct {
 }
 
 func NewWorker(cfg config.Config) (*Worker, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Use a generous timeout for startup: MongoDB may still be electing a PRIMARY
+	// after a restart, and NewClient waits for it before returning.
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	// Initialize MongoDB client
+	// Initialize MongoDB client. NewClient waits until MongoDB is ready (a
+	// writable PRIMARY is reachable) before returning, so this returns once
+	// MongoDB is fully ready to serve change streams.
 	mongoClient, err := mongo.NewClient(ctx, mongo.Config{
 		URI:      cfg.MongoDBURI,
 		Database: cfg.MongoDBDatabase,
-		Timeout:  10 * time.Second,
+		Timeout:  60 * time.Second,
 	})
 	if err != nil {
 		return nil, err
-	}
-
-	// Initialize replica set (required for change streams)
-	if err := mongoClient.InitializeReplicaSet(ctx); err != nil {
-		log.Printf("Warning: Failed to initialize replica set: %v", err)
 	}
 
 	// Initialize Redis client with URI/DSN

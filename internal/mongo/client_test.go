@@ -6,8 +6,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -65,7 +63,7 @@ func TestClientIntegration(t *testing.T) {
 		defer cancel()
 
 		client, err := NewClient(ctx, Config{
-			URI:      "mongodb://localhost:27017",
+			URI:      "mongodb://localhost:27017/?replicaSet=rs0",
 			Database: "conduit",
 			Timeout:  10 * time.Second,
 		})
@@ -83,7 +81,7 @@ func TestClientIntegration(t *testing.T) {
 		defer cancel()
 
 		client, err := NewClient(ctx, Config{
-			URI:      "mongodb://localhost:27017",
+			URI:      "mongodb://localhost:27017/?replicaSet=rs0",
 			Database: "conduit",
 			Timeout:  10 * time.Second,
 		})
@@ -95,54 +93,6 @@ func TestClientIntegration(t *testing.T) {
 		collection := client.Collection("users")
 		assert.NotNil(t, collection)
 		assert.Equal(t, "users", collection.Name())
-	})
-}
-
-func TestClientEnableStreams(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	client, err := NewClient(ctx, Config{
-		URI:      "mongodb://localhost:27017",
-		Database: "conduit",
-		Timeout:  10 * time.Second,
-	})
-	if err != nil {
-		t.Skipf("MongoDB not available: %v", err)
-	}
-	defer client.Close(ctx)
-
-	t.Run("enable streams without old image", func(t *testing.T) {
-		collection := "test_stream_collection"
-		_ = client.Collection(collection).Drop(ctx)
-
-		// Create collection first
-		_, err := client.Collection(collection).InsertOne(ctx, bson.M{"_id": "1"})
-		require.NoError(t, err)
-
-		err = client.EnableStreams(ctx, collection, false)
-		require.NoError(t, err)
-
-		// Cleanup
-		_ = client.Collection(collection).Drop(ctx)
-	})
-
-	t.Run("enable streams with old image", func(t *testing.T) {
-		collection := "test_stream_old"
-		_ = client.Collection(collection).Drop(ctx)
-
-		_, err := client.Collection(collection).InsertOne(ctx, bson.M{"_id": "1"})
-		require.NoError(t, err)
-
-		err = client.EnableStreams(ctx, collection, true)
-		require.NoError(t, err)
-
-		// Cleanup
-		_ = client.Collection(collection).Drop(ctx)
 	})
 }
 

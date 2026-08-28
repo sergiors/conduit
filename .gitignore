@@ -14,9 +14,6 @@ coverage.html
 /api
 /worker
 
-# Data
-.mongodb_data/
-
 # Env
 .env
 .env.local
