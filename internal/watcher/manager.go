@@ -239,8 +239,13 @@ func (m *Manager) restartWatcher(ctx context.Context, collection collections.Col
 
 // handleEvent processes an event with idempotency and retry logic
 func (m *Manager) handleEvent(ctx context.Context, collectionName string, record streams.StreamRecord) error {
-	// Generate event ID: {collection}:{type}:{timestamp}
-	eventID := fmt.Sprintf("%s:%s:%d", collectionName, record.RecordType, record.Timestamp.UnixNano())
+	// The event ID is derived deterministically from the MongoDB change event
+	// (resume token / clusterTime + documentKey) by the watcher, so the same
+	// change always maps to the same idempotency key across restarts.
+	if record.EventID == "" {
+		return fmt.Errorf("event is missing a deterministic event ID")
+	}
+	eventID := record.EventID
 
 	// Check idempotency
 	processed, err := m.redisClient.IsProcessed(ctx, eventID)

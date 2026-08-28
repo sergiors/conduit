@@ -7,7 +7,9 @@
 //
 // Key Features:
 //   - DynamoDB-aligned naming: newImage, oldImage, tableName, recordType
-//   - Timestamp tracking: Nanosecond precision for idempotency keys
+//   - EventID: deterministic idempotency key derived from change-stream data
+//     (resume token, with clusterTime + documentKey as fallback) - stable
+//     across process restarts; never derived from application time
 //   - Full document support: Optional oldImage via fullDocumentBeforeChange
 //
 // Record Types:
@@ -24,5 +26,6 @@
 //	    NewImage:   bson.M{"_id": "123", "name": "John"},
 //	    OldImage:   nil,
 //	    Timestamp:  time.Now(),
+//	    EventID:    "users:826A91ADB6000000022B04...",
 //	}
 package streams

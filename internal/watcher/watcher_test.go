@@ -8,6 +8,7 @@ import (
 	"github.com/sergiors/conduit/internal/streams"
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 func TestWatcherCreation(t *testing.T) {
@@ -127,6 +128,115 @@ func TestParseChange(t *testing.T) {
 		record, err := watcher.parseChange(change)
 		assert.Error(t, err)
 		assert.Equal(t, streams.StreamRecord{}, record)
+	})
+
+	t.Run("event ID is derived from resume token", func(t *testing.T) {
+		watcher := NewWatcher(nil, "conduit", "users", "pk", "sk", false, "", nil)
+
+		change := bson.M{
+			"_id": bson.M{
+				"_data": "826A91ADB6000000022B042C0100296E",
+			},
+			"operationType": "insert",
+			"fullDocument":  bson.M{"_id": "123"},
+		}
+
+		record, err := watcher.parseChange(change)
+		assert.NoError(t, err)
+		assert.Equal(t, "users:826A91ADB6000000022B042C0100296E", record.EventID)
+	})
+
+	t.Run("event ID is stable across restarts", func(t *testing.T) {
+		// Two independent watcher instances (a restart) parsing the same
+		// change event must produce the same event ID.
+		change := bson.M{
+			"_id": bson.M{
+				"_data": "826A91ADB6000000022B042C0100296E",
+			},
+			"operationType": "update",
+			"fullDocument":  bson.M{"_id": "123"},
+		}
+
+		first := NewWatcher(nil, "conduit", "orders", "pk", "sk", false, "", nil)
+		second := NewWatcher(nil, "conduit", "orders", "pk", "sk", false, "", nil)
+
+		r1, err := first.parseChange(change)
+		assert.NoError(t, err)
+		r2, err := second.parseChange(change)
+		assert.NoError(t, err)
+
+		assert.Equal(t, r1.EventID, r2.EventID)
+		assert.NotEmpty(t, r1.EventID)
+	})
+
+	t.Run("event ID falls back to clusterTime and documentKey", func(t *testing.T) {
+		watcher := NewWatcher(nil, "conduit", "orders", "pk", "sk", false, "", nil)
+
+		change := bson.M{
+			"operationType": "update",
+			"clusterTime":   primitive.Timestamp{T: 1787932086, I: 4},
+			"documentKey":   bson.M{"_id": "456"},
+		}
+
+		record, err := watcher.parseChange(change)
+		assert.NoError(t, err)
+		assert.Equal(t, `orders:1787932086:4:{"_id":"456"}`, record.EventID)
+	})
+
+	t.Run("event ID fallback is stable across restarts", func(t *testing.T) {
+		change := bson.M{
+			"operationType": "delete",
+			"clusterTime":   primitive.Timestamp{T: 1787932086, I: 7},
+			"documentKey":   bson.M{"_id": "789"},
+		}
+
+		first := NewWatcher(nil, "conduit", "sessions", "pk", "sk", false, "", nil)
+		second := NewWatcher(nil, "conduit", "sessions", "pk", "sk", false, "", nil)
+
+		r1, err := first.parseChange(change)
+		assert.NoError(t, err)
+		r2, err := second.parseChange(change)
+		assert.NoError(t, err)
+
+		assert.Equal(t, r1.EventID, r2.EventID)
+		assert.NotEmpty(t, r1.EventID)
+	})
+
+	t.Run("different changes produce different event IDs", func(t *testing.T) {
+		watcher := NewWatcher(nil, "conduit", "users", "pk", "sk", false, "", nil)
+
+		first, err := watcher.parseChange(bson.M{
+			"_id":           bson.M{"_data": "826A91ADB6000000022B04"},
+			"operationType": "insert",
+		})
+		assert.NoError(t, err)
+
+		second, err := watcher.parseChange(bson.M{
+			"_id":           bson.M{"_data": "826A91ADB6000000032B04"},
+			"operationType": "insert",
+		})
+		assert.NoError(t, err)
+
+		assert.NotEqual(t, first.EventID, second.EventID)
+	})
+
+	t.Run("event ID is never derived from time.Now", func(t *testing.T) {
+		// Parsing the same change twice within one watcher must also be
+		// deterministic (guards against any wall-clock dependency).
+		watcher := NewWatcher(nil, "conduit", "users", "pk", "sk", false, "", nil)
+
+		change := bson.M{
+			"_id":           bson.M{"_data": "826A91ADB6000000022B04"},
+			"operationType": "insert",
+		}
+
+		r1, err := watcher.parseChange(change)
+		assert.NoError(t, err)
+		time.Sleep(10 * time.Millisecond)
+		r2, err := watcher.parseChange(change)
+		assert.NoError(t, err)
+
+		assert.Equal(t, r1.EventID, r2.EventID)
 	})
 }
 

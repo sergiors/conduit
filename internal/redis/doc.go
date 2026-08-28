@@ -11,7 +11,11 @@
 //	cdc:resume:<collectionName>        - Resume token for a table
 //	cdc:retry:<collectionName>         - Retry queue (sorted set by nextRetryAt)
 //	cdc:dlq:<collectionName>           - Dead letter queue (list)
-//	cdc:processed:<table>:<type>:<ts> - Idempotency key (TTL: 24h)
+//	cdc:processed:<eventID>            - Idempotency key (TTL: 24h)
+//
+// The event ID is deterministic, derived from the MongoDB change event
+// (resume token, or clusterTime + documentKey as fallback), so replays of the
+// same change always map to the same key.
 //
 // Usage:
 //

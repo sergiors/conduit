@@ -505,7 +505,7 @@ MongoDB Change Stream
    - `delete` → `REMOVE` with optional `oldImage`
    - `drop` / `invalidate` → cancels the watcher and stops gracefully
 4. **The manager's handler** receives the `StreamRecord`.
-5. **Idempotency**: the manager builds an event ID `{collection}:{type}:{nanoseconds}` and checks `cdc:processed:{id}` in Redis. If present, the event is skipped.
+5. **Idempotency**: the manager uses the event ID derived by the watcher from change-stream data — the resume token (`_id._data`), with `clusterTime` + `documentKey` as fallback — and checks `cdc:processed:{id}` in Redis. If present, the event is skipped.
 6. **Dispatch**: the dispatcher fans the record out to all sinks registered for that collection. Each sink may filter by event type and by image criteria before sending.
 7. **Success path**: if all sinks succeed, the manager marks the event as processed with a 24-hour TTL and the watcher saves the change stream resume token to Redis.
 8. **Failure path**: if any sink fails, the manager marshals the record to JSON and enqueues a `RetryEvent` into the Redis sorted set `cdc:retry:{collection}` with `retryCount = 0` and `nextRetryAt = now + 1s`.
@@ -667,6 +667,7 @@ The following invariants are enforced by the code:
 - **Resume tokens are isolated per collection**. Key format: `cdc:resume:{collectionName}`.
 - **Resume tokens advance only after successful processing**. Failures route events to retry; the change stream cursor still advances, but the saved token reflects the last successfully handled event.
 - **Idempotency is required for all event processing**. Duplicate event IDs within the 24-hour TTL are skipped.
+- **Event IDs are deterministic and derived exclusively from change-stream data**. The primary source is the resume token (`_id._data`); `clusterTime` + `documentKey` serve as fallback. Application-generated timestamps (e.g. `time.Now()`) are never part of the ID, so the same MongoDB change produces the same ID across process restarts.
 - **Event ordering is not guaranteed**. Downstream consumers must be eventually consistent.
 - **Retry uses exponential backoff capped at 5 minutes** with a maximum of 5 attempts.
 - **Events exhausted from retry go to the DLQ**. Key format: `cdc:dlq:{collectionName}`.

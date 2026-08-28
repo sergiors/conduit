@@ -2,8 +2,10 @@ package watcher
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -11,6 +13,7 @@ import (
 	"github.com/sergiors/conduit/internal/redis"
 	"github.com/sergiors/conduit/internal/streams"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -232,6 +235,7 @@ func (w *Watcher) parseChange(change bson.M) (streams.StreamRecord, error) {
 	record := streams.StreamRecord{
 		TableName: w.collectionName,
 		Timestamp: time.Now(),
+		EventID:   w.eventID(change),
 	}
 
 	switch opType {
@@ -303,4 +307,44 @@ func (w *Watcher) IsRunning() bool {
 // OldImage returns the oldImage configuration
 func (w *Watcher) OldImage() bool {
 	return w.oldImage
+}
+
+// eventID derives a stable identifier for a change event, used as the
+// idempotency key for delivery. It is derived exclusively from the MongoDB
+// change event itself — never from wall-clock time — so the same change always
+// yields the same ID, including after a process restart replays the event.
+//
+// The MongoDB resume token (change event `_id._data`) is the primary source:
+// it is a hex string that uniquely identifies the change (it encodes
+// clusterTime, operation type and document key) and is identical when the
+// event is re-read from the oplog. If the token is missing or malformed,
+// clusterTime plus documentKey are used as a fallback, still sourced purely
+// from change-stream data.
+//
+// Returns "" only when no change-stream identity data is present at all;
+// the caller treats an empty ID as undeliverable for dedup purposes.
+func (w *Watcher) eventID(change bson.M) string {
+	// Preferred: the resume token's _data string.
+	if idDoc, ok := change["_id"].(bson.M); ok {
+		if data, ok := idDoc["_data"].(string); ok && data != "" {
+			return fmt.Sprintf("%s:%s", w.collectionName, data)
+		}
+	}
+
+	// Fallback: clusterTime (timestamp + increment) and documentKey.
+	// Both are part of the change event and stable across replays.
+	parts := make([]string, 0, 3)
+	if ct, ok := change["clusterTime"].(primitive.Timestamp); ok {
+		parts = append(parts, fmt.Sprintf("%d:%d", ct.T, ct.I))
+	}
+	if dk, ok := change["documentKey"].(bson.M); ok {
+		if keyJSON, err := json.Marshal(dk); err == nil {
+			parts = append(parts, string(keyJSON))
+		}
+	}
+	if len(parts) > 0 {
+		return fmt.Sprintf("%s:%s", w.collectionName, strings.Join(parts, ":"))
+	}
+
+	return ""
 }

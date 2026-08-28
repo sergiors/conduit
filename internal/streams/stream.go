@@ -22,6 +22,12 @@ type StreamRecord struct {
 	NewImage   interface{} `json:"newImage,omitempty"`
 	OldImage   interface{} `json:"oldImage,omitempty"`
 	Timestamp  time.Time   `json:"timestamp"`
+
+	// EventID is a stable identifier for the underlying MongoDB change event,
+	// derived exclusively from change-stream data (resume token, with
+	// clusterTime and documentKey as fallback). It is deterministic across
+	// process restarts and is used as the idempotency key for delivery.
+	EventID string `json:"eventId,omitempty"`
 }
 
 // ParseStreamRecord parses raw JSON data into a StreamRecord
