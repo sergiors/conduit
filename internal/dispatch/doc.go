@@ -12,7 +12,7 @@
 // Usage:
 //
 //	d := dispatch.NewDispatcher()
-//	transport := dispatch.BuildTransport(ctx, "collection", sink.Type, sink.Config)
+//	transport := dispatch.BuildTransport(ctx, "collection", sink.Type, sink.Spec)
 //	d.Register("collection", dispatch.NewRuntimeSink(sink, transport))
 //
 //	// Route a stream record to all registered sinks

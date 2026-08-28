@@ -8,17 +8,17 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func rawConfig(endpoint string) map[string]interface{} {
+func rawSpec(endpoint string) map[string]interface{} {
 	return map[string]interface{}{"endpoint": endpoint}
 }
 
 func TestReconcileSinks(t *testing.T) {
 	t.Run("no changes when sinks are identical", func(t *testing.T) {
 		current := []collections.Sink{
-			{ID: "s1", Type: collections.SinkTypeHTTP, Config: rawConfig("https://webhook.example.com")},
+			{ID: "s1", Type: collections.SinkTypeHTTP, Spec: rawSpec("https://webhook.example.com")},
 		}
 		desired := []collections.Sink{
-			{ID: "s1", Type: collections.SinkTypeHTTP, Config: rawConfig("https://webhook.example.com")},
+			{ID: "s1", Type: collections.SinkTypeHTTP, Spec: rawSpec("https://webhook.example.com")},
 		}
 
 		rec := ReconcileSinks(current, desired)
@@ -29,7 +29,7 @@ func TestReconcileSinks(t *testing.T) {
 	t.Run("add new sink", func(t *testing.T) {
 		current := []collections.Sink{}
 		desired := []collections.Sink{
-			{ID: "s1", Type: collections.SinkTypeHTTP, Config: rawConfig("https://new.example.com")},
+			{ID: "s1", Type: collections.SinkTypeHTTP, Spec: rawSpec("https://new.example.com")},
 		}
 
 		rec := ReconcileSinks(current, desired)
@@ -41,7 +41,7 @@ func TestReconcileSinks(t *testing.T) {
 
 	t.Run("remove sink", func(t *testing.T) {
 		current := []collections.Sink{
-			{ID: "s1", Type: collections.SinkTypeHTTP, Config: rawConfig("https://remove.example.com")},
+			{ID: "s1", Type: collections.SinkTypeHTTP, Spec: rawSpec("https://remove.example.com")},
 		}
 		desired := []collections.Sink{}
 
@@ -54,10 +54,10 @@ func TestReconcileSinks(t *testing.T) {
 
 	t.Run("configuration changes are ignored", func(t *testing.T) {
 		current := []collections.Sink{
-			{ID: "s1", Type: collections.SinkTypeHTTP, Config: rawConfig("https://old.example.com"), EventTypes: []string{"INSERT"}},
+			{ID: "s1", Type: collections.SinkTypeHTTP, Spec: rawSpec("https://old.example.com"), EventTypes: []string{"INSERT"}},
 		}
 		desired := []collections.Sink{
-			{ID: "s1", Type: collections.SinkTypeHTTP, Config: rawConfig("https://new.example.com"), EventTypes: []string{"INSERT", "MODIFY"}},
+			{ID: "s1", Type: collections.SinkTypeHTTP, Spec: rawSpec("https://new.example.com"), EventTypes: []string{"INSERT", "MODIFY"}},
 		}
 
 		rec := ReconcileSinks(current, desired)
@@ -67,12 +67,12 @@ func TestReconcileSinks(t *testing.T) {
 
 	t.Run("mixed add and remove", func(t *testing.T) {
 		current := []collections.Sink{
-			{ID: "s1", Type: collections.SinkTypeHTTP, Config: rawConfig("https://keep.example.com")},
-			{ID: "s2", Type: collections.SinkTypeHTTP, Config: rawConfig("https://remove.example.com")},
+			{ID: "s1", Type: collections.SinkTypeHTTP, Spec: rawSpec("https://keep.example.com")},
+			{ID: "s2", Type: collections.SinkTypeHTTP, Spec: rawSpec("https://remove.example.com")},
 		}
 		desired := []collections.Sink{
-			{ID: "s1", Type: collections.SinkTypeHTTP, Config: rawConfig("https://keep.example.com")},
-			{ID: "s3", Type: collections.SinkTypeHTTP, Config: rawConfig("https://add.example.com")},
+			{ID: "s1", Type: collections.SinkTypeHTTP, Spec: rawSpec("https://keep.example.com")},
+			{ID: "s3", Type: collections.SinkTypeHTTP, Spec: rawSpec("https://add.example.com")},
 		}
 
 		rec := ReconcileSinks(current, desired)
@@ -93,8 +93,8 @@ func TestReconcileSinks(t *testing.T) {
 
 	t.Run("remove all sinks", func(t *testing.T) {
 		current := []collections.Sink{
-			{ID: "s1", Type: collections.SinkTypeHTTP, Config: rawConfig("https://a.example.com")},
-			{ID: "s2", Type: collections.SinkTypeHTTP, Config: rawConfig("https://b.example.com")},
+			{ID: "s1", Type: collections.SinkTypeHTTP, Spec: rawSpec("https://a.example.com")},
+			{ID: "s2", Type: collections.SinkTypeHTTP, Spec: rawSpec("https://b.example.com")},
 		}
 		desired := []collections.Sink{}
 

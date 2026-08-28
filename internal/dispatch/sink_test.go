@@ -86,9 +86,9 @@ func TestRuntimeSinkFilterCriteria(t *testing.T) {
 
 func TestRuntimeSinkKey(t *testing.T) {
 	sink := NewRuntimeSink(collections.Sink{
-		ID:     "507f1f77bcf86cd799439011",
-		Type:   collections.SinkTypeHTTP,
-		Config: map[string]interface{}{"endpoint": "https://webhook.example.com"},
+		ID:   "507f1f77bcf86cd799439011",
+		Type: collections.SinkTypeHTTP,
+		Spec: map[string]interface{}{"endpoint": "https://webhook.example.com"},
 	}, &MockTransport{})
 
 	assert.Equal(t, "507f1f77bcf86cd799439011", sink.Key())

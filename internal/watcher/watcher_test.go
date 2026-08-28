@@ -145,9 +145,9 @@ func TestManagerCreation(t *testing.T) {
 func TestSinkIdentity(t *testing.T) {
 	t.Run("sink identity is the persisted ID", func(t *testing.T) {
 		sink := collections.Sink{
-			ID:     "507f1f77bcf86cd799439011",
-			Type:   collections.SinkTypeHTTP,
-			Config: map[string]interface{}{"endpoint": "https://webhook.example.com"},
+			ID:   "507f1f77bcf86cd799439011",
+			Type: collections.SinkTypeHTTP,
+			Spec: map[string]interface{}{"endpoint": "https://webhook.example.com"},
 		}
 		assert.Equal(t, "507f1f77bcf86cd799439011", sink.Identity())
 	})

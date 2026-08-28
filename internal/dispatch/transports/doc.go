@@ -6,7 +6,7 @@
 //	dispatch.RegisterTransport(collections.SinkTypeHTTP, builderFunc)
 //
 // Each transport owns its own type-specific Spec struct and decodes the opaque
-// config payload from the shared Sink model itself. The runtime transport
+// spec payload from the shared Sink model itself. The runtime transport
 // embeds its Spec and only adds runtime state (clients, connections, caches).
 // Filtering, event-type selection and sink identity are handled by
 // dispatch.RuntimeSink, not by the transport implementation.
@@ -22,8 +22,8 @@ package transports
 
 import "go.mongodb.org/mongo-driver/bson"
 
-// decodeConfig decodes an opaque config map into a typed struct.
-func decodeConfig(src map[string]interface{}, dst interface{}) error {
+// decodeSpec decodes an opaque spec map into a typed struct.
+func decodeSpec(src map[string]interface{}, dst interface{}) error {
 	data, err := bson.Marshal(src)
 	if err != nil {
 		return err

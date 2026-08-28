@@ -19,8 +19,6 @@ type EventBridgeSpec struct {
 // EventBridgeTransport delivers stream records to AWS EventBridge.
 type EventBridgeTransport struct {
 	EventBridgeSpec
-
-	// TODO: Add AWS SDK EventBridge client when integration is configured
 }
 
 // NewEventBridge builds an EventBridge transport from its spec.
@@ -43,7 +41,6 @@ func NewEventBridge(ctx context.Context, spec EventBridgeSpec) dispatch.Transpor
 }
 
 func (t *EventBridgeTransport) Send(ctx context.Context, record streams.StreamRecord) error {
-	// TODO: Use AWS SDK to call PutEvents
 	log.Printf("Would send to EventBridge %s@%s (source: %s): %+v", t.Region, t.EventBusName, t.Source, record)
 	return nil
 }
@@ -51,10 +48,10 @@ func (t *EventBridgeTransport) Send(ctx context.Context, record streams.StreamRe
 func (t *EventBridgeTransport) Close() error { return nil }
 
 func init() {
-	dispatch.RegisterTransport(collections.SinkTypeEventBridge, func(ctx context.Context, collectionName string, t collections.Type, config map[string]interface{}) dispatch.Transport {
+	dispatch.RegisterTransport(collections.SinkTypeEventBridge, func(ctx context.Context, collectionName string, t collections.Type, rawSpec map[string]interface{}) dispatch.Transport {
 		var spec EventBridgeSpec
-		if err := decodeConfig(config, &spec); err != nil {
-			log.Printf("Failed to decode EventBridge transport config for %s: %v", collectionName, err)
+		if err := decodeSpec(rawSpec, &spec); err != nil {
+			log.Printf("Failed to decode EventBridge transport spec for %s: %v", collectionName, err)
 			return nil
 		}
 

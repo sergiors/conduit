@@ -77,9 +77,7 @@ func NewWorker(cfg config.Config) (*Worker, error) {
 		redisClient,
 		dispatcher,
 		retryProcessor,
-		watcher.Config{
-			SyncInterval: 15 * time.Minute,
-		},
+		watcher.DefaultConfig(),
 	)
 
 	return &Worker{

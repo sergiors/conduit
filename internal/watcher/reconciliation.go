@@ -92,7 +92,7 @@ func (r *Reconciliation) ApplyChanges(ctx context.Context, collectionName string
 		case ChangeRemoved:
 			disp.Remove(collectionName, change.Sink.ID)
 		case ChangeAdded:
-			transport := dispatch.BuildTransport(ctx, collectionName, change.Sink.Type, change.Sink.Config)
+			transport := dispatch.BuildTransport(ctx, collectionName, change.Sink.Type, change.Sink.Spec)
 			if transport == nil {
 				continue
 			}

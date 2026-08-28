@@ -14,7 +14,7 @@ func TestSinkBSONTags(t *testing.T) {
 		ID:           "sink1",
 		CollectionID: "coll1",
 		Type:         SinkTypeHTTP,
-		Config:       map[string]interface{}{"endpoint": "http://localhost:3000/events"},
+		Spec:         map[string]interface{}{"endpoint": "http://localhost:3000/events"},
 		EventTypes:   []string{"INSERT"},
 	}
 
@@ -28,7 +28,7 @@ func TestSinkBSONTags(t *testing.T) {
 	assert.Equal(t, "sink1", decoded["_id"])
 	assert.Equal(t, "coll1", decoded["collection_id"])
 	assert.Equal(t, string(SinkTypeHTTP), decoded["type"])
-	assert.Equal(t, map[string]interface{}{"endpoint": "http://localhost:3000/events"}, decoded["config"])
+	assert.Equal(t, map[string]interface{}{"endpoint": "http://localhost:3000/events"}, decoded["spec"])
 	assert.Equal(t, []interface{}{"INSERT"}, []interface{}(decoded["event_types"].(primitive.A)))
 }
 
@@ -51,14 +51,14 @@ func TestSettingsSinkCRUD(t *testing.T) {
 
 	t.Run("create sink", func(t *testing.T) {
 		sink, err := settings.CreateSink(ctx, "sink_test_table", Sink{
-			Type:   SinkTypeHTTP,
-			Config: map[string]interface{}{"endpoint": "http://localhost:3000/events"},
+			Type: SinkTypeHTTP,
+			Spec: map[string]interface{}{"endpoint": "http://localhost:3000/events"},
 		})
 		require.NoError(t, err)
 		assert.NotEmpty(t, sink.ID)
 		assert.Equal(t, table.ID, sink.CollectionID)
 		assert.Equal(t, SinkTypeHTTP, sink.Type)
-		assert.Equal(t, map[string]interface{}{"endpoint": "http://localhost:3000/events"}, sink.Config)
+		assert.Equal(t, map[string]interface{}{"endpoint": "http://localhost:3000/events"}, sink.Spec)
 	})
 
 	t.Run("get sinks", func(t *testing.T) {
@@ -86,8 +86,8 @@ func TestSettingsSinkCRUD(t *testing.T) {
 
 	t.Run("cascade delete sinks on collection delete", func(t *testing.T) {
 		_, err := settings.CreateSink(ctx, "sink_test_table", Sink{
-			Type:   SinkTypeHTTP,
-			Config: map[string]interface{}{"endpoint": "http://localhost:3000/events"},
+			Type: SinkTypeHTTP,
+			Spec: map[string]interface{}{"endpoint": "http://localhost:3000/events"},
 		})
 		require.NoError(t, err)
 

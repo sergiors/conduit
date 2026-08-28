@@ -122,7 +122,7 @@ Configuration is applied at runtime through the REST API. Workers detect changes
 
 ## Supported Sink Types
 
-Each sink type owns its own configuration, which lives inside a `config` object in the sink payload. The shared sink model only carries common metadata (`type`, `event_types`, `filter_criteria`).
+Each sink type owns its own configuration, which lives in a `spec` object in the sink payload. The shared sink model only carries common metadata (`type`, `event_types`, `filter_criteria`).
 
 ### HTTP
 
@@ -131,7 +131,7 @@ Sends `StreamRecord` JSON documents to a webhook endpoint via `POST`. Supports a
 ```json
 {
   "type": "http",
-  "config": {
+  "spec": {
     "endpoint": "https://example.com/webhook",
     "bearer_token": "secret"
   }
@@ -145,7 +145,7 @@ Registered sink type with a skeleton implementation. The AWS SDK integration is 
 ```json
 {
   "type": "eventbridge",
-  "config": {
+  "spec": {
     "region": "us-east-1",
     "event_bus_name": "default",
     "source": "conduit"
@@ -160,7 +160,7 @@ Registered sink type with a skeleton implementation. The Meilisearch client inte
 ```json
 {
   "type": "meilisearch",
-  "config": {
+  "spec": {
     "host": "https://search.example.com",
     "api_key": "secret",
     "index_name": "users"

@@ -19,8 +19,6 @@ type MeilisearchSpec struct {
 // MeilisearchTransport delivers stream records to Meilisearch for full-text indexing.
 type MeilisearchTransport struct {
 	MeilisearchSpec
-
-	// TODO: Add Meilisearch client when integration is configured
 }
 
 // NewMeilisearch builds a Meilisearch transport from its spec.
@@ -36,11 +34,6 @@ func NewMeilisearch(ctx context.Context, spec MeilisearchSpec) dispatch.Transpor
 }
 
 func (t *MeilisearchTransport) Send(ctx context.Context, record streams.StreamRecord) error {
-	// TODO: Use Meilisearch client
-	// INSERT  -> addDocument
-	// MODIFY  -> updateDocument
-	// REMOVE  -> deleteDocument
-
 	log.Printf("Would send to Meilisearch %s (index: %s): %+v", t.Host, t.IndexName, record)
 	return nil
 }
@@ -48,10 +41,10 @@ func (t *MeilisearchTransport) Send(ctx context.Context, record streams.StreamRe
 func (t *MeilisearchTransport) Close() error { return nil }
 
 func init() {
-	dispatch.RegisterTransport(collections.SinkTypeMeilisearch, func(ctx context.Context, collectionName string, t collections.Type, config map[string]interface{}) dispatch.Transport {
+	dispatch.RegisterTransport(collections.SinkTypeMeilisearch, func(ctx context.Context, collectionName string, t collections.Type, rawSpec map[string]interface{}) dispatch.Transport {
 		var spec MeilisearchSpec
-		if err := decodeConfig(config, &spec); err != nil {
-			log.Printf("Failed to decode Meilisearch transport config for %s: %v", collectionName, err)
+		if err := decodeSpec(rawSpec, &spec); err != nil {
+			log.Printf("Failed to decode Meilisearch transport spec for %s: %v", collectionName, err)
 			return nil
 		}
 

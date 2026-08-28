@@ -76,7 +76,7 @@ func NewManager(
 
 // Start initializes and starts all watchers
 func (m *Manager) Start(ctx context.Context) error {
-	log.Println("Watcher manager starting...")
+	log.Printf("Watcher manager starting with syncInterval=%s", m.syncInterval)
 
 	// Initial load of stream-enabled collections
 	collections, err := m.collectionSettings.ListStreamEnabled(ctx)
@@ -480,7 +480,7 @@ func (m *Manager) registerSinks(ctx context.Context, collectionName string, sink
 	}
 
 	for _, sink := range sinks {
-		transport := dispatch.BuildTransport(ctx, collectionName, sink.Type, sink.Config)
+		transport := dispatch.BuildTransport(ctx, collectionName, sink.Type, sink.Spec)
 		if transport == nil {
 			continue
 		}

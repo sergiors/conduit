@@ -19,7 +19,7 @@ type Sink struct {
 	ID             string                 `bson:"_id,omitempty" json:"id,omitempty"`
 	CollectionID   string                 `bson:"collection_id" json:"-"`
 	Type           Type                   `bson:"type" json:"type"`
-	Config         map[string]interface{} `bson:"config" json:"config"`
+	Spec           map[string]interface{} `bson:"spec" json:"spec"`
 	EventTypes     []string               `bson:"event_types,omitempty" json:"event_types"`
 	FilterCriteria FilterCriteria         `bson:"filter_criteria,omitempty" json:"filter_criteria,omitempty"`
 	CreatedAt      time.Time              `bson:"created_at" json:"created_at"`
@@ -51,8 +51,8 @@ func (s *Sink) Validate() error {
 	if s.Type == "" {
 		return NewValidationError("sink type is required")
 	}
-	if len(s.Config) == 0 {
-		return NewValidationError("config is required")
+	if len(s.Spec) == 0 {
+		return NewValidationError("spec is required")
 	}
 	if err := s.ValidateEventTypes(); err != nil {
 		return err

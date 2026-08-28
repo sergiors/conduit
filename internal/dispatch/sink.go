@@ -50,8 +50,9 @@ func (rs *RuntimeSink) Send(ctx context.Context, record streams.StreamRecord) er
 	if !rs.eventTypeAllowed(record.RecordType) {
 		return nil
 	}
-	if !collections.MatchImage(record.NewImage, rs.FilterCriteria.NewImage) ||
-		!collections.MatchImage(record.OldImage, rs.FilterCriteria.OldImage) {
+	newMatch := collections.MatchImage(record.NewImage, rs.FilterCriteria.NewImage)
+	oldMatch := collections.MatchImage(record.OldImage, rs.FilterCriteria.OldImage)
+	if !newMatch || !oldMatch {
 		return nil
 	}
 	return rs.Transport.Send(ctx, record)

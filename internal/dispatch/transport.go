@@ -26,14 +26,14 @@ type Transport interface {
 	Close() error
 }
 
-// TransportBuilder builds a transport from its persisted configuration.
-// The builder is responsible for decoding the type-specific config payload,
+// TransportBuilder builds a transport from its persisted spec.
+// The builder is responsible for decoding the type-specific spec payload,
 // validating it, and returning a ready-to-use Transport. The collection name
 // may be used for transport-specific defaults (e.g. a default Meilisearch
 // index name), but event types, filter criteria and sink identity must not be
-// handled here. If the configuration is invalid or unsupported, the builder
-// should return nil.
-type TransportBuilder func(ctx context.Context, collectionName string, t collections.Type, config map[string]interface{}) Transport
+// handled here. If the spec is invalid or unsupported, the builder should
+// return nil.
+type TransportBuilder func(ctx context.Context, collectionName string, t collections.Type, spec map[string]interface{}) Transport
 
 // transportBuilders holds registered transport builders by type.
 var transportBuilders = make(map[collections.Type]TransportBuilder)
@@ -52,14 +52,13 @@ func RegisterTransport(t collections.Type, builder TransportBuilder) {
 }
 
 // BuildTransport creates a transport using the registered builder.
-// Returns nil if the type is not registered or the builder rejects the config.
-func BuildTransport(ctx context.Context, collectionName string, t collections.Type, config map[string]interface{}) Transport {
+// Returns nil if the type is not registered or the builder rejects the spec.
+func BuildTransport(ctx context.Context, collectionName string, t collections.Type, spec map[string]interface{}) Transport {
 	builder, exists := transportBuilders[t]
 	if !exists {
-		log.Printf("Unknown transport type: %s for collection %s", t, collectionName)
 		return nil
 	}
-	return builder(ctx, collectionName, t, config)
+	return builder(ctx, collectionName, t, spec)
 }
 
 // RegisteredTransportTypes returns all registered transport types.

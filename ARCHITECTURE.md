@@ -86,7 +86,7 @@ Because `old_image` affects how the MongoDB change stream is opened, stream conf
 
 A _sink_ is a destination for CDC events. Each sink belongs to exactly one collection and can filter by event type (`INSERT`, `MODIFY`, `REMOVE`) and by content of the `new_image` / `old_image` using prefix, suffix, numeric, existence, and anything-but conditions.
 
-The shared `Sink` model carries only common metadata: `type`, an opaque `config` payload, `event_types`, and `filter_criteria`. Type-specific settings (endpoint, region, host, etc.) live inside `config` and are owned by the individual sink implementation. This keeps the shared model stable as new sink types are added.
+The shared `Sink` model carries only common metadata: `type`, an opaque `spec` payload, `event_types`, and `filter_criteria`. Type-specific settings (endpoint, region, host, etc.) live inside `spec` and are owned by the individual sink implementation. This keeps the shared model stable as new sink types are added.
 
 Sinks are persisted separately from collections in `config.sinks` so that a collection can have many sinks without bloating the collection document. The worker loads sinks when it starts or refreshes a watcher.
 
@@ -448,8 +448,8 @@ The API returns `201 Created`.
 
 ## Creating a Sink: `POST /api/collections/{name}/sinks`
 
-1. **HTTP binding**: the body is bound into a `collections.SinkConfig`.
-2. **API handler** calls `Settings.CreateSink(ctx, name, config)`.
+1. **HTTP binding**: the body is bound into a `collections.Sink`.
+2. **API handler** calls `Settings.CreateSink(ctx, name, spec)`.
 3. **Domain enforcement**:
    - The collection must exist.
    - The collection must have `stream_enabled = true`.
@@ -460,7 +460,7 @@ The API returns `201 Created`.
 5. **Notification**: the API publishes the collection name to `cdc:config-change`.
 6. **Worker reaction**:
    - The manager receives the notification and refreshes sinks for the collection.
-   - It diffs the currently registered sinks against the new desired set from `config.sinks`.
+   - It reconciles the currently registered sinks against the new desired set from `config.sinks`.
    - Added or changed sinks are built by `dispatch.BuildSink` and registered; removed sinks are closed and unregistered.
    - If the collection has no active watcher (for example because the notification arrived before stream enablement), the manager simply skips the refresh.
 
@@ -555,15 +555,15 @@ Stored in MongoDB as `config.sinks`.
 | `_id`             | ObjectID              | Sink identifier, exposed as `id`.                                       |
 | `collection_id`   | string (ObjectID hex) | Reference to `config.collections._id`. Not exposed.                     |
 | `type`            | string                | Sink type: `http`, `eventbridge`, `meilisearch`.                        |
-| `config`          | object                | Opaque, type-specific configuration. Interpreted by the sink package.  |
+| `spec`            | object                | Opaque, type-specific spec. Interpreted by the sink package.          |
 | `event_types`     | []string              | Subset of `INSERT`, `MODIFY`, `REMOVE`. Empty means all.                |
 | `filter_criteria` | object                | Per-image filters (`old_image`, `new_image`).                           |
 | `created_at`      | timestamp             | Creation time.                                                          |
 | `updated_at`      | timestamp             | Last mutation time.                                                     |
 
-### Why `config` Is Opaque
+### Why `spec` Is Opaque
 
-The shared `Sink` model deliberately stores type-specific settings as an opaque `config` object rather than a flat set of fields. Each sink implementation owns its own configuration struct and decodes `config` itself. This means adding a new sink type never requires modifying the shared schema or existing sink implementations.
+The shared `Sink` model deliberately stores type-specific settings as an opaque `spec` object rather than a flat set of fields. Each sink implementation owns its own spec struct and decodes `spec` itself. This means adding a new sink type never requires modifying the shared schema or existing sink implementations.
 
 ### Why Sinks Are Stored Separately
 
@@ -661,7 +661,7 @@ The following invariants are enforced by the code:
 - **A sink belongs to exactly one collection**. Enforced by the `collection_id` reference and by scoping sink reads/deletes to that collection.
 - **A sink can only be created if streaming is enabled** for its collection.
 - **Sink event types, when specified, must be `INSERT`, `MODIFY`, or `REMOVE`**.
-- **A sink must have a non-empty `type` and a non-empty `config` object**. Type-specific required fields are validated by the sink implementation, not the shared model.
+- **A sink must have a non-empty `type` and a non-empty `spec` object**. Type-specific required fields are validated by the sink implementation, not the shared model.
 - **A watcher exists only for stream-enabled collections**. The manager starts watchers only for collections with `stream_enabled = true`.
 - **There is at most one watcher per collection**. The manager's registry is keyed by collection name.
 - **Resume tokens are isolated per collection**. Key format: `cdc:resume:{collectionName}`.
@@ -716,13 +716,12 @@ Whenever the API mutates configuration, it publishes the affected collection nam
 
 ## Sink Refresh
 
-`refreshSinks` loads the current sink configs from `config.sinks`, diffs them against the previously registered set, and applies only the changes:
+`refreshSinks` loads the current sink specs from `config.sinks`, reconciles them against the previously registered set, and applies only the changes:
 
 - New sinks are built and registered.
-- Changed sinks are removed and re-registered.
 - Removed sinks are closed and unregistered.
 
-The diff key for a sink is derived from its `type` and opaque `config` payload. Because the shared model does not know type-specific fields, the diff treats the whole `config` object as the identity of a sink: a change to any field inside `config` is detected as an update.
+Sink identity is based on the persisted sink ID. Because sinks are immutable, a change to any field inside `spec` is naturally observed as the deletion of one sink and the creation of another.
 
 ## Resume Tokens
 
@@ -837,7 +836,7 @@ Domain package for configuration.
 
 - `collection.go`: `Collection` struct, `Settings` store, collection CRUD, physical MongoDB collection creation, key index management.
 - `stream.go`: Stream enable/disable with immutability and `changeStreamPreAndPostImages` configuration.
-- `sink.go`: `Sink` and `SinkConfig` structs (common metadata only), sink CRUD, shared validation.
+- `sink.go`: `Sink` and `Sink` structs (common metadata only), sink CRUD, shared validation.
 - `ttl.go`: TTL index creation/removal with immutability.
 - `protection.go`: Deletion protection toggle with conflict detection.
 - `document.go`: Read-only document access.
@@ -852,7 +851,7 @@ Worker's watcher lifecycle management.
 
 - `manager.go`: `Manager`, sync loop, Pub/Sub listener, start/stop/restart logic, sink refresh.
 - `watcher.go`: `Watcher`, the per-collection change stream consumer.
-- `diff.go`: Sink diffing and incremental updates.
+- `reconciliation.go`: Sink reconciliation and incremental updates.
 - `doc.go`: Package documentation.
 
 ## `internal/dispatch/`
@@ -861,9 +860,9 @@ Event routing and sink registry.
 
 - `dispatcher.go`: `Dispatcher` with concurrent-safe sink registry.
 - `sink.go`: `Sink` interface, builder registry, `BuildSink` factory.
-- `sinks/http.go`: Fully implemented HTTP webhook sink with its own `HTTPConfig`.
-- `sinks/eventbridge.go`: EventBridge skeleton with its own `EventBridgeConfig` (TODO: AWS SDK integration).
-- `sinks/meilisearch.go`: Meilisearch skeleton with its own `MeilisearchConfig` (TODO: client integration).
+- `sinks/http.go`: Fully implemented HTTP webhook sink with its own `HTTPSpec`.
+- `sinks/eventbridge.go`: EventBridge skeleton with its own `EventBridgeSpec` (TODO: AWS SDK integration).
+- `sinks/meilisearch.go`: Meilisearch skeleton with its own `MeilisearchSpec` (TODO: client integration).
 - `sinks/doc.go`: Sink package overview.
 
 ## `internal/retry/`
@@ -920,7 +919,7 @@ Adding a sink requires:
 4. Calling `dispatch.RegisterSink("type", builder)` in an `init()` function.
 5. Ensuring `cmd/worker/main.go` imports the package with a blank import (already done for the `sinks` package).
 
-Because the shared `Sink` model stores type-specific settings as an opaque `config` object, adding a new sink type never requires modifying the shared schema or existing sink implementations. The builder decodes and validates its own `config` payload.
+Because the shared `Sink` model stores type-specific settings as an opaque `spec` object, adding a new sink type never requires modifying the shared schema or existing sink implementations. The builder decodes and validates its own `spec` payload.
 
 The HTTP sink is the reference implementation. EventBridge and Meilisearch are registered skeletons waiting for SDK integration.
 

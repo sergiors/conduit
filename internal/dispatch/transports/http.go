@@ -70,10 +70,10 @@ func (t *HTTPTransport) Send(ctx context.Context, record streams.StreamRecord) e
 func (t *HTTPTransport) Close() error { return nil }
 
 func init() {
-	dispatch.RegisterTransport(collections.SinkTypeHTTP, func(ctx context.Context, collectionName string, t collections.Type, config map[string]interface{}) dispatch.Transport {
+	dispatch.RegisterTransport(collections.SinkTypeHTTP, func(ctx context.Context, collectionName string, t collections.Type, rawSpec map[string]interface{}) dispatch.Transport {
 		var spec HTTPSpec
-		if err := decodeConfig(config, &spec); err != nil {
-			log.Printf("Failed to decode HTTP transport config for %s: %v", collectionName, err)
+		if err := decodeSpec(rawSpec, &spec); err != nil {
+			log.Printf("Failed to decode HTTP transport spec for %s: %v", collectionName, err)
 			return nil
 		}
 
