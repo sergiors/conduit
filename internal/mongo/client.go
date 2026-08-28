@@ -93,11 +93,12 @@ func waitForWritablePrimary(ctx context.Context, client *mongo.Client) error {
 
 	for {
 		var hello struct {
-			IsWritablePrimary bool `bson:"isWritablePrimary"`
+			IsWritablePrimary bool    `bson:"isWritablePrimary"`
+			OK                float64 `bson:"ok"`
 		}
 		err := client.Database("admin").RunCommand(ctx, helloCmd).Decode(&hello)
 
-		if err == nil && hello.IsWritablePrimary {
+		if err == nil && hello.OK == 1 && hello.IsWritablePrimary {
 			log.Println("MongoDB node is writable PRIMARY")
 			return nil
 		}

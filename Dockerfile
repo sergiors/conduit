@@ -29,9 +29,6 @@ RUN apk add --no-cache ca-certificates tzdata
 COPY --from=builder /app/bin/api ./bin/api
 COPY --from=builder /app/bin/worker ./bin/worker
 
-# Copy env example as reference
-COPY --from=builder /app/.env.example ./
-
 EXPOSE 8080
 
 CMD ["./bin/api"]
