@@ -118,6 +118,18 @@ Configuration is applied at runtime through the REST API. Workers detect changes
 
 - `GET /health` — health check
 
+### Authentication
+
+All `/api/*` endpoints require a bearer token:
+
+```bash
+curl -H "Authorization: Bearer $API_KEY" http://localhost:8080/api/collections
+```
+
+- Send the token as `Authorization: Bearer $API_KEY` on every `/api/*` request.
+- `/health` is exempt and requires no token.
+- `API_KEY` is **required**: the API refuses to start without it.
+
 ---
 
 ## Supported Sink Types
@@ -187,6 +199,7 @@ MONGODB_URI=mongodb://localhost:27017/?replicaSet=rs0
 MONGODB_DATABASE=conduit
 REDIS_URI=redis://localhost:6379
 PORT=8080
+API_KEY=your-secret-key
 ```
 
 ### Run with Docker Compose

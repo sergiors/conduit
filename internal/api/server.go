@@ -15,6 +15,7 @@ type Dependencies struct {
 	CollectionSettings *collections.Settings
 	MongoClient        *mongo.Client
 	RedisClient        *redis.Client
+	APIKey             string
 }
 
 // Server exposes HTTP endpoints. It contains no business rules; it only binds

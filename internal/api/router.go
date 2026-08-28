@@ -8,30 +8,33 @@ func (s *Server) registerRoutes(r *gin.Engine) {
 	// Health
 	r.GET("/health", s.health)
 
+	// All /api/* routes are protected by bearer-token auth.
+	api := r.Group("/api", authMiddleware(s.deps.APIKey))
+
 	// Collection configuration
-	r.GET("/api/collections", s.listCollections)
-	r.POST("/api/collections", s.createCollection)
-	r.GET("/api/collections/:name", s.getCollection)
-	r.DELETE("/api/collections/:name", s.deleteCollection)
+	api.GET("/collections", s.listCollections)
+	api.POST("/collections", s.createCollection)
+	api.GET("/collections/:name", s.getCollection)
+	api.DELETE("/collections/:name", s.deleteCollection)
 
 	// Collection streams
-	r.POST("/api/collections/:name/stream", s.createStream)
-	r.DELETE("/api/collections/:name/stream", s.deleteStream)
+	api.POST("/collections/:name/stream", s.createStream)
+	api.DELETE("/collections/:name/stream", s.deleteStream)
 
 	// Collection TTL
-	r.POST("/api/collections/:name/ttl", s.createTTL)
-	r.DELETE("/api/collections/:name/ttl", s.deleteTTL)
+	api.POST("/collections/:name/ttl", s.createTTL)
+	api.DELETE("/collections/:name/ttl", s.deleteTTL)
 
 	// Collection deletion protection
-	r.POST("/api/collections/:name/protection", s.createProtection)
-	r.DELETE("/api/collections/:name/protection", s.deleteProtection)
+	api.POST("/collections/:name/protection", s.createProtection)
+	api.DELETE("/collections/:name/protection", s.deleteProtection)
 
 	// Collection sinks
-	r.GET("/api/collections/:name/sinks", s.getSinks)
-	r.POST("/api/collections/:name/sinks", s.createSink)
-	r.DELETE("/api/collections/:name/sinks/:id", s.deleteSink)
+	api.GET("/collections/:name/sinks", s.getSinks)
+	api.POST("/collections/:name/sinks", s.createSink)
+	api.DELETE("/collections/:name/sinks/:id", s.deleteSink)
 
 	// Collection documents
-	r.GET("/api/collections/:name/documents", s.listDocuments)
-	r.GET("/api/collections/:name/documents/:id", s.getDocument)
+	api.GET("/collections/:name/documents", s.listDocuments)
+	api.GET("/collections/:name/documents/:id", s.getDocument)
 }

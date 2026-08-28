@@ -48,6 +48,7 @@ func main() {
 		CollectionSettings: collectionSettings,
 		MongoClient:        mongoClient,
 		RedisClient:        redisClient,
+		APIKey:             cfg.APIKey,
 	})
 
 	log.Printf("API server starting on port %s", cfg.Port)

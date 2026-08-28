@@ -14,6 +14,7 @@ type Config struct {
 	MongoDBDatabase string
 	RedisURI        string
 	Port            string
+	APIKey          string
 }
 
 // Load reads the application configuration from the environment.
@@ -23,6 +24,7 @@ func Load() Config {
 		MongoDBDatabase: requiredEnv("MONGODB_DATABASE"),
 		RedisURI:        requiredEnv("REDIS_URI"),
 		Port:            getEnv("PORT", "8080"),
+		APIKey:          requiredEnv("API_KEY"),
 	}
 }
 

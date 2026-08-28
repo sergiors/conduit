@@ -56,6 +56,7 @@ services:
       - MONGODB_DATABASE=conduit
       - REDIS_URI=redis://redis:6379
       - PORT=8080
+      - API_KEY=change-me
     depends_on:
       mongo:
         condition: service_healthy
