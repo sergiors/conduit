@@ -142,112 +142,14 @@ func TestManagerCreation(t *testing.T) {
 	})
 }
 
-func TestSinkName(t *testing.T) {
-	t.Run("http sink uses only endpoint", func(t *testing.T) {
-		sink := collections.SinkConfig{
-			Type:     "http",
-			Endpoint: "https://webhook.example.com",
+func TestSinkIdentity(t *testing.T) {
+	t.Run("sink identity is the persisted ID", func(t *testing.T) {
+		sink := collections.Sink{
+			ID:     "507f1f77bcf86cd799439011",
+			Type:   collections.SinkTypeHTTP,
+			Config: map[string]interface{}{"endpoint": "https://webhook.example.com"},
 		}
-		name := sinkName(sink)
-		assert.Equal(t, "https://webhook.example.com", name)
-	})
-
-	// TODO: Re-enable tests when EventBridge and Meilisearch sinks are enabled
-	// t.Run("eventbridge sink matches Name() format", func(t *testing.T) {
-	// 	sink := collections.SinkConfig{
-	// 		Type:        "eventbridge",
-	// 		Region:      "us-east-1",
-	// 		EventBusName: "default",
-	// 	}
-	// 	name := sinkName(sink)
-	// 	assert.Equal(t, "eventbridge:default@us-east-1", name)
-	// })
-	//
-	// t.Run("meilisearch sink matches Name() format", func(t *testing.T) {
-	// 	sink := collections.SinkConfig{
-	// 		Type:      "meilisearch",
-	// 		Endpoint:  "http://localhost:7700",
-	// 		IndexName: "users",
-	// 	}
-	// 	name := sinkName(sink)
-	// 	assert.Equal(t, "meilisearch:http://localhost:7700/users", name)
-	// })
-}
-
-func TestConfigEqual(t *testing.T) {
-	t.Run("identical configs are equal", func(t *testing.T) {
-		a := collections.SinkConfig{
-			Type:        "http",
-			Endpoint:    "https://webhook.example.com",
-			BearerToken: "token123",
-			EventTypes:  []string{"INSERT", "MODIFY"},
-		}
-		b := collections.SinkConfig{
-			Type:        "http",
-			Endpoint:    "https://webhook.example.com",
-			BearerToken: "token123",
-			EventTypes:  []string{"INSERT", "MODIFY"},
-		}
-		assert.True(t, configEqual(a, b))
-	})
-
-	t.Run("different event types order are equal", func(t *testing.T) {
-		a := collections.SinkConfig{
-			Type:       "http",
-			Endpoint:   "https://webhook.example.com",
-			EventTypes: []string{"INSERT", "MODIFY"},
-		}
-		b := collections.SinkConfig{
-			Type:       "http",
-			Endpoint:   "https://webhook.example.com",
-			EventTypes: []string{"MODIFY", "INSERT"},
-		}
-		assert.True(t, configEqual(a, b))
-	})
-
-	t.Run("different endpoints are not equal", func(t *testing.T) {
-		a := collections.SinkConfig{
-			Type:     "http",
-			Endpoint: "https://webhook.example.com",
-		}
-		b := collections.SinkConfig{
-			Type:     "http",
-			Endpoint: "https://other.example.com",
-		}
-		assert.False(t, configEqual(a, b))
-	})
-
-	t.Run("different event types are not equal", func(t *testing.T) {
-		a := collections.SinkConfig{
-			Type:       "http",
-			Endpoint:   "https://webhook.example.com",
-			EventTypes: []string{"INSERT"},
-		}
-		b := collections.SinkConfig{
-			Type:       "http",
-			Endpoint:   "https://webhook.example.com",
-			EventTypes: []string{"INSERT", "MODIFY"},
-		}
-		assert.False(t, configEqual(a, b))
-	})
-
-	t.Run("different filter criteria are not equal", func(t *testing.T) {
-		a := collections.SinkConfig{
-			Type:     "http",
-			Endpoint: "https://webhook.example.com",
-		}
-		b := collections.SinkConfig{
-			Type:     "http",
-			Endpoint: "https://webhook.example.com",
-			FilterCriteria: collections.FilterCriteria{
-				OldImage: collections.ImageFilter{
-					"status": collections.FilterCondition{
-						Prefix: ptr("active"),
-					},
-				},
-			},
-		}
-		assert.False(t, configEqual(a, b))
+		assert.Equal(t, "507f1f77bcf86cd799439011", sink.Identity())
 	})
 }
 

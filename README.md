@@ -15,7 +15,7 @@ Conduit watches MongoDB collections and forwards change events to external sinks
 
 MongoDB change streams are a solid foundation for CDC, but building a reliable pipeline around them requires handling resume tokens, retries, dead-letter queues, multiple sinks, and safe configuration updates. Conduit packages that plumbing into a small control-plane + data-plane system.
 
-It uses DynamoDB terminology—collections, items, streams, new/old images, TTL—while storing data in MongoDB. That makes it a pragmatic fit when you want DynamoDB-style CDC semantics on a MongoDB deployment.
+It is compatible with the DynamoDB programming model—collections, items, streams, new/old images, and TTL—while storing data in MongoDB. That makes it a pragmatic fit when you want DynamoDB-style CDC semantics on a MongoDB deployment.
 
 ### Why it exists
 
@@ -122,17 +122,51 @@ Configuration is applied at runtime through the REST API. Workers detect changes
 
 ## Supported Sink Types
 
+Each sink type owns its own configuration, which lives inside a `config` object in the sink payload. The shared sink model only carries common metadata (`type`, `event_types`, `filter_criteria`).
+
 ### HTTP
 
 Sends `StreamRecord` JSON documents to a webhook endpoint via `POST`. Supports a bearer token and per-sink filtering.
 
+```json
+{
+  "type": "http",
+  "config": {
+    "endpoint": "https://example.com/webhook",
+    "bearer_token": "secret"
+  }
+}
+```
+
 ### AWS EventBridge
 
-Registered sink type with a skeleton implementation. Requires `region` and `event_bus_name`. The AWS SDK integration is not yet wired in.
+Registered sink type with a skeleton implementation. The AWS SDK integration is not yet wired in.
+
+```json
+{
+  "type": "eventbridge",
+  "config": {
+    "region": "us-east-1",
+    "event_bus_name": "default",
+    "source": "conduit"
+  }
+}
+```
 
 ### Meilisearch
 
-Registered sink type with a skeleton implementation. Requires an `endpoint` and optional `index_name`. The Meilisearch client integration is not yet wired in.
+Registered sink type with a skeleton implementation. The Meilisearch client integration is not yet wired in.
+
+```json
+{
+  "type": "meilisearch",
+  "config": {
+    "host": "https://search.example.com",
+    "api_key": "secret",
+    "index_name": "users"
+  }
+}
+```
 
 New sinks can be added by implementing the `Sink` interface and registering a builder in `internal/dispatch/sinks`.
 

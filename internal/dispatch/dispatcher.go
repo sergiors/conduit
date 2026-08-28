@@ -8,31 +8,33 @@ import (
 	"github.com/sergiors/conduit/internal/streams"
 )
 
-// Dispatcher routes stream records to configured sinks.
+// Dispatcher routes stream records to the runtime sinks configured for each
+// collection. Each RuntimeSink decides whether an event should be delivered
+// before invoking its underlying Transport.
 type Dispatcher struct {
-	sinks map[string][]Sink
+	sinks map[string][]*RuntimeSink
 	mu    sync.RWMutex
 }
 
 // NewDispatcher creates a new event dispatcher.
 func NewDispatcher() *Dispatcher {
 	return &Dispatcher{
-		sinks: make(map[string][]Sink),
+		sinks: make(map[string][]*RuntimeSink),
 	}
 }
 
-// Register adds a sink for a collection.
-func (d *Dispatcher) Register(collection string, sink Sink) {
+// Register adds a runtime sink for a collection.
+func (d *Dispatcher) Register(collection string, sink *RuntimeSink) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
 	if d.sinks[collection] == nil {
-		d.sinks[collection] = make([]Sink, 0)
+		d.sinks[collection] = make([]*RuntimeSink, 0)
 	}
 	d.sinks[collection] = append(d.sinks[collection], sink)
 }
 
-// Dispatch sends a stream record to all configured sinks.
+// Dispatch sends a stream record to all runtime sinks for a collection.
 func (d *Dispatcher) Dispatch(ctx context.Context, collection string, record streams.StreamRecord) error {
 	d.mu.RLock()
 	sinks, ok := d.sinks[collection]
@@ -46,14 +48,14 @@ func (d *Dispatcher) Dispatch(ctx context.Context, collection string, record str
 	for _, sink := range sinks {
 		if err := sink.Send(ctx, record); err != nil {
 			lastErr = err
-			log.Printf("dispatch to %s failed: %v", sink.Name(), err)
+			log.Printf("dispatch to %s failed: %v", sink.Key(), err)
 		}
 	}
 
 	return lastErr
 }
 
-// Close all sinks.
+// Close closes all runtime sinks (and their transports).
 func (d *Dispatcher) Close() error {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
@@ -69,8 +71,8 @@ func (d *Dispatcher) Close() error {
 	return lastErr
 }
 
-// Remove removes a single sink by name, closing it first.
-func (d *Dispatcher) Remove(collection, name string) {
+// Remove removes a single runtime sink by its stable key, closing it first.
+func (d *Dispatcher) Remove(collection, key string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -80,7 +82,7 @@ func (d *Dispatcher) Remove(collection, name string) {
 	}
 
 	for i, sink := range sinks {
-		if sink.Name() == name {
+		if sink.Key() == key {
 			sink.Close()
 			d.sinks[collection] = append(sinks[:i], sinks[i+1:]...)
 			if len(d.sinks[collection]) == 0 {
@@ -91,7 +93,8 @@ func (d *Dispatcher) Remove(collection, name string) {
 	}
 }
 
-// Clear removes all sinks for a collection (used when config changes).
+// Clear removes and closes all runtime sinks for a collection (used when
+// config changes).
 func (d *Dispatcher) Clear(collection string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()

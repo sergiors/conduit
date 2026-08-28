@@ -3,7 +3,6 @@
 // This package manages collection configurations stored in MongoDB:
 //   - Collection: Represents a MongoDB collection with CDC settings
 //   - Sink: A sink configuration stored in its own collection
-//   - SinkConfig: Configures where events are sent
 //   - Settings: CRUD operations for collection configurations
 //
 // Key Features:

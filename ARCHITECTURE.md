@@ -86,6 +86,8 @@ Because `old_image` affects how the MongoDB change stream is opened, stream conf
 
 A _sink_ is a destination for CDC events. Each sink belongs to exactly one collection and can filter by event type (`INSERT`, `MODIFY`, `REMOVE`) and by content of the `new_image` / `old_image` using prefix, suffix, numeric, existence, and anything-but conditions.
 
+The shared `Sink` model carries only common metadata: `type`, an opaque `config` payload, `event_types`, and `filter_criteria`. Type-specific settings (endpoint, region, host, etc.) live inside `config` and are owned by the individual sink implementation. This keeps the shared model stable as new sink types are added.
+
 Sinks are persisted separately from collections in `config.sinks` so that a collection can have many sinks without bloating the collection document. The worker loads sinks when it starts or refreshes a watcher.
 
 ## Dispatcher
@@ -451,8 +453,9 @@ The API returns `201 Created`.
 3. **Domain enforcement**:
    - The collection must exist.
    - The collection must have `stream_enabled = true`.
-   - `Endpoint` must be non-empty.
+   - `Type` must be non-empty and `Config` must be present.
    - `EventTypes`, if provided, must be a subset of `{INSERT, MODIFY, REMOVE}`.
+   - Type-specific validation is deferred to the sink implementation, not the shared `collections` package.
 4. **Persistence**: the sink is inserted into `config.sinks` with a reference to the collection's `_id` (`collection_id`). The generated sink `_id` is returned as `id`.
 5. **Notification**: the API publishes the collection name to `cdc:config-change`.
 6. **Worker reaction**:
@@ -552,16 +555,15 @@ Stored in MongoDB as `config.sinks`.
 | `_id`             | ObjectID              | Sink identifier, exposed as `id`.                                       |
 | `collection_id`   | string (ObjectID hex) | Reference to `config.collections._id`. Not exposed.                     |
 | `type`            | string                | Sink type: `http`, `eventbridge`, `meilisearch`.                        |
-| `endpoint`        | string                | URL, EventBridge event-bus name, or Meilisearch host depending on type. |
-| `bearer_token`    | string                | Auth token or API key.                                                  |
+| `config`          | object                | Opaque, type-specific configuration. Interpreted by the sink package.  |
 | `event_types`     | []string              | Subset of `INSERT`, `MODIFY`, `REMOVE`. Empty means all.                |
 | `filter_criteria` | object                | Per-image filters (`old_image`, `new_image`).                           |
-| `region`          | string                | AWS region for EventBridge.                                             |
-| `event_bus_name`  | string                | EventBridge bus name.                                                   |
-| `source`          | string                | EventBridge source, default `conduit-mongodb`.                          |
-| `index_name`      | string                | Meilisearch index, default `collection_name`.                           |
 | `created_at`      | timestamp             | Creation time.                                                          |
 | `updated_at`      | timestamp             | Last mutation time.                                                     |
+
+### Why `config` Is Opaque
+
+The shared `Sink` model deliberately stores type-specific settings as an opaque `config` object rather than a flat set of fields. Each sink implementation owns its own configuration struct and decodes `config` itself. This means adding a new sink type never requires modifying the shared schema or existing sink implementations.
 
 ### Why Sinks Are Stored Separately
 
@@ -659,7 +661,7 @@ The following invariants are enforced by the code:
 - **A sink belongs to exactly one collection**. Enforced by the `collection_id` reference and by scoping sink reads/deletes to that collection.
 - **A sink can only be created if streaming is enabled** for its collection.
 - **Sink event types, when specified, must be `INSERT`, `MODIFY`, or `REMOVE`**.
-- **A sink endpoint is required** for every sink type.
+- **A sink must have a non-empty `type` and a non-empty `config` object**. Type-specific required fields are validated by the sink implementation, not the shared model.
 - **A watcher exists only for stream-enabled collections**. The manager starts watchers only for collections with `stream_enabled = true`.
 - **There is at most one watcher per collection**. The manager's registry is keyed by collection name.
 - **Resume tokens are isolated per collection**. Key format: `cdc:resume:{collectionName}`.
@@ -720,11 +722,7 @@ Whenever the API mutates configuration, it publishes the affected collection nam
 - Changed sinks are removed and re-registered.
 - Removed sinks are closed and unregistered.
 
-The diff key for a sink is type-specific:
-
-- HTTP: the endpoint URL.
-- EventBridge: `eventbridge:{eventBusName}@{region}`.
-- Meilisearch: `meilisearch:{host}/{indexName}`.
+The diff key for a sink is derived from its `type` and opaque `config` payload. Because the shared model does not know type-specific fields, the diff treats the whole `config` object as the identity of a sink: a change to any field inside `config` is detected as an update.
 
 ## Resume Tokens
 
@@ -839,7 +837,7 @@ Domain package for configuration.
 
 - `collection.go`: `Collection` struct, `Settings` store, collection CRUD, physical MongoDB collection creation, key index management.
 - `stream.go`: Stream enable/disable with immutability and `changeStreamPreAndPostImages` configuration.
-- `sink.go`: `Sink` and `SinkConfig` structs, sink CRUD, validation.
+- `sink.go`: `Sink` and `SinkConfig` structs (common metadata only), sink CRUD, shared validation.
 - `ttl.go`: TTL index creation/removal with immutability.
 - `protection.go`: Deletion protection toggle with conflict detection.
 - `document.go`: Read-only document access.
@@ -863,9 +861,9 @@ Event routing and sink registry.
 
 - `dispatcher.go`: `Dispatcher` with concurrent-safe sink registry.
 - `sink.go`: `Sink` interface, builder registry, `BuildSink` factory.
-- `sinks/http.go`: Fully implemented HTTP webhook sink.
-- `sinks/eventbridge.go`: EventBridge skeleton (TODO: AWS SDK integration).
-- `sinks/meilisearch.go`: Meilisearch skeleton (TODO: client integration).
+- `sinks/http.go`: Fully implemented HTTP webhook sink with its own `HTTPConfig`.
+- `sinks/eventbridge.go`: EventBridge skeleton with its own `EventBridgeConfig` (TODO: AWS SDK integration).
+- `sinks/meilisearch.go`: Meilisearch skeleton with its own `MeilisearchConfig` (TODO: client integration).
 - `sinks/doc.go`: Sink package overview.
 
 ## `internal/retry/`
@@ -902,13 +900,6 @@ Environment-based configuration loading.
 
 - `config.go`: `Config` struct and `Load()`.
 
-## `examples/`
-
-Operator-facing shell scripts.
-
-- `create_table.sh`: Example collection creation.
-- `monitor_queues.sh`: Redis queue monitoring helper.
-
 ## `ui/`
 
 Web UI built separately and served by the `ui` Docker Compose service.
@@ -924,9 +915,12 @@ The architecture already contains clear extension points:
 Adding a sink requires:
 
 1. Creating a new file in `internal/dispatch/sinks/`.
-2. Implementing the `dispatch.Sink` interface.
-3. Calling `dispatch.RegisterSink("type", builder)` in an `init()` function.
-4. Ensuring `cmd/worker/main.go` imports the package with a blank import (already done for the `sinks` package).
+2. Defining a type-specific `Config` struct for the sink's own settings.
+3. Implementing the `dispatch.Sink` interface.
+4. Calling `dispatch.RegisterSink("type", builder)` in an `init()` function.
+5. Ensuring `cmd/worker/main.go` imports the package with a blank import (already done for the `sinks` package).
+
+Because the shared `Sink` model stores type-specific settings as an opaque `config` object, adding a new sink type never requires modifying the shared schema or existing sink implementations. The builder decodes and validates its own `config` payload.
 
 The HTTP sink is the reference implementation. EventBridge and Meilisearch are registered skeletons waiting for SDK integration.
 

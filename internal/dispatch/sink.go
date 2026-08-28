@@ -2,65 +2,72 @@ package dispatch
 
 import (
 	"context"
-	"log"
+	"strings"
 
 	"github.com/sergiors/conduit/internal/collections"
 	"github.com/sergiors/conduit/internal/streams"
 )
 
-// Sink registry pattern:
-// Each sink type (http, eventbridge, meilisearch) registers itself
-// via init() in its package. The application's main.go must import the
-// sinks package with a blank import to trigger initialization:
-//
-//	import _ "github.com/sergiors/conduit/internal/dispatch/sinks"
-//
-// This ensures all init() functions run before main(), registering all
-// sink builders so BuildSink() can find them.
+// RuntimeSink is the active, in-memory representation of a persisted sink.
+// It glues the persisted configuration to a concrete Transport and is
+// responsible for common sink behavior: event type filtering, filter criteria
+// evaluation, and stable identity. Transports receive only events that
+// should actually be delivered.
+type RuntimeSink struct {
+	collections.Sink
 
-// Sink defines the interface for event sinks.
-type Sink interface {
-	Send(ctx context.Context, record streams.StreamRecord) error
-	Close() error
-	Name() string
+	Transport Transport
+
+	eventTypes map[string]bool
 }
 
-// SinkBuilder builds a sink from config.
-// Returns nil if required fields are missing.
-type SinkBuilder func(ctx context.Context, collectionName string, sink collections.SinkConfig) Sink
-
-// builders holds registered sink builders by type
-var builders = make(map[string]SinkBuilder)
-
-// RegisterSink registers a builder function for a sink type.
-// Must be called during init() of the sink package.
-func RegisterSink(sinkType string, builder SinkBuilder) {
-	if builder == nil {
-		log.Printf("Attempted to register nil builder for type: %s", sinkType)
-		return
+// NewRuntimeSink creates a runtime sink from its persisted configuration and
+// an instantiated transport.
+func NewRuntimeSink(sink collections.Sink, transport Transport) *RuntimeSink {
+	rs := &RuntimeSink{
+		Sink:      sink,
+		Transport: transport,
 	}
-	if _, exists := builders[sinkType]; exists {
-		log.Printf("Sink builder for type %s already registered, overwriting", sinkType)
+	if len(sink.EventTypes) > 0 {
+		rs.eventTypes = make(map[string]bool, len(sink.EventTypes))
+		for _, et := range sink.EventTypes {
+			rs.eventTypes[strings.ToUpper(et)] = true
+		}
 	}
-	builders[sinkType] = builder
+	return rs
 }
 
-// BuildSink creates a sink using the registered builder.
-// Returns nil if the type is not registered or build fails.
-func BuildSink(ctx context.Context, collectionName string, sink collections.SinkConfig) Sink {
-	builder, exists := builders[sink.Type]
-	if !exists {
-		log.Printf("Unknown sink type: %s for collection %s", sink.Type, collectionName)
+// Key returns a stable identifier derived from the persisted sink. It is the
+// same value used when diffing sink configurations, so the dispatcher can be
+// addressed by sink identity without involving the transport.
+func (rs *RuntimeSink) Key() string {
+	return rs.Sink.Identity()
+}
+
+// Send evaluates the sink's routing rules and, if the event should be
+// delivered, delegates to the transport.
+func (rs *RuntimeSink) Send(ctx context.Context, record streams.StreamRecord) error {
+	if !rs.eventTypeAllowed(record.RecordType) {
 		return nil
 	}
-	return builder(ctx, collectionName, sink)
+	if !collections.MatchImage(record.NewImage, rs.FilterCriteria.NewImage) ||
+		!collections.MatchImage(record.OldImage, rs.FilterCriteria.OldImage) {
+		return nil
+	}
+	return rs.Transport.Send(ctx, record)
 }
 
-// RegisteredSinkTypes returns all registered sink types.
-func RegisteredSinkTypes() []string {
-	types := make([]string, 0, len(builders))
-	for t := range builders {
-		types = append(types, t)
+// Close closes the underlying transport.
+func (rs *RuntimeSink) Close() error {
+	if rs.Transport == nil {
+		return nil
 	}
-	return types
+	return rs.Transport.Close()
+}
+
+func (rs *RuntimeSink) eventTypeAllowed(rt streams.RecordType) bool {
+	if len(rs.eventTypes) == 0 {
+		return true
+	}
+	return rs.eventTypes[string(rt)]
 }

@@ -8,7 +8,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 )
 
-// FilterCondition is a single filter condition for image fields
+// FilterCondition is a single filter condition for image fields.
 type FilterCondition struct {
 	Prefix      *string `bson:"prefix,omitempty"       json:"prefix,omitempty"`
 	Suffix      *string `bson:"suffix,omitempty"       json:"suffix,omitempty"`
@@ -17,10 +17,10 @@ type FilterCondition struct {
 	AnythingBut any     `bson:"anything-but,omitempty" json:"anything-but,omitempty"`
 }
 
-// ImageFilter maps field names to a filter condition (AND across fields, AND within condition)
+// ImageFilter maps field names to a filter condition (AND across fields, AND within condition).
 type ImageFilter map[string]FilterCondition
 
-// FilterCriteria specifies optional filters for old_image and new_image
+// FilterCriteria specifies optional filters for old_image and new_image.
 type FilterCriteria struct {
 	OldImage ImageFilter `bson:"old_image,omitempty" json:"old_image,omitempty"`
 	NewImage ImageFilter `bson:"new_image,omitempty" json:"new_image,omitempty"`
@@ -88,7 +88,7 @@ func matchCondition(val interface{}, exists bool, cond FilterCondition) bool {
 	return true
 }
 
-// noValueConditionsOnly returns true when no value-dependent conditions are set
+// noValueConditionsOnly returns true when no value-dependent conditions are set.
 func (cond FilterCondition) noValueConditionsOnly() bool {
 	return cond.Prefix == nil && cond.Suffix == nil && cond.Numeric == nil && cond.AnythingBut == nil
 }

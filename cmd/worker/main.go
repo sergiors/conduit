@@ -11,7 +11,7 @@ import (
 	"github.com/sergiors/conduit/internal/collections"
 	"github.com/sergiors/conduit/internal/config"
 	"github.com/sergiors/conduit/internal/dispatch"
-	_ "github.com/sergiors/conduit/internal/dispatch/sinks" // Register sink builders via init()
+	_ "github.com/sergiors/conduit/internal/dispatch/transports" // Register transport builders via init()
 	"github.com/sergiors/conduit/internal/mongo"
 	"github.com/sergiors/conduit/internal/redis"
 	"github.com/sergiors/conduit/internal/retry"
@@ -19,12 +19,12 @@ import (
 )
 
 type Worker struct {
-	mongoClient     *mongo.Client
-	redisClient     *redis.Client
+	mongoClient        *mongo.Client
+	redisClient        *redis.Client
 	collectionSettings *collections.Settings
-	dispatcher      *dispatch.Dispatcher
-	watcherManager  *watcher.Manager
-	retryProcessor  *retry.Processor
+	dispatcher         *dispatch.Dispatcher
+	watcherManager     *watcher.Manager
+	retryProcessor     *retry.Processor
 }
 
 func NewWorker(cfg config.Config) (*Worker, error) {
@@ -83,12 +83,12 @@ func NewWorker(cfg config.Config) (*Worker, error) {
 	)
 
 	return &Worker{
-		mongoClient:     mongoClient,
-		redisClient:     redisClient,
+		mongoClient:        mongoClient,
+		redisClient:        redisClient,
 		collectionSettings: settings,
-		dispatcher:      dispatcher,
-		watcherManager:  watcherManager,
-		retryProcessor:  retryProcessor,
+		dispatcher:         dispatcher,
+		watcherManager:     watcherManager,
+		retryProcessor:     retryProcessor,
 	}, nil
 }
 

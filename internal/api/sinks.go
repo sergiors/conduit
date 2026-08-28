@@ -24,19 +24,19 @@ func (s *Server) createSink(c *gin.Context) {
 	ctx := c.Request.Context()
 	name := c.Param("name")
 
-	var config collections.SinkConfig
-	if !bindJSON(c, &config) {
+	var sink collections.Sink
+	if !bindJSON(c, &sink) {
 		return
 	}
 
-	sink, err := s.deps.CollectionSettings.CreateSink(ctx, name, config)
+	created, err := s.deps.CollectionSettings.CreateSink(ctx, name, sink)
 	if err != nil {
 		writeError(c, err)
 		return
 	}
 
 	s.publishConfigChange(ctx, name)
-	c.JSON(http.StatusCreated, sink)
+	c.JSON(http.StatusCreated, created)
 }
 
 func (s *Server) deleteSink(c *gin.Context) {

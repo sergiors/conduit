@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sergiors/conduit/internal/collections"
 	"github.com/sergiors/conduit/internal/dispatch"
 	"github.com/sergiors/conduit/internal/redis"
 	"github.com/sergiors/conduit/internal/streams"
@@ -73,8 +74,8 @@ func TestCalculateNextRetry(t *testing.T) {
 func TestProcessRetryEvent(t *testing.T) {
 	t.Run("successful dispatch skips retry", func(t *testing.T) {
 		dispatcher := dispatch.NewDispatcher()
-		// Register a mock sink that always succeeds
-		dispatcher.Register("users", &successSink{})
+		// Register a mock transport that always succeeds wrapped in a runtime sink.
+		dispatcher.Register("users", dispatch.NewRuntimeSink(collections.Sink{}, &successTransport{}))
 
 		processor := NewProcessor(nil, dispatcher, DefaultConfig())
 
@@ -140,11 +141,10 @@ func TestRetryEventStructure(t *testing.T) {
 	})
 }
 
-// successSink is a mock sink that always succeeds
-type successSink struct{}
+// successTransport is a mock transport that always succeeds.
+type successTransport struct{}
 
-func (s *successSink) Name() string { return "success" }
-func (s *successSink) Close() error { return nil }
-func (s *successSink) Send(ctx context.Context, record streams.StreamRecord) error {
+func (s *successTransport) Close() error { return nil }
+func (s *successTransport) Send(ctx context.Context, record streams.StreamRecord) error {
 	return nil
 }

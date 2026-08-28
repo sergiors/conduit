@@ -4,24 +4,20 @@ import (
 	"context"
 	"testing"
 
+	"github.com/sergiors/conduit/internal/collections"
 	"github.com/sergiors/conduit/internal/streams"
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/bson"
 )
 
-// MockSink is a test double for Sink interface
-type MockSink struct {
-	name       string
+// MockTransport is a test double for the Transport interface.
+type MockTransport struct {
 	sent       bool
 	closed     bool
 	shouldFail bool
 }
 
-func (m *MockSink) Name() string {
-	return m.name
-}
-
-func (m *MockSink) Send(ctx context.Context, record streams.StreamRecord) error {
+func (m *MockTransport) Send(ctx context.Context, record streams.StreamRecord) error {
 	if m.shouldFail {
 		return assert.AnError
 	}
@@ -29,9 +25,13 @@ func (m *MockSink) Send(ctx context.Context, record streams.StreamRecord) error 
 	return nil
 }
 
-func (m *MockSink) Close() error {
+func (m *MockTransport) Close() error {
 	m.closed = true
 	return nil
+}
+
+func newTestSink(transport Transport) *RuntimeSink {
+	return NewRuntimeSink(collections.Sink{}, transport)
 }
 
 func TestDispatcherCreation(t *testing.T) {
@@ -44,7 +44,7 @@ func TestDispatcherCreation(t *testing.T) {
 func TestDispatcherRegistration(t *testing.T) {
 	t.Run("register single sink", func(t *testing.T) {
 		d := NewDispatcher()
-		sink := &MockSink{name: "test"}
+		sink := newTestSink(&MockTransport{})
 
 		d.Register("table1", sink)
 
@@ -55,8 +55,8 @@ func TestDispatcherRegistration(t *testing.T) {
 
 	t.Run("register multiple sinks for same table", func(t *testing.T) {
 		d := NewDispatcher()
-		sink1 := &MockSink{name: "test1"}
-		sink2 := &MockSink{name: "test2"}
+		sink1 := newTestSink(&MockTransport{})
+		sink2 := newTestSink(&MockTransport{})
 
 		d.Register("table1", sink1)
 		d.Register("table1", sink2)
@@ -68,8 +68,8 @@ func TestDispatcherRegistration(t *testing.T) {
 
 	t.Run("register sinks for different tables", func(t *testing.T) {
 		d := NewDispatcher()
-		sink1 := &MockSink{name: "test1"}
-		sink2 := &MockSink{name: "test2"}
+		sink1 := newTestSink(&MockTransport{})
+		sink2 := newTestSink(&MockTransport{})
 
 		d.Register("table1", sink1)
 		d.Register("table2", sink2)
@@ -84,8 +84,8 @@ func TestDispatcherRegistration(t *testing.T) {
 func TestDispatcherDispatch(t *testing.T) {
 	t.Run("dispatch to registered sinks", func(t *testing.T) {
 		d := NewDispatcher()
-		sink := &MockSink{name: "test"}
-		d.Register("table1", sink)
+		transport := &MockTransport{}
+		d.Register("table1", newTestSink(transport))
 
 		ctx := context.Background()
 		record := streams.StreamRecord{
@@ -96,7 +96,7 @@ func TestDispatcherDispatch(t *testing.T) {
 
 		err := d.Dispatch(ctx, "table1", record)
 		assert.NoError(t, err)
-		assert.True(t, sink.sent)
+		assert.True(t, transport.sent)
 	})
 
 	t.Run("dispatch to unregistered table does nothing", func(t *testing.T) {
@@ -113,11 +113,11 @@ func TestDispatcherDispatch(t *testing.T) {
 
 	t.Run("dispatch continues on failure", func(t *testing.T) {
 		d := NewDispatcher()
-		failDest := &MockSink{name: "fail", shouldFail: true}
-		successDest := &MockSink{name: "success"}
+		failDest := &MockTransport{shouldFail: true}
+		successDest := &MockTransport{}
 
-		d.Register("table1", failDest)
-		d.Register("table1", successDest)
+		d.Register("table1", newTestSink(failDest))
+		d.Register("table1", newTestSink(successDest))
 
 		ctx := context.Background()
 		record := streams.StreamRecord{
@@ -131,18 +131,59 @@ func TestDispatcherDispatch(t *testing.T) {
 	})
 }
 
+func TestDispatcherRemove(t *testing.T) {
+	t.Run("remove sink by key", func(t *testing.T) {
+		d := NewDispatcher()
+		sink := newTestSink(&MockTransport{})
+		d.Register("table1", sink)
+
+		d.Remove("table1", sink.Key())
+
+		d.mu.RLock()
+		defer d.mu.RUnlock()
+		assert.Empty(t, d.sinks["table1"])
+	})
+
+	t.Run("remove missing key is a no-op", func(t *testing.T) {
+		d := NewDispatcher()
+		sink := newTestSink(&MockTransport{})
+		d.Register("table1", sink)
+
+		d.Remove("table1", "missing-key")
+
+		d.mu.RLock()
+		defer d.mu.RUnlock()
+		assert.Len(t, d.sinks["table1"], 1)
+	})
+}
+
+func TestDispatcherClear(t *testing.T) {
+	t.Run("clear removes all sinks for a collection", func(t *testing.T) {
+		d := NewDispatcher()
+		transport := &MockTransport{}
+		d.Register("table1", newTestSink(transport))
+
+		d.Clear("table1")
+
+		d.mu.RLock()
+		defer d.mu.RUnlock()
+		assert.Empty(t, d.sinks["table1"])
+		assert.True(t, transport.closed)
+	})
+}
+
 func TestDispatcherClose(t *testing.T) {
 	t.Run("close all sinks", func(t *testing.T) {
 		d := NewDispatcher()
-		sink1 := &MockSink{name: "sink1"}
-		sink2 := &MockSink{name: "sink2"}
+		transport1 := &MockTransport{}
+		transport2 := &MockTransport{}
 
-		d.Register("table1", sink1)
-		d.Register("table2", sink2)
+		d.Register("table1", newTestSink(transport1))
+		d.Register("table2", newTestSink(transport2))
 
 		err := d.Close()
 		assert.NoError(t, err)
-		assert.True(t, sink1.closed)
-		assert.True(t, sink2.closed)
+		assert.True(t, transport1.closed)
+		assert.True(t, transport2.closed)
 	})
 }

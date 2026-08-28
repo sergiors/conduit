@@ -6,16 +6,16 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 func TestSinkBSONTags(t *testing.T) {
 	sink := Sink{
 		ID:           "sink1",
 		CollectionID: "coll1",
-		SinkConfig: SinkConfig{
-			Type:     "http",
-			Endpoint: "http://localhost:3000/events",
-		},
+		Type:         SinkTypeHTTP,
+		Config:       map[string]interface{}{"endpoint": "http://localhost:3000/events"},
+		EventTypes:   []string{"INSERT"},
 	}
 
 	data, err := bson.Marshal(sink)
@@ -27,8 +27,9 @@ func TestSinkBSONTags(t *testing.T) {
 
 	assert.Equal(t, "sink1", decoded["_id"])
 	assert.Equal(t, "coll1", decoded["collection_id"])
-	assert.Equal(t, "http", decoded["type"])
-	assert.Equal(t, "http://localhost:3000/events", decoded["endpoint"])
+	assert.Equal(t, string(SinkTypeHTTP), decoded["type"])
+	assert.Equal(t, map[string]interface{}{"endpoint": "http://localhost:3000/events"}, decoded["config"])
+	assert.Equal(t, []interface{}{"INSERT"}, []interface{}(decoded["event_types"].(primitive.A)))
 }
 
 func TestSettingsSinkCRUD(t *testing.T) {
@@ -49,15 +50,15 @@ func TestSettingsSinkCRUD(t *testing.T) {
 	require.NoError(t, settings.Create(ctx, table))
 
 	t.Run("create sink", func(t *testing.T) {
-		sink, err := settings.CreateSink(ctx, "sink_test_table", SinkConfig{
-			Type:     "http",
-			Endpoint: "http://localhost:3000/events",
+		sink, err := settings.CreateSink(ctx, "sink_test_table", Sink{
+			Type:   SinkTypeHTTP,
+			Config: map[string]interface{}{"endpoint": "http://localhost:3000/events"},
 		})
 		require.NoError(t, err)
 		assert.NotEmpty(t, sink.ID)
 		assert.Equal(t, table.ID, sink.CollectionID)
-		assert.Equal(t, "http", sink.Type)
-		assert.Equal(t, "http://localhost:3000/events", sink.Endpoint)
+		assert.Equal(t, SinkTypeHTTP, sink.Type)
+		assert.Equal(t, map[string]interface{}{"endpoint": "http://localhost:3000/events"}, sink.Config)
 	})
 
 	t.Run("get sinks", func(t *testing.T) {
@@ -84,9 +85,9 @@ func TestSettingsSinkCRUD(t *testing.T) {
 	})
 
 	t.Run("cascade delete sinks on collection delete", func(t *testing.T) {
-		_, err := settings.CreateSink(ctx, "sink_test_table", SinkConfig{
-			Type:     "http",
-			Endpoint: "http://localhost:3000/events",
+		_, err := settings.CreateSink(ctx, "sink_test_table", Sink{
+			Type:   SinkTypeHTTP,
+			Config: map[string]interface{}{"endpoint": "http://localhost:3000/events"},
 		})
 		require.NoError(t, err)
 

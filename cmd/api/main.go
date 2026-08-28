@@ -44,8 +44,8 @@ func main() {
 
 	server := api.New(api.Dependencies{
 		CollectionSettings: collectionSettings,
-		MongoClient:     mongoClient,
-		RedisClient:     redisClient,
+		MongoClient:        mongoClient,
+		RedisClient:        redisClient,
 	})
 
 	log.Printf("API server starting on port %s", cfg.Port)

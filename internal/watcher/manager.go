@@ -19,18 +19,18 @@ import (
 
 // Manager manages CDC watchers for all enabled collections
 type Manager struct {
-	mongoClient     *mongo.Client
-	database        string
+	mongoClient        *mongo.Client
+	database           string
 	collectionSettings *collections.Settings
-	redisClient     *redisclient.Client
-	dispatcher      Dispatcher
-	retryProcessor  *retry.Processor
-	watchers        map[string]*Watcher
-	currentSinks    map[string][]collections.SinkConfig
-	mu              sync.RWMutex
-	syncInterval    time.Duration
-	pubsub          *redis.PubSub
-	configChan      <-chan *redis.Message
+	redisClient        *redisclient.Client
+	dispatcher         Dispatcher
+	retryProcessor     *retry.Processor
+	watchers           map[string]*Watcher
+	currentSinks       map[string][]collections.Sink
+	mu                 sync.RWMutex
+	syncInterval       time.Duration
+	pubsub             *redis.PubSub
+	configChan         <-chan *redis.Message
 }
 
 // Dispatcher interface for decoupling
@@ -62,15 +62,15 @@ func NewManager(
 	cfg Config,
 ) *Manager {
 	return &Manager{
-		mongoClient:     mongoClient,
-		database:        database,
+		mongoClient:        mongoClient,
+		database:           database,
 		collectionSettings: collectionSettings,
-		redisClient:     redisClient,
-		dispatcher:      dispatcher,
-		retryProcessor:  retryProcessor,
-		watchers:        make(map[string]*Watcher),
-		currentSinks:    make(map[string][]collections.SinkConfig),
-		syncInterval:    cfg.SyncInterval,
+		redisClient:        redisClient,
+		dispatcher:         dispatcher,
+		retryProcessor:     retryProcessor,
+		watchers:           make(map[string]*Watcher),
+		currentSinks:       make(map[string][]collections.Sink),
+		syncInterval:       cfg.SyncInterval,
 	}
 }
 
@@ -150,7 +150,7 @@ func (m *Manager) startWatcher(ctx context.Context, collection collections.Colle
 	log.Printf("Starting watcher for collection: %s", collection.CollectionName)
 
 	// Register sinks for this collection
-	sinkConfigs, err := m.loadSinkConfigs(ctx, collection.CollectionName)
+	sinkConfigs, err := m.loadSinks(ctx, collection.CollectionName)
 	if err != nil {
 		log.Printf("Failed to load sinks for %s: %v", collection.CollectionName, err)
 		sinkConfigs = nil
@@ -435,14 +435,14 @@ func (m *Manager) syncWithCollections(ctx context.Context) {
 	log.Printf("Sync complete: %d active watchers", len(enabledSet))
 }
 
-// refreshSinks diffs current vs desired sinks and only updates what changed
+// refreshSinks reconciles current vs desired sinks and only applies changes.
 func (m *Manager) refreshSinks(ctx context.Context, collectionName string) error {
 	d, ok := m.dispatcher.(*dispatch.Dispatcher)
 	if !ok {
 		return nil
 	}
 
-	desired, err := m.loadSinkConfigs(ctx, collectionName)
+	desired, err := m.loadSinks(ctx, collectionName)
 	if err != nil {
 		log.Printf("Failed to load sinks for %s: %v", collectionName, err)
 		return err
@@ -452,64 +452,41 @@ func (m *Manager) refreshSinks(ctx context.Context, collectionName string) error
 	current := m.currentSinks[collectionName]
 	m.mu.RUnlock()
 
-	// If desired is empty, remove all current sinks
-	if len(desired) == 0 {
-		diff := DiffSinks(current, desired)
-		diff.LogChanges(collectionName)
-		diff.ApplyChanges(ctx, collectionName, d)
+	reconciliation := ReconcileSinks(current, desired)
+	reconciliation.LogChanges(collectionName)
+	reconciliation.ApplyChanges(ctx, collectionName, d)
 
-		m.mu.Lock()
-		delete(m.currentSinks, collectionName)
-		m.mu.Unlock()
-
-		if len(diff.Changes) > 0 {
-			log.Printf("Removed all sinks for collection %s", collectionName)
-		}
-		return nil
-	}
-
-	// Compute diff and apply changes
-	diff := DiffSinks(current, desired)
-	diff.LogChanges(collectionName)
-	diff.ApplyChanges(ctx, collectionName, d)
-
-	// Update state
 	m.mu.Lock()
 	m.currentSinks[collectionName] = desired
 	m.mu.Unlock()
 
-	if len(diff.Changes) > 0 {
-		log.Printf("Refreshed sinks for collection %s: %s", collectionName, diff.Summary())
+	if len(reconciliation.Changes) > 0 {
+		log.Printf("Refreshed sinks for collection %s: %s", collectionName, reconciliation.Summary())
 	}
 
 	return nil
 }
 
-// loadSinkConfigs loads the sink configs for a collection by name.
-func (m *Manager) loadSinkConfigs(ctx context.Context, collectionName string) ([]collections.SinkConfig, error) {
-	sinks, err := m.collectionSettings.GetSinks(ctx, collectionName)
-	if err != nil {
-		return nil, err
-	}
-	configs := make([]collections.SinkConfig, 0, len(sinks))
-	for _, sink := range sinks {
-		configs = append(configs, sink.SinkConfig)
-	}
-	return configs, nil
+// loadSinks loads the persisted sinks for a collection by name.
+func (m *Manager) loadSinks(ctx context.Context, collectionName string) ([]collections.Sink, error) {
+	return m.collectionSettings.GetSinks(ctx, collectionName)
 }
 
-// registerSinks registers event sinks for a collection
-func (m *Manager) registerSinks(ctx context.Context, collectionName string, sinks []collections.SinkConfig) error {
+// registerSinks registers event sinks for a collection.
+func (m *Manager) registerSinks(ctx context.Context, collectionName string, sinks []collections.Sink) error {
 	d, ok := m.dispatcher.(*dispatch.Dispatcher)
 	if !ok {
 		return nil
 	}
 
-	for _, dest := range sinks {
-		if created := dispatch.BuildSink(ctx, collectionName, dest); created != nil {
-			d.Register(collectionName, created)
-			log.Printf("Registered %s sink for collection %s", dest.Type, collectionName)
+	for _, sink := range sinks {
+		transport := dispatch.BuildTransport(ctx, collectionName, sink.Type, sink.Config)
+		if transport == nil {
+			continue
 		}
+		runtimeSink := dispatch.NewRuntimeSink(sink, transport)
+		d.Register(collectionName, runtimeSink)
+		log.Printf("Registered %s sink for collection %s", sink.Type, collectionName)
 	}
 	return nil
 }
@@ -540,76 +517,4 @@ type WatcherStats struct {
 	EventsProcessed int64
 	LastError       error
 	LastErrorTime   time.Time
-}
-
-// diffSinks compares current and desired sink configs, returning which to add/remove
-func diffSinks(current, desired []collections.SinkConfig) (toAdd, toRemove []collections.SinkConfig) {
-	currentByKey := make(map[string]collections.SinkConfig, len(current))
-	for _, c := range current {
-		currentByKey[sinkName(c)] = c
-	}
-
-	desiredByKey := make(map[string]collections.SinkConfig, len(desired))
-	for _, d := range desired {
-		desiredByKey[sinkName(d)] = d
-	}
-
-	// Find sinks to remove: in current but not in desired, or config changed
-	for key, cur := range currentByKey {
-		des, exists := desiredByKey[key]
-		if !exists || !configEqual(cur, des) {
-			toRemove = append(toRemove, cur)
-		}
-	}
-
-	// Find sinks to add: in desired but not in current, or config changed
-	for key, des := range desiredByKey {
-		cur, exists := currentByKey[key]
-		if !exists || !configEqual(cur, des) {
-			toAdd = append(toAdd, des)
-		}
-	}
-
-	return
-}
-
-// sinkName builds the internal name for a sink config.
-// This MUST match exactly what Sink.Name() returns for Remove() to work correctly.
-func sinkName(dest collections.SinkConfig) string {
-	switch dest.Type {
-	case "eventbridge":
-		// Matches: "eventbridge:" + eventBusName + "@" + region
-		return "eventbridge:" + dest.EventBusName + "@" + dest.Region
-	case "meilisearch":
-		// Matches: "meilisearch:" + host + "/" + indexName
-		return "meilisearch:" + dest.Endpoint + "/" + dest.IndexName
-	default:
-		// HTTP: just the endpoint
-		return dest.Endpoint
-	}
-}
-
-// configEqual compares two sink configs ignoring event type order.
-// It checks both common fields and type-specific fields.
-func configEqual(a, b collections.SinkConfig) bool {
-	if a.Type != b.Type || a.Endpoint != b.Endpoint || a.BearerToken != b.BearerToken {
-		return false
-	}
-	if a.Region != b.Region || a.EventBusName != b.EventBusName || a.Source != b.Source || a.IndexName != b.IndexName {
-		return false
-	}
-	if len(a.EventTypes) != len(b.EventTypes) {
-		return false
-	}
-	aSet := make(map[string]bool, len(a.EventTypes))
-	for _, et := range a.EventTypes {
-		aSet[et] = true
-	}
-	for _, et := range b.EventTypes {
-		if !aSet[et] {
-			return false
-		}
-	}
-	return imageFilterEqual(a.FilterCriteria.OldImage, b.FilterCriteria.OldImage) &&
-		imageFilterEqual(a.FilterCriteria.NewImage, b.FilterCriteria.NewImage)
 }
