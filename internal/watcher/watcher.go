@@ -156,6 +156,15 @@ func (w *Watcher) watchOnce(handler func(streams.StreamRecord) error) error {
 		opts.SetFullDocumentBeforeChange(options.WhenAvailable)
 	}
 
+	// if w.oldImage {
+	// 	// Use Required so the pre-image is guaranteed to be present. WhenAvailable
+	// 	// would silently omit the pre-image (and thus old_image) whenever it is
+	// 	// unavailable, e.g. if changeStreamPreAndPostImages is not enabled on the
+	// 	// collection. Delete events do carry a pre-image when that feature is on,
+	// 	// so Required does not break deletes.
+	// 	opts.SetFullDocumentBeforeChange(options.Required)
+	// }
+
 	// Set resume token if available
 	if w.resumeToken != "" {
 		var resumeToken bson.Raw

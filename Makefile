@@ -77,7 +77,6 @@ docker-up: ## Start full stack with Docker (MongoDB + Redis + API + Worker)
 	@echo "  API:      http://localhost:8080"
 	@echo "  MongoDB:  mongodb://localhost:27017"
 	@echo "  Redis:    localhost:6379"
-	@echo "  Mongo Express: http://localhost:8081 (admin/admin)"
 
 docker-down: ## Stop all services
 	@echo "Stopping all services..."

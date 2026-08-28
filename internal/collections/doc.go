@@ -12,6 +12,13 @@
 //   - Deletion protection flag
 //   - TTL attribute configuration
 //
+// Pre-image support is a permanent capability of every managed collection: the
+// physical MongoDB collection is created with changeStreamPreAndPostImages
+// enabled, exactly once, and is never toggled afterwards. The old_image flag is
+// purely a runtime behavior that tells the watcher whether to request and
+// forward pre-images. MongoDB configuration and Conduit configuration are
+// therefore completely independent.
+//
 // Collection Schema:
 //
 //	{

@@ -8,7 +8,7 @@ services:
     ports:
       - 27017:27017
     volumes:
-      - ./.mongodb_data:/data/db
+      - mongo_data:/data/db
     healthcheck:
       test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
       interval: 30s
@@ -31,7 +31,7 @@ services:
       dockerfile: Dockerfile
     command: ["./bin/worker"]
     environment:
-      - MONGODB_URI=mongodb://mongo:27017/?directConnection=true
+      - MONGODB_URI=mongodb://mongo:27017/?replicaSet=rs0
       - MONGODB_DATABASE=conduit
       - REDIS_URI=redis://redis:6379
     depends_on:
@@ -49,7 +49,7 @@ services:
     ports:
       - 8080:8080
     environment:
-      - MONGODB_URI=mongodb://mongo:27017/?directConnection=true
+      - MONGODB_URI=mongodb://mongo:27017/?replicaSet=rs0
       - MONGODB_DATABASE=conduit
       - REDIS_URI=redis://redis:6379
       - PORT=8080
@@ -69,3 +69,6 @@ services:
     depends_on:
       - api
     restart: unless-stopped
+
+volumes:
+  mongo_data:

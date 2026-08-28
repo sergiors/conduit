@@ -3,14 +3,16 @@ package collections
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
 )
 
 // EnableStream enables the CDC stream for a collection and configures old_image.
-// oldImage controls whether change events include the pre-image.
+// oldImage is a runtime behavior only: it tells the watcher whether to request
+// and forward pre-images. It does not affect MongoDB configuration, because
+// changeStreamPreAndPostImages is a permanent capability enabled once at
+// collection creation.
 //
 // The stream configuration is immutable: if the stream is already enabled, any
 // subsequent EnableStream returns ErrStreamAlreadyExists, even with the same
@@ -47,14 +49,13 @@ func (s *Settings) EnableStream(ctx context.Context, name string, oldImage bool)
 		return ErrStreamAlreadyExists
 	}
 
-	// Configure changeStreamPreAndPostImages on the physical collection.
-	s.setChangeStreamPreAndPostImages(ctx, name, true)
-
 	return nil
 }
 
 // DisableStream disables the CDC stream and clears old_image for a collection.
-// Idempotent. Returns ErrCollectionNotFound if the collection does not exist.
+// It only updates Conduit metadata; the physical collection keeps its
+// changeStreamPreAndPostImages capability. Idempotent. Returns
+// ErrCollectionNotFound if the collection does not exist.
 func (s *Settings) DisableStream(ctx context.Context, name string) error {
 	if _, err := s.Get(ctx, name); err != nil {
 		return err
@@ -72,23 +73,7 @@ func (s *Settings) DisableStream(ctx context.Context, name string) error {
 		return err
 	}
 
-	// Disable changeStreamPreAndPostImages on the physical collection.
-	s.setChangeStreamPreAndPostImages(ctx, name, false)
-
 	return nil
-}
-
-// setChangeStreamPreAndPostImages configures changeStreamPreAndPostImages on a
-// collection. It is tolerant: if MongoDB does not support the option, the
-// failure is logged and ignored.
-func (s *Settings) setChangeStreamPreAndPostImages(ctx context.Context, name string, enabled bool) {
-	err := s.client.Database(s.database).RunCommand(ctx, bson.M{
-		"collMod":                      name,
-		"changeStreamPreAndPostImages": bson.M{"enabled": enabled},
-	}).Err()
-	if err != nil {
-		log.Printf("Warning: Failed to configure changeStreamPreAndPostImages for %s: %v", name, err)
-	}
 }
 
 // ListStreamEnabled returns collections with streams enabled

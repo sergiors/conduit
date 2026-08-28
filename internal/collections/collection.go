@@ -79,8 +79,13 @@ func (s *Settings) createCollection(ctx context.Context, collection *Collection)
 		return nil
 	}
 
-	// Create the collection
-	err = db.CreateCollection(ctx, collectionName)
+	// Create the collection with pre- and post-image support enabled. This is a
+	// permanent capability of every managed collection, enabled exactly once at
+	// creation. It is independent of the old_image runtime flag: MongoDB is
+	// always capable of producing pre-images, and Conduit decides at runtime
+	// whether to request and forward them.
+	createOpts := options.CreateCollection().SetChangeStreamPreAndPostImages(bson.M{"enabled": true})
+	err = db.CreateCollection(ctx, collectionName, createOpts)
 	if err != nil {
 		return fmt.Errorf("create collection: %w", err)
 	}
