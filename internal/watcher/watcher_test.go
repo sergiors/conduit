@@ -1,6 +1,10 @@
 package watcher
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
 	"testing"
 	"time"
 
@@ -9,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
 )
 
 func TestWatcherCreation(t *testing.T) {
@@ -237,6 +242,89 @@ func TestParseChange(t *testing.T) {
 		assert.NoError(t, err)
 
 		assert.Equal(t, r1.EventID, r2.EventID)
+	})
+}
+
+func TestIsResumeTokenInvalid(t *testing.T) {
+	t.Run("token-fatal server codes are invalidating", func(t *testing.T) {
+		// Verified against a live MongoDB 8.x replica set:
+		//   9     -> FailedToParse: "resume token string was not a valid hex string"
+		//   50811 -> KeyString format error (structurally invalid token)
+		//
+		// Note: stale-but-structurally-valid tokens (e.g. after a collection
+		// drop) do NOT error at Watch() on MongoDB 8.x; the stream delivers a
+		// `drop` event then `invalidate`, handled as terminal conditions. So
+		// only parse failures of the token itself invalidate here.
+		for _, code := range []int32{9, 50811} {
+			err := mongo.CommandError{Code: code, Message: "synthetic"}
+			assert.True(t, isResumeTokenInvalid(err), "code %d should invalidate", code)
+		}
+	})
+
+	t.Run("wrapped token-fatal errors are still detected", func(t *testing.T) {
+		cmdErr := mongo.CommandError{Code: 50811, Message: "KeyString format error: Unknown type: 255"}
+		wrapped := fmt.Errorf("start change stream: %w", cmdErr)
+		assert.True(t, isResumeTokenInvalid(wrapped))
+	})
+
+	t.Run("transient errors never invalidate the token", func(t *testing.T) {
+		transient := []error{
+			errors.New("connection refused"),
+			context.DeadlineExceeded,
+			io.EOF,
+			mongo.CommandError{Code: 6, Message: "HostUnreachable"},
+			mongo.CommandError{Code: 89, Message: "NetworkTimeout"},
+			mongo.CommandError{Code: 91, Message: "ShutdownInProgress"},
+			mongo.CommandError{Code: 189, Message: "PrimarySteppedDown"},
+			mongo.CommandError{Code: 262, Message: "ExceededTimeLimit"},
+			mongo.CommandError{Code: 43, Message: "CursorNotFound"},
+			fmt.Errorf("start change stream: %w", errors.New("server selection error: context deadline exceeded")),
+		}
+		for _, err := range transient {
+			assert.False(t, isResumeTokenInvalid(err), "error %v must not invalidate", err)
+		}
+	})
+
+	t.Run("structurally valid tokens are never classified invalid", func(t *testing.T) {
+		// A stale token from a dropped collection is structurally valid; on
+		// MongoDB 8.x it does not error at Watch() — the stream delivers
+		// `drop` then `invalidate` instead (verified live). It must not be
+		// classified as token-invalid, so the token survives for a future
+		// recreate of the same collection.
+		validShape := bson.M{"_data": "826A91ADB6000000022B042C0100296E5A1004210D2489479F4AF0A8FC2ABF942361A6463C6F7065726174696F6E54797065003C696E7365727400000004"}
+		stored, err := bson.Marshal(validShape)
+		assert.NoError(t, err)
+		assert.False(t, isResumeTokenInvalid(fmt.Errorf("start change stream: %w", errStaleTokenScenario(stored))))
+	})
+
+	t.Run("nil error is not invalidating", func(t *testing.T) {
+		assert.False(t, isResumeTokenInvalid(nil))
+	})
+}
+
+// errStaleTokenScenario wraps a sentinel so the classifier sees a generic
+// error carrying a token-looking message; it must still not invalidate.
+func errStaleTokenScenario(token []byte) error {
+	return errors.New("change stream error for token " + string(token))
+}
+
+func TestResumeTokenPreservation(t *testing.T) {
+	t.Run("terminal parse errors propagate out of watchOnce", func(t *testing.T) {
+		watcher := NewWatcher(nil, "conduit", "users", "pk", "sk", false, "", nil)
+
+		// A drop event must surface from parseChange instead of being
+		// swallowed, so watchLoop can stop the watcher.
+		_, err := watcher.parseChange(bson.M{"operationType": "drop"})
+		assert.ErrorIs(t, err, errCollectionDropped)
+
+		_, err = watcher.parseChange(bson.M{"operationType": "invalidate"})
+		assert.ErrorIs(t, err, errChangeStreamInvalidated)
+	})
+
+	t.Run("sentinel errors are stable and distinct", func(t *testing.T) {
+		assert.NotEqual(t, errCollectionDropped, errChangeStreamInvalidated)
+		assert.EqualError(t, errCollectionDropped, "collection dropped")
+		assert.EqualError(t, errChangeStreamInvalidated, "change stream invalidated")
 	})
 }
 

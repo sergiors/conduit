@@ -7,6 +7,9 @@
 // Key Features:
 //   - One watcher per collection (no duplicates)
 //   - Resume token management per collection (stored in Redis)
+//   - Resume tokens advance only after successful processing and are never
+//     deleted on transient errors; they are invalidated only when MongoDB
+//     explicitly rejects the token as no longer usable
 //   - Graceful start/stop with no goroutine leaks
 //   - Automatic sync with config.collections configuration
 //

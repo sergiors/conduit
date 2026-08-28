@@ -3,6 +3,7 @@ package watcher
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -17,6 +18,50 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
+
+// Sentinel errors for terminal change stream conditions.
+var (
+	errCollectionDropped       = errors.New("collection dropped")
+	errChangeStreamInvalidated = errors.New("change stream invalidated")
+)
+
+// isResumeTokenInvalid reports whether an error from the change stream means
+// MongoDB explicitly rejected the resume token as no longer usable.
+//
+// Only server-side parse failures of the token itself justify deleting the
+// stored token (verified against MongoDB 8.x):
+//   - code 9 "FailedToParse": token is not valid hex ("resume token string
+//     was not a valid hex string").
+//   - code 50811 "KeyString format error": token is structurally invalid.
+//
+// A stale-but-structurally-valid token (e.g. after a collection drop) is NOT
+// treated as invalid: MongoDB delivers a `drop` event followed by
+// `invalidate` on that stream (verified live), which the watcher handles as
+// terminal conditions without deleting the token. Everything else — network
+// failures, elections, cursor timeouts — is transient: the token is preserved
+// and the watcher retries from the last successful position.
+func isResumeTokenInvalid(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	var cmdErr mongo.CommandError
+	if errors.As(err, &cmdErr) {
+		switch cmdErr.Code {
+		case 9: // FailedToParse: "resume token string was not a valid hex string"
+			return true
+		case 50811: // KeyString format error: token is structurally invalid
+			return true
+		}
+	}
+
+	// String matching as a last resort for errors that may lose the typed
+	// error through wrapping. These messages only ever originate from the
+	// server rejecting the token itself.
+	msg := err.Error()
+	return strings.Contains(msg, "resume token string was not a valid hex string") ||
+		strings.Contains(msg, "KeyString format error")
+}
 
 // Watcher watches a single MongoDB collection for changes
 type Watcher struct {
@@ -112,7 +157,16 @@ func (w *Watcher) Stop(ctx context.Context) error {
 	}
 }
 
-// watchLoop is the main watch loop with resume token management
+// watchLoop is the main watch loop with resume token management.
+//
+// Resume token policy:
+//   - The token is only advanced after an event is successfully handled.
+//   - Transient errors (network failures, elections, cursor timeouts) never
+//     touch the token: the loop retries from the last successful position.
+//   - The stored token is invalidated only when MongoDB explicitly rejects it
+//     as invalid (see isResumeTokenInvalid). It is never deleted as a side
+//     effect of generic errors; a dropped/invalidated collection is handled
+//     as a terminal condition instead.
 func (w *Watcher) watchLoop(handler func(streams.StreamRecord) error) {
 	for {
 		select {
@@ -120,27 +174,34 @@ func (w *Watcher) watchLoop(handler func(streams.StreamRecord) error) {
 			return
 		default:
 			if err := w.watchOnce(handler); err != nil {
-				// Check if this is a drop/invalidate error (expected when collection is removed)
-				if err.Error() == "collection dropped" || err.Error() == "change stream invalidated" {
+				// Terminal conditions: the collection is gone or the change
+				// stream was invalidated. Stop the watcher; the manager will
+				// reconcile the watcher lifecycle.
+				if errors.Is(err, errCollectionDropped) || errors.Is(err, errChangeStreamInvalidated) {
 					log.Printf("Stopping watcher for %s: %v", w.collectionName, err)
 					return
 				}
 
 				w.recordError(err)
 
-				// Skip token cleanup if context is already cancelled (watcher is stopping)
-				if w.ctx.Err() == nil {
-					// Invalidate resume token on error
+				// Only invalidate when MongoDB itself rejects the resume
+				// token. Deleting it on generic errors would silently skip
+				// every event that occurred while the watcher was down.
+				if isResumeTokenInvalid(err) {
+					log.Printf("Resume token for %s rejected by MongoDB, invalidating: %v", w.collectionName, err)
+					w.resumeToken = ""
 					if delErr := w.redisClient.DeleteResumeToken(w.ctx, w.collectionName); delErr != nil {
-						log.Printf("Failed to delete resume token: %v", delErr)
+						log.Printf("Failed to invalidate resume token: %v", delErr)
 					}
+				}
 
-					// Wait before retrying
-					select {
-					case <-w.ctx.Done():
-						return
-					case <-time.After(5 * time.Second):
-					}
+				// Wait before retrying. The token is preserved, so the next
+				// watchOnce resumes from the last successfully processed
+				// event and nothing is skipped.
+				select {
+				case <-w.ctx.Done():
+					return
+				case <-time.After(5 * time.Second):
 				}
 			}
 		}
@@ -188,6 +249,12 @@ func (w *Watcher) watchOnce(handler func(streams.StreamRecord) error) error {
 		// Parse change into stream record
 		record, err := w.parseChange(change)
 		if err != nil {
+			// Terminal conditions (drop/invalidate) must abort the session so
+			// watchLoop can stop the watcher. Unknown operation types are
+			// skipped like any other non-terminal parse problem.
+			if errors.Is(err, errCollectionDropped) || errors.Is(err, errChangeStreamInvalidated) {
+				return err
+			}
 			w.recordError(fmt.Errorf("parse change: %w", err))
 			continue
 		}
@@ -198,7 +265,10 @@ func (w *Watcher) watchOnce(handler func(streams.StreamRecord) error) error {
 			// Don't return here - let retry logic handle it
 		}
 
-		// Update resume token after successful processing
+		// Advance the resume token only after the event was handed off
+		// successfully. The in-memory token advances first so an in-memory
+		// restart never replays the event; the Redis copy is updated
+		// best-effort so a process restart resumes from here too.
 		if cursor.ResumeToken() != nil {
 			tokenData, err := bson.Marshal(cursor.ResumeToken())
 			if err == nil {
@@ -268,13 +338,17 @@ func (w *Watcher) parseChange(change bson.M) (streams.StreamRecord, error) {
 	case "drop":
 		// Collection was dropped - stop watcher
 		log.Printf("Collection %s was dropped, stopping watcher", w.collectionName)
-		w.cancel()
-		return streams.StreamRecord{}, fmt.Errorf("collection dropped")
+		if w.cancel != nil {
+			w.cancel()
+		}
+		return streams.StreamRecord{}, errCollectionDropped
 	case "invalidate":
 		// Change stream invalidated - collection likely dropped or renamed
 		log.Printf("Change stream for %s invalidated, stopping watcher", w.collectionName)
-		w.cancel()
-		return streams.StreamRecord{}, fmt.Errorf("change stream invalidated")
+		if w.cancel != nil {
+			w.cancel()
+		}
+		return streams.StreamRecord{}, errChangeStreamInvalidated
 	default:
 		// Ignore unknown operation types (renames, etc.)
 		return streams.StreamRecord{}, fmt.Errorf("unknown operation type: %s", opType)
@@ -317,7 +391,7 @@ func (w *Watcher) OldImage() bool {
 // The MongoDB resume token (change event `_id._data`) is the primary source:
 // it is a hex string that uniquely identifies the change (it encodes
 // clusterTime, operation type and document key) and is identical when the
-// event is re-read from the oplog. If the token is missing or malformed,
+// event is re-read from the oplog. If the token is missing or malfo	rmed,
 // clusterTime plus documentKey are used as a fallback, still sourced purely
 // from change-stream data.
 //
