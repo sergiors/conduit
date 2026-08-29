@@ -14,10 +14,12 @@
 //
 // Pre-image support is a permanent capability of every managed collection: the
 // physical MongoDB collection is created with changeStreamPreAndPostImages
-// enabled, exactly once, and is never toggled afterwards. The old_image flag is
-// purely a runtime behavior that tells the watcher whether to request and
-// forward pre-images. MongoDB configuration and Conduit configuration are
-// therefore completely independent.
+// enabled, and the capability is never disabled afterwards. The old_image flag
+// is a runtime behavior that tells the watcher whether to request and forward
+// pre-images; enabling a stream with old_image also ensures (idempotently) that
+// the physical collection has the capability, repairing collections created by
+// older Conduit versions or outside Conduit. MongoDB configuration and Conduit
+// configuration are therefore almost entirely independent.
 //
 // Collection Schema:
 //

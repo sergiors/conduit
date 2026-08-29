@@ -210,7 +210,10 @@ func (w *Watcher) watchOnce(handler func(streams.StreamRecord) error) error {
 
 	if w.oldImage {
 		// Use WhenAvailable instead of Required to allow delete events
-		// Required would fail if pre-image is not found (e.g., for deletes)
+		// Required would fail if pre-image is not found (e.g., for deletes).
+		// The collection-level changeStreamPreAndPostImages capability is
+		// ensured by Settings.Create and Settings.EnableStream, so
+		// WhenAvailable reliably yields the pre-image here.
 		opts.SetFullDocumentBeforeChange(options.WhenAvailable)
 	}
 

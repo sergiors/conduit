@@ -10,9 +10,22 @@ import (
 
 // EnableStream enables the CDC stream for a collection and configures old_image.
 // oldImage is a runtime behavior only: it tells the watcher whether to request
-// and forward pre-images. It does not affect MongoDB configuration, because
-// changeStreamPreAndPostImages is a permanent capability enabled once at
-// collection creation.
+// and forward pre-images.
+//
+// When oldImage is true, the physical collection's changeStreamPreAndPostImages
+// capability is ensured before the watcher can observe the stream. Collections
+// created through Settings.Create always have the capability already; this call
+// repairs collections that were created by an older Conduit version or outside
+// Conduit, where the capability would otherwise be missing. Without it, MongoDB
+// accepts the change stream but silently omits fullDocumentBeforeChange on
+// update and replace (and delete) events, and the pre-image is lost at the
+// source — no downstream code can recover it. The command is idempotent, and a
+// MongoDB-level failure aborts the enablement by rolling the recorded stream
+// back: with old_image enabled, a silent capability gap is indistinguishable
+// from data loss. The capability check runs after the existence check (an
+// unknown collection returns ErrCollectionNotFound without side effects)
+// because collMod carries no stream semantics and would otherwise mask the
+// domain contract with a driver-level NamespaceNotFound error.
 //
 // The stream configuration is immutable: if the stream is already enabled, any
 // subsequent EnableStream returns ErrStreamAlreadyExists, even with the same
@@ -20,7 +33,8 @@ import (
 // Returns ErrCollectionNotFound if the collection does not exist.
 func (s *Settings) EnableStream(ctx context.Context, name string, oldImage bool) error {
 	// Atomic conditional update. It only succeeds when the stream is not enabled
-	// yet. Once enabled, old_image cannot be redefined through this route.
+	// yet. Once enabled, old_image cannot be redefined through this route. This
+	// also validates existence atomically, before any MongoDB-level side effect.
 	filter := bson.M{
 		"collection_name": name,
 		"stream_enabled":  bson.M{"$ne": true},
@@ -49,13 +63,45 @@ func (s *Settings) EnableStream(ctx context.Context, name string, oldImage bool)
 		return ErrStreamAlreadyExists
 	}
 
+	// Ensure the MongoDB pre-image capability once the stream is recorded.
+	// If it fails, roll the recorded stream back so the stored configuration
+	// stays untouched and the operator can simply retry.
+	if oldImage {
+		if err := s.ensureChangeStreamPreAndPostImages(ctx, name); err != nil {
+			if rollbackErr := s.rollbackStream(ctx, name); rollbackErr != nil {
+				return fmt.Errorf("%w (rollback failed: %v)", err, rollbackErr)
+			}
+			return err
+		}
+	}
+
+	return nil
+}
+
+// rollbackStream undoes a partially-applied EnableStream after the capability
+// repair failed, restoring the stored configuration to its pre-call state.
+func (s *Settings) rollbackStream(ctx context.Context, name string) error {
+	_, err := s.collection.UpdateOne(
+		ctx,
+		bson.M{"collection_name": name},
+		bson.M{"$set": bson.M{
+			"stream_enabled": false,
+			"old_image":      false,
+			"updated_at":     time.Now(),
+		}},
+	)
+	if err != nil {
+		return fmt.Errorf("rollback stream for %s: %w", name, err)
+	}
 	return nil
 }
 
 // DisableStream disables the CDC stream and clears old_image for a collection.
 // It only updates Conduit metadata; the physical collection keeps its
-// changeStreamPreAndPostImages capability. Idempotent. Returns
-// ErrCollectionNotFound if the collection does not exist.
+// changeStreamPreAndPostImages capability (that capability can only be granted,
+// never revoked through Conduit, so a later re-enable with old_image works
+// immediately). Idempotent. Returns ErrCollectionNotFound if the collection
+// does not exist.
 func (s *Settings) DisableStream(ctx context.Context, name string) error {
 	if _, err := s.Get(ctx, name); err != nil {
 		return err
@@ -89,4 +135,26 @@ func (s *Settings) ListStreamEnabled(ctx context.Context) ([]Collection, error) 
 		return nil, err
 	}
 	return collections, nil
+}
+
+// ensureChangeStreamPreAndPostImages enables the changeStreamPreAndPostImages
+// capability on the physical collection via collMod, so MongoDB is able to
+// serve fullDocumentBeforeChange to the watcher. It is idempotent: enabling an
+// already-enabled capability is a no-op.
+//
+// Collections created through Settings.Create are provisioned with the
+// capability up front; this exists to repair collections that predate that
+// provisioning or were created outside Conduit. MongoDB versions before 6.0
+// reject the command, in which case the returned error aborts EnableStream —
+// enabling a stream with old_image on a deployment that cannot produce
+// pre-images would silently breach the event contract.
+func (s *Settings) ensureChangeStreamPreAndPostImages(ctx context.Context, name string) error {
+	cmd := bson.D{
+		{Key: "collMod", Value: name},
+		{Key: "changeStreamPreAndPostImages", Value: bson.M{"enabled": true}},
+	}
+	if err := s.client.Database(s.database).RunCommand(ctx, cmd).Err(); err != nil {
+		return fmt.Errorf("enable changeStreamPreAndPostImages for %s: %w", name, err)
+	}
+	return nil
 }

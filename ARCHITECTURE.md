@@ -432,7 +432,7 @@ The API returns `201 Created` with the collection body.
    - The update is conditional: it only succeeds when `stream_enabled` is not already `true`.
    - If the update matches no document, Conduit checks whether the collection exists. If it does, `ErrStreamAlreadyExists` is returned; otherwise `ErrCollectionNotFound`.
    - Stream configuration is therefore immutable while enabled.
-4. **Physical MongoDB configuration**: `changeStreamPreAndPostImages` is enabled on the collection via `collMod`. Failures are logged and ignored (tolerant for older MongoDB versions).
+4. **Physical MongoDB configuration**: when `old_image` is `true`, `changeStreamPreAndPostImages` is ensured on the collection via `collMod` (idempotent; collections created through Conduit already have it). A failure aborts the enablement and rolls the recorded stream back: enabling a stream with `old_image` on a deployment that cannot produce pre-images would silently drop every pre-image at the source.
 5. **Configuration persistence**: `stream_enabled` and `old_image` are updated in `config.collections`.
 6. **Notification**: the API publishes the collection name to `cdc:config-change`.
 7. **Worker reaction**:
