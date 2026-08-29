@@ -152,18 +152,43 @@ Sends `StreamRecord` JSON documents to a webhook endpoint via `POST`. Supports a
 
 ### AWS EventBridge
 
-Registered sink type with a skeleton implementation. The AWS SDK integration is not yet wired in.
+Fully implemented sink that publishes `StreamRecord` documents to an AWS
+EventBridge event bus via `PutEvents`. The spec contains ONLY EventBridge
+routing config (`event_bus_name`, and an optional `source`) — AWS credentials
+and the region are NEVER part of the sink spec.
 
 ```json
 {
   "type": "eventbridge",
   "spec": {
-    "region": "us-east-1",
     "event_bus_name": "default",
     "source": "conduit"
   }
 }
 ```
+
+The AWS region is resolved via the AWS SDK default region chain — `AWS_REGION`,
+the shared `~/.aws/config` file, or the compute
+environment (ECS task role, EC2 instance profile, EKS IRSA) — and is
+infrastructure configuration, never part of the Conduit sink spec. For example:
+
+```bash
+export AWS_REGION=us-east-1
+```
+
+Credentials must be available to the app process via the AWS SDK default
+credential chain: environment variables, the shared `~/.aws/credentials` file,
+or an IAM role (EC2 instance profile, ECS task role, or IRSA). For example:
+
+```bash
+export AWS_ACCESS_KEY_ID=AKIA...
+export AWS_SECRET_ACCESS_KEY=...
+export AWS_SESSION_TOKEN=...   # optional, for temporary credentials
+```
+
+Construction fails fast if no region resolves or if no credentials resolve — the
+sink is skipped with a log line at registration time rather than failing on
+first delivery.
 
 ### Meilisearch
 
@@ -200,6 +225,9 @@ MONGODB_DATABASE=conduit
 REDIS_URI=redis://localhost:6379
 PORT=8080
 API_KEY=your-secret-key
+# Optional: only needed for the EventBridge sink. AWS_ACCESS_KEY_ID,
+# AWS_SECRET_ACCESS_KEY, and AWS_REGION (plus optional AWS_SESSION_TOKEN) are
+# resolved via the AWS SDK default credential chain.
 ```
 
 ### Run with Docker Compose

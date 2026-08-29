@@ -171,8 +171,6 @@ func (m *Manager) startWatcher(ctx context.Context, collection collections.Colle
 		m.mongoClient,
 		m.database,
 		collection.CollectionName,
-		collection.PartitionKey,
-		collection.SortKey,
 		collection.OldImage,
 		resumeToken,
 		m.redisClient,
@@ -487,6 +485,7 @@ func (m *Manager) registerSinks(ctx context.Context, collectionName string, sink
 	for _, sink := range sinks {
 		transport := dispatch.BuildTransport(ctx, collectionName, sink.Type, sink.Spec)
 		if transport == nil {
+			log.Printf("Failed to build transport for sink type %s (collection %s, sink %s); skipping registration", sink.Type, collectionName, sink.ID)
 			continue
 		}
 		runtimeSink := dispatch.NewRuntimeSink(sink, transport)

@@ -56,6 +56,7 @@ func RegisterTransport(t collections.Type, builder TransportBuilder) {
 func BuildTransport(ctx context.Context, collectionName string, t collections.Type, spec map[string]interface{}) Transport {
 	builder, exists := transportBuilders[t]
 	if !exists {
+		log.Printf("no transport registered for sink type %q (collection %s)", t, collectionName)
 		return nil
 	}
 	return builder(ctx, collectionName, t, spec)

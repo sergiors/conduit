@@ -28,6 +28,11 @@ type StreamRecord struct {
 	// clusterTime and documentKey as fallback). It is deterministic across
 	// process restarts and is used as the idempotency key for delivery.
 	EventID string `json:"eventId,omitempty"`
+
+	// DocumentID is the deterministic document identity for a change event:
+	// the MongoDB `_id` stringified (ObjectID -> hex). Used e.g. as the
+	// Meilisearch primary key.
+	DocumentID string `json:"documentId,omitempty"`
 }
 
 // ParseStreamRecord parses raw JSON data into a StreamRecord
@@ -66,6 +71,11 @@ func ParseStreamRecord(data []byte) (*StreamRecord, error) {
 	// Parse old image (keep as interface{})
 	if oi, ok := raw["oldImage"]; ok && oi != nil {
 		record.OldImage = oi
+	}
+
+	// Parse document id
+	if did, ok := raw["documentId"].(string); ok {
+		record.DocumentID = did
 	}
 
 	return record, nil

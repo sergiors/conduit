@@ -10,6 +10,9 @@
 //   - EventID: deterministic idempotency key derived from change-stream data
 //     (resume token, with clusterTime + documentKey as fallback) - stable
 //     across process restarts; never derived from application time
+//   - DocumentID: deterministic document identity for a change event: the
+//     MongoDB `_id` stringified (ObjectID -> hex); used e.g. as the Meilisearch
+//     primary key
 //   - Full document support: Optional oldImage via fullDocumentBeforeChange
 //
 // Record Types:

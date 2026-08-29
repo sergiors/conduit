@@ -27,7 +27,6 @@ export const sinkSchema = z
       .array(z.string())
       .min(1, "At least one event type is required"),
     filter_criteria: filterCriteriaSchema.optional(),
-    region: z.string().optional(),
     event_bus_name: z.string().optional(),
     source: z.string().optional(),
     index_name: z.string().optional(),
@@ -35,7 +34,6 @@ export const sinkSchema = z
   .refine(
     (data) => {
       if (!data.endpoint) return false;
-      if (data.type === "eventbridge" && !data.region) return false;
       if (data.type === "eventbridge" && !data.event_bus_name) return false;
       return true;
     },
@@ -86,7 +84,6 @@ export interface SinkConfig {
   bearer_token?: string;
   event_types?: string[];
   filter_criteria?: FilterCriteria;
-  region?: string;
   event_bus_name?: string;
   source?: string;
   index_name?: string;

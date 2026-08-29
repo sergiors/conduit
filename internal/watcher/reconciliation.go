@@ -94,6 +94,7 @@ func (r *Reconciliation) ApplyChanges(ctx context.Context, collectionName string
 		case ChangeAdded:
 			transport := dispatch.BuildTransport(ctx, collectionName, change.Sink.Type, change.Sink.Spec)
 			if transport == nil {
+				log.Printf("Failed to build transport for added sink type %s (collection %s, sink %s); skipping registration", change.Sink.Type, collectionName, change.Sink.ID)
 				continue
 			}
 			sink := dispatch.NewRuntimeSink(change.Sink, transport)

@@ -862,8 +862,8 @@ Event routing and sink registry.
 - `dispatcher.go`: `Dispatcher` with concurrent-safe sink registry.
 - `sink.go`: `Sink` interface, builder registry, `BuildSink` factory.
 - `sinks/http.go`: Fully implemented HTTP webhook sink with its own `HTTPSpec`.
-- `sinks/eventbridge.go`: EventBridge skeleton with its own `EventBridgeSpec` (TODO: AWS SDK integration).
-- `sinks/meilisearch.go`: Meilisearch skeleton with its own `MeilisearchSpec` (TODO: client integration).
+- `transports/eventbridge.go`: Fully implemented EventBridge sink with its own `EventBridgeSpec` (AWS SDK v2 PutEvents, SDK-resolved region). The region comes from the AWS SDK default region chain (`AWS_REGION`, shared config, or the compute environment) — never the spec. Credentials come from the AWS SDK default credential chain — never the spec — and construction fails fast if none resolve.
+- `sinks/meilisearch.go`: Fully implemented Meilisearch sink with its own `MeilisearchSpec` (official meilisearch-go SDK; awaits task completion). Documents are keyed by their MongoDB `_id` (the index primary key).
 - `sinks/doc.go`: Sink package overview.
 
 ## `internal/retry/`
@@ -922,7 +922,7 @@ Adding a sink requires:
 
 Because the shared `Sink` model stores type-specific settings as an opaque `spec` object, adding a new sink type never requires modifying the shared schema or existing sink implementations. The builder decodes and validates its own `spec` payload.
 
-The HTTP sink is the reference implementation. EventBridge and Meilisearch are registered skeletons waiting for SDK integration.
+The HTTP sink is the reference implementation. EventBridge and Meilisearch are fully implemented with their official SDKs (AWS SDK v2 and meilisearch-go respectively).
 
 ## Additional Dispatchers
 

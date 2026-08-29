@@ -18,7 +18,7 @@ import (
 
 func TestWatcherCreation(t *testing.T) {
 	t.Run("new watcher with correct configuration", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "users", "pk", "sk", true, "", nil)
+		watcher := NewWatcher(nil, "conduit", "users", true, "", nil)
 
 		assert.NotNil(t, watcher)
 		assert.Equal(t, "conduit", watcher.database)
@@ -29,7 +29,7 @@ func TestWatcherCreation(t *testing.T) {
 
 	t.Run("watcher with resume token", func(t *testing.T) {
 		token := "test-resume-token"
-		watcher := NewWatcher(nil, "conduit", "orders", "pk", "sk", false, token, nil)
+		watcher := NewWatcher(nil, "conduit", "orders", false, token, nil)
 
 		assert.NotNil(t, watcher)
 		assert.Equal(t, token, watcher.resumeToken)
@@ -38,7 +38,7 @@ func TestWatcherCreation(t *testing.T) {
 
 func TestWatcherStats(t *testing.T) {
 	t.Run("initial stats are correct", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "test", "pk", "sk", false, "", nil)
+		watcher := NewWatcher(nil, "conduit", "test", false, "", nil)
 
 		stats := watcher.GetStats()
 		assert.Zero(t, stats.EventsProcessed)
@@ -47,14 +47,14 @@ func TestWatcherStats(t *testing.T) {
 	})
 
 	t.Run("IsRunning returns false before start", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "test", "pk", "sk", false, "", nil)
+		watcher := NewWatcher(nil, "conduit", "test", false, "", nil)
 		assert.False(t, watcher.IsRunning())
 	})
 }
 
 func TestParseChange(t *testing.T) {
 	t.Run("parse insert operation", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "users", "pk", "sk", false, "", nil)
+		watcher := NewWatcher(nil, "conduit", "users", false, "", nil)
 
 		change := bson.M{
 			"operationType": "insert",
@@ -74,7 +74,7 @@ func TestParseChange(t *testing.T) {
 	})
 
 	t.Run("parse update operation with old image", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "orders", "pk", "sk", true, "", nil)
+		watcher := NewWatcher(nil, "conduit", "orders", true, "", nil)
 
 		change := bson.M{
 			"operationType": "update",
@@ -96,7 +96,7 @@ func TestParseChange(t *testing.T) {
 	})
 
 	t.Run("parse delete operation", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "sessions", "pk", "sk", true, "", nil)
+		watcher := NewWatcher(nil, "conduit", "sessions", true, "", nil)
 
 		change := bson.M{
 			"operationType": "delete",
@@ -114,7 +114,7 @@ func TestParseChange(t *testing.T) {
 	})
 
 	t.Run("parse unknown operation type", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "test", "pk", "sk", false, "", nil)
+		watcher := NewWatcher(nil, "conduit", "test", false, "", nil)
 
 		change := bson.M{
 			"operationType": "unknown",
@@ -126,7 +126,7 @@ func TestParseChange(t *testing.T) {
 	})
 
 	t.Run("parse missing operation type", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "test", "pk", "sk", false, "", nil)
+		watcher := NewWatcher(nil, "conduit", "test", false, "", nil)
 
 		change := bson.M{}
 
@@ -136,7 +136,7 @@ func TestParseChange(t *testing.T) {
 	})
 
 	t.Run("event ID is derived from resume token", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "users", "pk", "sk", false, "", nil)
+		watcher := NewWatcher(nil, "conduit", "users", false, "", nil)
 
 		change := bson.M{
 			"_id": bson.M{
@@ -162,8 +162,8 @@ func TestParseChange(t *testing.T) {
 			"fullDocument":  bson.M{"_id": "123"},
 		}
 
-		first := NewWatcher(nil, "conduit", "orders", "pk", "sk", false, "", nil)
-		second := NewWatcher(nil, "conduit", "orders", "pk", "sk", false, "", nil)
+		first := NewWatcher(nil, "conduit", "orders", false, "", nil)
+		second := NewWatcher(nil, "conduit", "orders", false, "", nil)
 
 		r1, err := first.parseChange(change)
 		assert.NoError(t, err)
@@ -175,7 +175,7 @@ func TestParseChange(t *testing.T) {
 	})
 
 	t.Run("event ID falls back to clusterTime and documentKey", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "orders", "pk", "sk", false, "", nil)
+		watcher := NewWatcher(nil, "conduit", "orders", false, "", nil)
 
 		change := bson.M{
 			"operationType": "update",
@@ -195,8 +195,8 @@ func TestParseChange(t *testing.T) {
 			"documentKey":   bson.M{"_id": "789"},
 		}
 
-		first := NewWatcher(nil, "conduit", "sessions", "pk", "sk", false, "", nil)
-		second := NewWatcher(nil, "conduit", "sessions", "pk", "sk", false, "", nil)
+		first := NewWatcher(nil, "conduit", "sessions", false, "", nil)
+		second := NewWatcher(nil, "conduit", "sessions", false, "", nil)
 
 		r1, err := first.parseChange(change)
 		assert.NoError(t, err)
@@ -208,7 +208,7 @@ func TestParseChange(t *testing.T) {
 	})
 
 	t.Run("different changes produce different event IDs", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "users", "pk", "sk", false, "", nil)
+		watcher := NewWatcher(nil, "conduit", "users", false, "", nil)
 
 		first, err := watcher.parseChange(bson.M{
 			"_id":           bson.M{"_data": "826A91ADB6000000022B04"},
@@ -228,7 +228,7 @@ func TestParseChange(t *testing.T) {
 	t.Run("event ID is never derived from time.Now", func(t *testing.T) {
 		// Parsing the same change twice within one watcher must also be
 		// deterministic (guards against any wall-clock dependency).
-		watcher := NewWatcher(nil, "conduit", "users", "pk", "sk", false, "", nil)
+		watcher := NewWatcher(nil, "conduit", "users", false, "", nil)
 
 		change := bson.M{
 			"_id":           bson.M{"_data": "826A91ADB6000000022B04"},
@@ -242,6 +242,73 @@ func TestParseChange(t *testing.T) {
 		assert.NoError(t, err)
 
 		assert.Equal(t, r1.EventID, r2.EventID)
+	})
+}
+
+func TestParseChangeDocumentID(t *testing.T) {
+	t.Run("insert with ObjectID _id yields hex", func(t *testing.T) {
+		// Identity is the MongoDB `_id` regardless of any pk/sk-style fields
+		// present in the full document.
+		watcher := NewWatcher(nil, "conduit", "orders", false, "", nil)
+		oid := primitive.NewObjectID()
+
+		change := bson.M{
+			"operationType": "insert",
+			"documentKey":   bson.M{"_id": oid},
+			"fullDocument": bson.M{
+				"_id":     oid,
+				"tenant":  "acme",
+				"orderId": "o-42",
+			},
+		}
+
+		record, err := watcher.parseChange(change)
+		assert.NoError(t, err)
+		assert.Equal(t, oid.Hex(), record.DocumentID)
+	})
+
+	t.Run("insert with string _id is verbatim", func(t *testing.T) {
+		watcher := NewWatcher(nil, "conduit", "users", false, "", nil)
+
+		change := bson.M{
+			"operationType": "insert",
+			"documentKey":   bson.M{"_id": "user-1"},
+			"fullDocument":  bson.M{"_id": "user-1", "name": "John"},
+		}
+
+		record, err := watcher.parseChange(change)
+		assert.NoError(t, err)
+		assert.Equal(t, "user-1", record.DocumentID)
+	})
+
+	t.Run("delete with only documentKey yields _id hex", func(t *testing.T) {
+		// A delete event without a pre-image still carries documentKey, so the
+		// identity is always available.
+		watcher := NewWatcher(nil, "conduit", "sessions", false, "", nil)
+		oid := primitive.NewObjectID()
+
+		change := bson.M{
+			"operationType": "delete",
+			"documentKey":   bson.M{"_id": oid},
+		}
+
+		record, err := watcher.parseChange(change)
+		assert.NoError(t, err)
+		assert.Equal(t, streams.RemoveRecord, record.RecordType)
+		assert.Equal(t, oid.Hex(), record.DocumentID)
+	})
+
+	t.Run("missing documentKey leaves DocumentID empty", func(t *testing.T) {
+		watcher := NewWatcher(nil, "conduit", "users", false, "", nil)
+
+		change := bson.M{
+			"operationType": "insert",
+			"fullDocument":  bson.M{"name": "John"},
+		}
+
+		record, err := watcher.parseChange(change)
+		assert.NoError(t, err)
+		assert.Equal(t, "", record.DocumentID)
 	})
 }
 
@@ -310,7 +377,7 @@ func errStaleTokenScenario(token []byte) error {
 
 func TestResumeTokenPreservation(t *testing.T) {
 	t.Run("terminal parse errors propagate out of watchOnce", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "users", "pk", "sk", false, "", nil)
+		watcher := NewWatcher(nil, "conduit", "users", false, "", nil)
 
 		// A drop event must surface from parseChange instead of being
 		// swallowed, so watchLoop can stop the watcher.

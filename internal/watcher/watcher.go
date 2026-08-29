@@ -68,8 +68,6 @@ type Watcher struct {
 	mongoClient    *mongo.Client
 	database       string
 	collectionName string
-	pkField        string
-	skField        string
 	oldImage       bool
 	resumeToken    string
 	redisClient    *redis.Client
@@ -90,8 +88,6 @@ func NewWatcher(
 	mongoClient *mongo.Client,
 	database string,
 	collectionName string,
-	pkField string,
-	skField string,
 	oldImage bool,
 	resumeToken string,
 	redisClient *redis.Client,
@@ -100,8 +96,6 @@ func NewWatcher(
 		mongoClient:    mongoClient,
 		database:       database,
 		collectionName: collectionName,
-		pkField:        pkField,
-		skField:        skField,
 		oldImage:       oldImage,
 		resumeToken:    resumeToken,
 		redisClient:    redisClient,
@@ -308,6 +302,15 @@ func (w *Watcher) parseChange(change bson.M) (streams.StreamRecord, error) {
 		EventID:   w.eventID(change),
 	}
 
+	// The documentKey is present in insert/update/replace/delete change events
+	// and carries the MongoDB `_id`. It is the source of the record's document
+	// identity (see documentID), applied to all four operation types.
+	documentKey, _ := change["documentKey"].(bson.M)
+
+	// The document identity is the MongoDB `_id` from the change event's
+	// documentKey, available for every operation type.
+	record.DocumentID = w.documentID(documentKey)
+
 	switch opType {
 	case "insert":
 		record.RecordType = streams.InsertRecord
@@ -355,6 +358,35 @@ func (w *Watcher) parseChange(change bson.M) (streams.StreamRecord, error) {
 	}
 
 	return record, nil
+}
+
+// documentID extracts the deterministic document identity for a change event:
+// the MongoDB `_id` from the change event's documentKey, stringified by
+// stringifyID (ObjectID -> hex, string -> verbatim, other -> JSON). Every
+// insert/update/replace/delete change event carries documentKey, so this
+// identity is always available for the record's documentId field.
+func (w *Watcher) documentID(documentKey bson.M) string {
+	if idVal, ok := documentKey["_id"]; ok {
+		return stringifyID(idVal)
+	}
+	return ""
+}
+
+// stringifyID renders a MongoDB `_id` value as a deterministic string:
+// ObjectID -> hex, string -> verbatim, anything else -> its JSON
+// representation (the deterministic BSON->JSON form).
+func stringifyID(v interface{}) string {
+	switch t := v.(type) {
+	case primitive.ObjectID:
+		return t.Hex()
+	case string:
+		return t
+	default:
+		if data, err := json.Marshal(v); err == nil {
+			return string(data)
+		}
+		return fmt.Sprintf("%v", v)
+	}
 }
 
 // recordError updates error stats

@@ -21,7 +21,6 @@ export interface SinkConfig {
   bearer_token?: string;
   event_types?: string[];
   filter_criteria?: FilterCriteria;
-  region?: string;
   event_bus_name?: string;
   source?: string;
   index_name?: string;

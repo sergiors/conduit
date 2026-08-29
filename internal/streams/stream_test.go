@@ -110,6 +110,42 @@ func TestStreamRecordJSON(t *testing.T) {
 	})
 }
 
+func TestParseStreamRecordDocumentID(t *testing.T) {
+	t.Run("documentId round-trips through ParseStreamRecord", func(t *testing.T) {
+		original := StreamRecord{
+			TableName:  "orders",
+			RecordType: ModifyRecord,
+			NewImage:   bson.M{"_id": "o-1", "tenant": "acme"},
+			Timestamp:  time.Now(),
+			EventID:    "orders:token",
+			DocumentID: "acme~o-1",
+		}
+
+		data, err := json.Marshal(original)
+		require.NoError(t, err)
+
+		decoded, err := ParseStreamRecord(data)
+		require.NoError(t, err)
+		assert.Equal(t, "acme~o-1", decoded.DocumentID)
+	})
+
+	t.Run("missing documentId yields empty DocumentID", func(t *testing.T) {
+		record := StreamRecord{
+			TableName:  "users",
+			RecordType: InsertRecord,
+			NewImage:   bson.M{"_id": "u-1"},
+			Timestamp:  time.Now(),
+		}
+
+		data, err := json.Marshal(record)
+		require.NoError(t, err)
+
+		decoded, err := ParseStreamRecord(data)
+		require.NoError(t, err)
+		assert.Equal(t, "", decoded.DocumentID)
+	})
+}
+
 func TestStreamRecordTimestamp(t *testing.T) {
 	t.Run("timestamp is always set", func(t *testing.T) {
 		before := time.Now()

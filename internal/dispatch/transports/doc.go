@@ -12,9 +12,15 @@
 // dispatch.RuntimeSink, not by the transport implementation.
 //
 // Supported transports:
-//   - http: POST events to a webhook endpoint
-//   - eventbridge: Publish to AWS EventBridge
-//   - meilisearch: Index documents in Meilisearch
+//   - http: POST events to a webhook endpoint (fully implemented, reference)
+//   - meilisearch: Index documents in Meilisearch (fully implemented via the
+//     official meilisearch-go SDK; awaits task completion so the write is
+//     durable before returning)
+//   - eventbridge: Publish to AWS EventBridge (fully implemented via the AWS
+//     SDK v2 PutEvents API; uses the SDK-resolved region). The region comes from
+//     the AWS SDK default region chain (AWS_REGION / shared config), never the
+//     spec. Credentials are resolved via the AWS SDK v2 default credential chain
+//     (never stored in the spec) and construction fails fast if none resolve.
 //
 // To add a new transport, create a new file in this package, define its own
 // Spec struct, and call RegisterTransport in an init() function.

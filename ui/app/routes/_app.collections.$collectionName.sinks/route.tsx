@@ -419,7 +419,6 @@ function SinksForm({
             bearer_token: d.bearer_token ?? "",
             event_types: d.event_types ?? [],
             filter_criteria: apiToFormCriteria(d.filter_criteria),
-            region: d.region ?? "",
             event_bus_name: d.event_bus_name ?? "",
             source: d.source ?? "",
             index_name: d.index_name ?? "",
@@ -463,7 +462,6 @@ function SinksForm({
       bearer_token: dest.bearer_token,
       event_types: dest.event_types,
       filter_criteria: formToAPICriteria(dest.filter_criteria),
-      region: dest.region,
       event_bus_name: dest.event_bus_name,
       source: dest.source,
       index_name: dest.index_name,
@@ -501,7 +499,6 @@ function SinksForm({
         bearer_token: "",
         event_types: [],
         filter_criteria: { old_image: [], new_image: [] },
-        region: "",
         event_bus_name: "",
         source: "",
         index_name: "",
@@ -593,28 +590,16 @@ function SinksForm({
 
                 {dest.type === "eventbridge" && (
                   <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <Field>
-                        <FieldLabel>Region *</FieldLabel>
-                        <Controller
-                          name={`sinks.${index}.region` as const}
-                          control={control}
-                          render={({ field }) => (
-                            <Input {...field} placeholder="us-east-1" />
-                          )}
-                        />
-                      </Field>
-                      <Field>
-                        <FieldLabel>Event Bus Name *</FieldLabel>
-                        <Controller
-                          name={`sinks.${index}.event_bus_name` as const}
-                          control={control}
-                          render={({ field }) => (
-                            <Input {...field} placeholder="my-event-bus" />
-                          )}
-                        />
-                      </Field>
-                    </div>
+                    <Field>
+                      <FieldLabel>Event Bus Name *</FieldLabel>
+                      <Controller
+                        name={`sinks.${index}.event_bus_name` as const}
+                        control={control}
+                        render={({ field }) => (
+                          <Input {...field} placeholder="my-event-bus" />
+                        )}
+                      />
+                    </Field>
                     <Field>
                       <FieldLabel>Source</FieldLabel>
                       <Controller
