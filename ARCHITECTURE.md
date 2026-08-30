@@ -813,6 +813,8 @@ Entry points for the two runtime processes.
 - `cmd/api/main.go`: Loads configuration, initializes MongoDB and Redis, creates `collections.Settings`, and starts the Gin HTTP server.
 - `cmd/worker/main.go`: Loads configuration, initializes infrastructure, creates the dispatcher, retry processor, and watcher manager, and runs until a shutdown signal.
 
+  **Graceful shutdown.** On SIGINT or SIGTERM the worker shuts down in dependency order, bounded by `SHUTDOWN_TIMEOUT` (default 30s): (1) the watcher manager is stopped first — cancelling its run context, waiting for its sync/config-change loops and every watcher, and closing pub/sub — so no new events flow while in-flight bookkeeping drains; (2) the retry processor is stopped, letting the current pass finish; (3) the dispatcher closes all sinks/transports; (4) Redis is closed; (5) MongoDB is closed. Terminal bookkeeping writes (resume-token persist, `MarkProcessed`, retry `Enqueue`/`Remove`) and change-stream cursor close use a short detached context so a mid-flight event is never lost when the live context is cancelled. No arbitrary sleeps are used; shutdown is driven entirely by context cancellation and `sync.WaitGroup` waits.
+
 ## `internal/api/`
 
 HTTP layer. Each file handles one resource or concern:

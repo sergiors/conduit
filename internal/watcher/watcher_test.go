@@ -14,6 +14,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 func TestWatcherCreation(t *testing.T) {
@@ -430,4 +431,112 @@ func TestManagerConfig(t *testing.T) {
 		}
 		assert.Equal(t, 60*time.Second, cfg.SyncInterval)
 	})
+}
+
+func TestManagerStopIdempotent(t *testing.T) {
+	t.Run("Stop before Start is safe", func(t *testing.T) {
+		manager := NewManager(nil, "conduit", nil, nil, nil, nil, DefaultConfig())
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+
+		assert.NoError(t, manager.Stop(ctx))
+	})
+
+	t.Run("Stop twice returns nil", func(t *testing.T) {
+		manager := NewManager(nil, "conduit", nil, nil, nil, nil, DefaultConfig())
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+
+		// Both calls are no-ops (never started), exercising the stopped-flag
+		// guard and the nil pubsub path.
+		assert.NoError(t, manager.Stop(ctx))
+		assert.NoError(t, manager.Stop(ctx))
+	})
+}
+
+func TestWatcherStopIdempotent(t *testing.T) {
+	t.Run("Stop on non-started watcher returns nil", func(t *testing.T) {
+		watcher := NewWatcher(nil, "conduit", "users", false, "", nil)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+
+		assert.NoError(t, watcher.Stop(ctx))
+	})
+
+	t.Run("Start then immediate Stop completes without hanging", func(t *testing.T) {
+		// A nil *mongo.Client would panic in watchOnce (w.mongoClient.Database
+		// on nil) if the goroutine reaches it before Stop cancels the context,
+		// so use a real lazily-connected client instead. The v1 driver's
+		// Connect is lazy (no network I/O at connect); pointing it at an
+		// unroutable address with a short server-selection timeout makes
+		// coll.Watch fail fast and deterministically, so watchOnce returns a
+		// "start change stream" error and watchLoop's retry select returns on
+		// w.ctx.Done once Stop cancels it. This exercises the no-hang behavior
+		// under test without a live MongoDB.
+		client, err := mongo.Connect(
+			context.Background(),
+			options.Client().
+				ApplyURI("mongodb://127.0.0.1:1").
+				SetServerSelectionTimeout(100*time.Millisecond),
+		)
+		if err != nil {
+			t.Fatalf("connect mongo: %v", err)
+		}
+		t.Cleanup(func() { _ = client.Disconnect(context.Background()) })
+
+		watcher := NewWatcher(client, "conduit", "users", false, "", nil)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		assert.NoError(t, watcher.Start(ctx, func(streams.StreamRecord) error { return nil }))
+		assert.NoError(t, watcher.Stop(ctx))
+		// Second Stop is a no-op.
+		assert.NoError(t, watcher.Stop(ctx))
+	})
+}
+
+func TestManagerStartWatcherDerivesFromRunCtx(t *testing.T) {
+	// A watcher created via manager.startWatcher must derive its context from
+	// the manager's run context, so Manager.Stop's runCancel() tears it down
+	// even if the watcher's own Stop is never called explicitly. This closes
+	// the post-Stop creation race where a concurrent configChangeLoop could
+	// otherwise create a watcher that outlives the manager.
+	client, err := mongo.Connect(
+		context.Background(),
+		options.Client().
+			ApplyURI("mongodb://127.0.0.1:1").
+			SetServerSelectionTimeout(100*time.Millisecond),
+	)
+	if err != nil {
+		t.Fatalf("connect mongo: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Disconnect(context.Background()) })
+
+	manager := NewManager(client, "conduit", nil, nil, nil, nil, DefaultConfig())
+	manager.runCtx, manager.runCancel = context.WithCancel(context.Background())
+
+	// startWatcher with a nil redisClient is tolerable here: watchOnce only
+	// touches redisClient AFTER a successful event, and with server-selection
+	// failures it errors before any redis use.
+	err = manager.startWatcher(manager.runCtx, collections.Collection{CollectionName: "users"})
+	assert.NoError(t, err)
+
+	watcher, ok := manager.watchers["users"]
+	assert.True(t, ok, "watcher should be registered")
+	assert.True(t, watcher.IsRunning())
+
+	// Cancelling the run context must make the watcher's Watch call abort
+	// rather than hang; Stop then returns promptly.
+	manager.runCancel()
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer stopCancel()
+	assert.NoError(t, watcher.Stop(stopCtx))
+	assert.False(t, watcher.IsRunning())
+
+	// After the run context is cancelled, startWatcher must refuse to create a
+	// new watcher (closing the post-Stop creation race).
+	err = manager.startWatcher(manager.runCtx, collections.Collection{CollectionName: "orders"})
+	assert.Error(t, err)
+	_, exists := manager.watchers["orders"]
+	assert.False(t, exists, "no watcher should be created after the run context is cancelled")
 }

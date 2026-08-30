@@ -2,9 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
-	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -25,6 +26,8 @@ type Worker struct {
 	dispatcher         *dispatch.Dispatcher
 	watcherManager     *watcher.Manager
 	retryProcessor     *retry.Processor
+
+	shutdownOnce atomic.Bool
 }
 
 func NewWorker(cfg config.Config) (*Worker, error) {
@@ -88,25 +91,55 @@ func NewWorker(cfg config.Config) (*Worker, error) {
 	}, nil
 }
 
-func (w *Worker) Close(ctx context.Context) error {
-	log.Println("Closing worker...")
+// Shutdown gracefully stops the worker in dependency order:
+//
+//  1. watcher manager (cancels the run ctx, waits for its loops and every
+//     watcher, closes pub/sub) — no new events flow while bookkeeping drains;
+//  2. retry processor (waits for the current processQueue pass to finish);
+//  3. dispatcher (closes all sinks/transports);
+//  4. redis client;
+//  5. mongo client.
+//
+// Individual errors are collected and logged; the combined error is returned.
+// Shutdown is idempotent: calling it more than once is a no-op.
+func (w *Worker) Shutdown(ctx context.Context) error {
+	if !w.shutdownOnce.CompareAndSwap(false, true) {
+		return nil
+	}
 
-	// Stop watcher manager
+	log.Println("Shutting down worker...")
+
+	var errs []error
+
+	// Watcher manager goes first so no new events are dispatched while
+	// in-flight bookkeeping completes.
 	if err := w.watcherManager.Stop(ctx); err != nil {
 		log.Printf("Error stopping watcher manager: %v", err)
+		errs = append(errs, err)
 	}
 
-	// Close Redis
+	if err := w.retryProcessor.Stop(ctx); err != nil {
+		log.Printf("Error stopping retry processor: %v", err)
+		errs = append(errs, err)
+	}
+
+	if err := w.dispatcher.Close(); err != nil {
+		log.Printf("Error closing dispatcher: %v", err)
+		errs = append(errs, err)
+	}
+
 	if err := w.redisClient.Close(); err != nil {
 		log.Printf("Error closing Redis: %v", err)
+		errs = append(errs, err)
 	}
 
-	// Close MongoDB
 	if err := w.mongoClient.Close(ctx); err != nil {
 		log.Printf("Error closing MongoDB: %v", err)
+		errs = append(errs, err)
 	}
 
-	return nil
+	log.Println("Worker stopped")
+	return errors.Join(errs...)
 }
 
 func (w *Worker) Run(ctx context.Context) error {
@@ -134,24 +167,26 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to create worker: %v", err)
 	}
-	defer worker.Close(context.Background())
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	// SIGINT and SIGTERM both trigger a graceful shutdown.
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 
 	if err := worker.Run(ctx); err != nil {
+		log.Printf("Worker failed: %v", err)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+		defer cancel()
+		if serr := worker.Shutdown(shutdownCtx); serr != nil {
+			log.Printf("Error during shutdown after run failure: %v", serr)
+		}
 		log.Fatalf("Worker failed: %v", err)
 	}
 
-	// Wait for shutdown signal
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	<-sigCh
+	<-ctx.Done()
 
-	log.Println("Shutting down worker...")
-	cancel()
-
-	// Give time for graceful shutdown
-	time.Sleep(2 * time.Second)
-	log.Println("Worker stopped")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+	defer cancel()
+	if err := worker.Shutdown(shutdownCtx); err != nil {
+		log.Printf("Error during shutdown: %v", err)
+	}
 }

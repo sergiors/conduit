@@ -22,6 +22,13 @@ type Processor struct {
 	maxDelay    time.Duration
 	collections map[string]bool
 	mu          sync.RWMutex
+
+	// Runtime state
+	ctx     context.Context
+	cancel  context.CancelFunc
+	wg      sync.WaitGroup
+	started bool
+	startMu sync.Mutex
 }
 
 // Config holds retry processor configuration
@@ -59,13 +66,56 @@ func NewProcessor(
 	}
 }
 
-// Start begins processing the retry queue
+// Start begins processing the retry queue. It is idempotent: calling Start
+// more than once is a no-op and returns nil.
 func (p *Processor) Start(ctx context.Context) error {
+	p.startMu.Lock()
+	defer p.startMu.Unlock()
+
+	if p.started {
+		return nil
+	}
+
 	log.Println("Retry processor starting...")
 
-	go p.processLoop(ctx)
+	p.ctx, p.cancel = context.WithCancel(ctx)
+	p.started = true
+
+	p.wg.Add(1)
+	go func() {
+		defer p.wg.Done()
+		p.processLoop(p.ctx)
+	}()
 
 	return nil
+}
+
+// Stop stops the retry processor gracefully. It cancels the processor's own
+// context and waits for processLoop to exit, so an in-flight processQueue pass
+// completes before returning. Stop is idempotent: calling it more than once
+// (or before Start) is a no-op and returns nil.
+func (p *Processor) Stop(ctx context.Context) error {
+	p.startMu.Lock()
+	if !p.started {
+		p.startMu.Unlock()
+		return nil
+	}
+	p.started = false
+	p.cancel()
+	p.startMu.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		p.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // processLoop continuously processes retry queue
@@ -139,15 +189,21 @@ func (p *Processor) processCollectionQueue(ctx context.Context, collectionName s
 
 // processRetryEvent processes a single retry event
 func (p *Processor) processRetryEvent(ctx context.Context, collectionName string, event redis.RetryEvent) {
+	// Bookkeeping writes (Remove + Enqueue) are paired operations: completing
+	// only half of a pair loses the event. Use a detached context so they
+	// survive a shutdown that cancels the live ctx mid-event.
+	bkctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+
 	// Check if max retries exceeded
 	if event.RetryCount >= event.MaxRetries {
 		log.Printf("Event exceeded max retries (%d), sending to DLQ: %s", event.MaxRetries, collectionName)
 		if p.redisClient != nil {
-			if err := p.redisClient.SendToDLQ(ctx, collectionName, event.EventData); err != nil {
+			if err := p.redisClient.SendToDLQ(bkctx, collectionName, event.EventData); err != nil {
 				log.Printf("Failed to send to DLQ: %v", err)
 			}
 			// Remove from retry queue after sending to DLQ
-			if err := p.redisClient.RemoveRetryEvent(ctx, collectionName, event); err != nil {
+			if err := p.redisClient.RemoveRetryEvent(bkctx, collectionName, event); err != nil {
 				log.Printf("Failed to remove event from retry queue: %v", err)
 			}
 		} else {
@@ -162,7 +218,7 @@ func (p *Processor) processRetryEvent(ctx context.Context, collectionName string
 		log.Printf("Failed to parse stream record from retry queue: %v", err)
 		// Remove invalid event from queue
 		if p.redisClient != nil {
-			if err := p.redisClient.RemoveRetryEvent(ctx, collectionName, event); err != nil {
+			if err := p.redisClient.RemoveRetryEvent(bkctx, collectionName, event); err != nil {
 				log.Printf("Failed to remove invalid event from retry queue: %v", err)
 			}
 		}
@@ -174,12 +230,12 @@ func (p *Processor) processRetryEvent(ctx context.Context, collectionName string
 
 		// Re-queue with exponential backoff - remove old, add new
 		if p.redisClient != nil {
-			if err := p.redisClient.RemoveRetryEvent(ctx, collectionName, event); err != nil {
+			if err := p.redisClient.RemoveRetryEvent(bkctx, collectionName, event); err != nil {
 				log.Printf("Failed to remove old retry event: %v", err)
 			}
 			event.RetryCount++
 			event.NextRetryAt = p.calculateNextRetry(event.RetryCount)
-			if err := p.redisClient.EnqueueRetry(ctx, event); err != nil {
+			if err := p.redisClient.EnqueueRetry(bkctx, event); err != nil {
 				log.Printf("Failed to re-queue retry event: %v", err)
 			}
 		}
@@ -189,7 +245,7 @@ func (p *Processor) processRetryEvent(ctx context.Context, collectionName string
 	// Success - event processed, remove from retry queue
 	log.Printf("Retry succeeded for %s after %d attempts", collectionName, event.RetryCount+1)
 	if p.redisClient != nil {
-		if err := p.redisClient.RemoveRetryEvent(ctx, collectionName, event); err != nil {
+		if err := p.redisClient.RemoveRetryEvent(bkctx, collectionName, event); err != nil {
 			log.Printf("Failed to remove event from retry queue: %v", err)
 		}
 	}

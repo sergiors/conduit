@@ -141,6 +141,52 @@ func TestRetryEventStructure(t *testing.T) {
 	})
 }
 
+func TestProcessorStop(t *testing.T) {
+	t.Run("Stop before Start is safe", func(t *testing.T) {
+		processor := NewProcessor(nil, nil, DefaultConfig())
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+
+		assert.NoError(t, processor.Stop(ctx))
+	})
+
+	t.Run("Start then Stop exits the loop", func(t *testing.T) {
+		// Use a short interval so the loop is actively ticking; Stop must
+		// cancel the loop and wait for it to exit.
+		cfg := DefaultConfig()
+		cfg.Interval = 10 * time.Millisecond
+		processor := NewProcessor(nil, nil, cfg)
+
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+
+		assert.NoError(t, processor.Start(ctx))
+		assert.NoError(t, processor.Stop(ctx))
+	})
+
+	t.Run("Stop is idempotent", func(t *testing.T) {
+		processor := NewProcessor(nil, nil, DefaultConfig())
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+
+		assert.NoError(t, processor.Start(ctx))
+		assert.NoError(t, processor.Stop(ctx))
+		// Second Stop is a no-op.
+		assert.NoError(t, processor.Stop(ctx))
+	})
+
+	t.Run("Start is idempotent", func(t *testing.T) {
+		processor := NewProcessor(nil, nil, DefaultConfig())
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+
+		assert.NoError(t, processor.Start(ctx))
+		// Second Start is a no-op.
+		assert.NoError(t, processor.Start(ctx))
+		assert.NoError(t, processor.Stop(ctx))
+	})
+}
+
 // successTransport is a mock transport that always succeeds.
 type successTransport struct{}
 

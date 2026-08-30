@@ -233,7 +233,15 @@ func (w *Watcher) watchOnce(handler func(streams.StreamRecord) error) error {
 	if err != nil {
 		return fmt.Errorf("start change stream: %w", err)
 	}
-	defer cursor.Close(w.ctx)
+
+	// A detached, bounded context: at shutdown w.ctx is already cancelled, and
+	// cursor.Close(cancelledCtx) never sends killCursors to the server,
+	// leaking the cursor.
+	closeCtx, closeCancel := context.WithTimeout(context.WithoutCancel(w.ctx), 5*time.Second)
+	defer func() {
+		closeCancel()
+		_ = cursor.Close(closeCtx)
+	}()
 
 	// Process changes
 	for cursor.Next(w.ctx) {
@@ -266,11 +274,17 @@ func (w *Watcher) watchOnce(handler func(streams.StreamRecord) error) error {
 		// successfully. The in-memory token advances first so an in-memory
 		// restart never replays the event; the Redis copy is updated
 		// best-effort so a process restart resumes from here too.
+		//
+		// The Redis write uses a detached bounded context so a shutdown that
+		// cancels w.ctx mid-event cannot drop an already-earned token advance.
 		if cursor.ResumeToken() != nil {
 			tokenData, err := bson.Marshal(cursor.ResumeToken())
 			if err == nil {
 				w.resumeToken = string(tokenData)
-				if err := w.redisClient.SetResumeToken(w.ctx, w.collectionName, w.resumeToken); err != nil {
+				bkctx, bkCancel := context.WithTimeout(context.WithoutCancel(w.ctx), 5*time.Second)
+				err := w.redisClient.SetResumeToken(bkctx, w.collectionName, w.resumeToken)
+				bkCancel()
+				if err != nil {
 					log.Printf("Failed to save resume token: %v", err)
 				}
 			}
@@ -289,7 +303,7 @@ func (w *Watcher) watchOnce(handler func(streams.StreamRecord) error) error {
 		return fmt.Errorf("cursor error: %w", err)
 	}
 
-	return cursor.Close(w.ctx)
+	return nil
 }
 
 // parseChange converts a MongoDB change event to a StreamRecord

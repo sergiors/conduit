@@ -31,6 +31,13 @@ type Manager struct {
 	syncInterval       time.Duration
 	pubsub             *redis.PubSub
 	configChan         <-chan *redis.Message
+
+	// Runtime state
+	runCtx    context.Context
+	runCancel context.CancelFunc
+	wg        sync.WaitGroup
+	stopped   bool
+	startMu   sync.Mutex
 }
 
 // Dispatcher interface for decoupling
@@ -76,7 +83,18 @@ func NewManager(
 
 // Start initializes and starts all watchers
 func (m *Manager) Start(ctx context.Context) error {
+	m.startMu.Lock()
+	defer m.startMu.Unlock()
+
+	if m.stopped {
+		return fmt.Errorf("manager already stopped")
+	}
+
 	log.Printf("Watcher manager starting with syncInterval=%s", m.syncInterval)
+
+	// Derive a cancellable context owned by the manager so Stop can cancel the
+	// sync/config-change loops independently of the parent context.
+	m.runCtx, m.runCancel = context.WithCancel(ctx)
 
 	// Initial load of stream-enabled collections
 	collections, err := m.collectionSettings.ListStreamEnabled(ctx)
@@ -88,7 +106,7 @@ func (m *Manager) Start(ctx context.Context) error {
 
 	// Start watcher for each enabled collection
 	for _, collection := range collections {
-		if err := m.startWatcher(ctx, collection); err != nil {
+		if err := m.startWatcher(m.runCtx, collection); err != nil {
 			log.Printf("Failed to start watcher for %s: %v", collection.CollectionName, err)
 		}
 	}
@@ -100,23 +118,59 @@ func (m *Manager) Start(ctx context.Context) error {
 	} else {
 		m.pubsub = pubsub
 		m.configChan = pubsub.Channel()
-		go m.configChangeLoop(ctx)
+		m.wg.Add(1)
+		go func() {
+			defer m.wg.Done()
+			m.configChangeLoop(m.runCtx)
+		}()
 	}
 
 	// Start sync loop
-	go m.syncLoop(ctx)
+	m.wg.Add(1)
+	go func() {
+		defer m.wg.Done()
+		m.syncLoop(m.runCtx)
+	}()
 
 	return nil
 }
 
-// Stop stops all watchers
+// Stop stops all watchers and the manager's background loops. It cancels the
+// manager's own context, waits for the sync/config-change loops to exit, stops
+// every watcher, and closes the pub/sub subscription. Stop is idempotent:
+// calling it more than once (or before Start) is a no-op and returns nil.
 func (m *Manager) Stop(ctx context.Context) error {
+	m.startMu.Lock()
+	if m.stopped {
+		m.startMu.Unlock()
+		return nil
+	}
+	m.stopped = true
+	if m.runCancel != nil {
+		m.runCancel()
+	}
+	m.startMu.Unlock()
+
 	log.Println("Watcher manager stopping...")
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	var lastErr error
+
+	// Bounded by the caller's context with a fallback timeout so a stuck loop
+	// cannot hang shutdown.
+	done := make(chan struct{})
+	go func() {
+		m.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		lastErr = ctx.Err()
+	case <-time.After(10 * time.Second):
+		lastErr = fmt.Errorf("manager loop stop timeout")
+	}
+
+	m.mu.Lock()
 	for collectionName, watcher := range m.watchers {
 		if err := watcher.Stop(ctx); err != nil {
 			log.Printf("Failed to stop watcher for %s: %v", collectionName, err)
@@ -124,6 +178,7 @@ func (m *Manager) Stop(ctx context.Context) error {
 		}
 		delete(m.watchers, collectionName)
 	}
+	m.mu.Unlock()
 
 	// Close Pub/Sub subscription
 	if m.pubsub != nil {
@@ -136,10 +191,21 @@ func (m *Manager) Stop(ctx context.Context) error {
 	return lastErr
 }
 
-// startWatcher creates and starts a watcher for a collection
+// startWatcher creates and starts a watcher for a collection.
+//
+// The watcher's context (and the handleEvent closure it invokes) derives from
+// m.runCtx, not the caller's ctx: cancelling the manager's run context must
+// tear down any watcher, including one created concurrently by a
+// configChangeLoop that was mid-flight when Stop began. startWatcher refuses
+// to run once m.runCtx is cancelled, so Stop can never be raced into
+// registering a watcher it will never drain.
 func (m *Manager) startWatcher(ctx context.Context, collection collections.Collection) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	if m.runCtx == nil || m.runCtx.Err() != nil {
+		return fmt.Errorf("watcher start refused: manager is stopping or stopped")
+	}
 
 	// Check if already running
 	if _, exists := m.watchers[collection.CollectionName]; exists {
@@ -150,10 +216,14 @@ func (m *Manager) startWatcher(ctx context.Context, collection collections.Colle
 	log.Printf("Starting watcher for collection: %s", collection.CollectionName)
 
 	// Register sinks for this collection
-	sinkConfigs, err := m.loadSinks(ctx, collection.CollectionName)
-	if err != nil {
-		log.Printf("Failed to load sinks for %s: %v", collection.CollectionName, err)
-		sinkConfigs = nil
+	var sinkConfigs []collections.Sink
+	if m.collectionSettings != nil {
+		var err error
+		sinkConfigs, err = m.loadSinks(ctx, collection.CollectionName)
+		if err != nil {
+			log.Printf("Failed to load sinks for %s: %v", collection.CollectionName, err)
+			sinkConfigs = nil
+		}
 	}
 	if err := m.registerSinks(ctx, collection.CollectionName, sinkConfigs); err != nil {
 		log.Printf("Failed to register sinks for %s: %v", collection.CollectionName, err)
@@ -161,9 +231,13 @@ func (m *Manager) startWatcher(ctx context.Context, collection collections.Colle
 	m.currentSinks[collection.CollectionName] = sinkConfigs
 
 	// Get resume token from Redis
-	resumeToken, err := m.redisClient.GetResumeToken(ctx, collection.CollectionName)
-	if err != nil {
-		log.Printf("Failed to get resume token for %s: %v", collection.CollectionName, err)
+	var resumeToken string
+	if m.redisClient != nil {
+		var err error
+		resumeToken, err = m.redisClient.GetResumeToken(ctx, collection.CollectionName)
+		if err != nil {
+			log.Printf("Failed to get resume token for %s: %v", collection.CollectionName, err)
+		}
 	}
 
 	// Create watcher
@@ -176,9 +250,10 @@ func (m *Manager) startWatcher(ctx context.Context, collection collections.Colle
 		m.redisClient,
 	)
 
-	// Start watcher with event handler
-	if err := watcher.Start(ctx, func(record streams.StreamRecord) error {
-		return m.handleEvent(ctx, collection.CollectionName, record)
+	// Start watcher with event handler. The watcher and its handler derive from
+	// m.runCtx so Stop's runCancel() tears them down (see the doc comment above).
+	if err := watcher.Start(m.runCtx, func(record streams.StreamRecord) error {
+		return m.handleEvent(m.runCtx, collection.CollectionName, record)
 	}); err != nil {
 		return fmt.Errorf("start watcher: %w", err)
 	}
@@ -264,8 +339,14 @@ func (m *Manager) handleEvent(ctx context.Context, collectionName string, record
 	}
 
 	// Mark as processed
-	// Use 24h TTL for idempotency key
-	if err := m.redisClient.MarkProcessed(ctx, eventID, 24*time.Hour); err != nil {
+	// Use 24h TTL for idempotency key.
+	//
+	// The dispatch already succeeded, so this write must survive a shutdown
+	// that cancels the live ctx mid-event; losing it would cause a duplicate
+	// delivery on restart.
+	bkctx, bkCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer bkCancel()
+	if err := m.redisClient.MarkProcessed(bkctx, eventID, 24*time.Hour); err != nil {
 		log.Printf("Failed to mark event as processed: %v", err)
 	}
 
@@ -291,7 +372,11 @@ func (m *Manager) queueRetry(ctx context.Context, collectionName string, record 
 		NextRetryAt:    time.Now().Add(time.Second), // First retry after 1s
 	}
 
-	return m.redisClient.EnqueueRetry(ctx, retryEvent)
+	// Terminal bookkeeping write: the dispatch already failed, so if this
+	// enqueue is lost to a cancelled ctx the event is silently gone.
+	bkctx, bkCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer bkCancel()
+	return m.redisClient.EnqueueRetry(bkctx, retryEvent)
 }
 
 // configChangeLoop listens for config change notifications and triggers immediate sync
