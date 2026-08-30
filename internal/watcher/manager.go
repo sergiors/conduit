@@ -11,6 +11,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/sergiors/conduit/internal/collections"
 	"github.com/sergiors/conduit/internal/dispatch"
+	"github.com/sergiors/conduit/internal/recover"
 	redisclient "github.com/sergiors/conduit/internal/redis"
 	"github.com/sergiors/conduit/internal/retry"
 	"github.com/sergiors/conduit/internal/streams"
@@ -121,7 +122,9 @@ func (m *Manager) Start(ctx context.Context) error {
 		m.wg.Add(1)
 		go func() {
 			defer m.wg.Done()
-			m.configChangeLoop(m.runCtx)
+			recover.Protect("manager:configChange", func() {
+				m.configChangeLoop(m.runCtx)
+			})
 		}()
 	}
 
@@ -129,7 +132,9 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.wg.Add(1)
 	go func() {
 		defer m.wg.Done()
-		m.syncLoop(m.runCtx)
+		recover.Protect("manager:sync", func() {
+			m.syncLoop(m.runCtx)
+		})
 	}()
 
 	return nil
@@ -391,8 +396,15 @@ func (m *Manager) configChangeLoop(ctx context.Context) {
 			}
 			collectionName := msg.Payload
 			log.Printf("Config change detected for collection: %s", collectionName)
-			// Handle change for specific collection
-			m.handleCollectionChange(ctx, collectionName)
+			// Handle change for specific collection. A panic while handling
+			// one message must not kill the loop; the next config change or
+			// sync will retry.
+			if _, panicked := recover.ProtectErr("manager:configChange", func() error {
+				m.handleCollectionChange(ctx, collectionName)
+				return nil
+			}); panicked {
+				log.Printf("Config change handling for %s panicked; continuing loop", collectionName)
+			}
 		}
 	}
 }
@@ -458,7 +470,14 @@ func (m *Manager) syncLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			m.syncWithCollections(ctx)
+			// A panic while syncing must not kill the loop; the next tick
+			// retries the reconciliation.
+			if _, panicked := recover.ProtectErr("manager:sync", func() error {
+				m.syncWithCollections(ctx)
+				return nil
+			}); panicked {
+				log.Println("Sync panicked; continuing loop")
+			}
 		}
 	}
 }

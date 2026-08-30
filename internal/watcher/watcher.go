@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	recoverpkg "github.com/sergiors/conduit/internal/recover"
 	"github.com/sergiors/conduit/internal/redis"
 	"github.com/sergiors/conduit/internal/streams"
 	"go.mongodb.org/mongo-driver/bson"
@@ -116,8 +118,20 @@ func (w *Watcher) Start(ctx context.Context, handler func(streams.StreamRecord) 
 
 	w.wg.Add(1)
 	go func() {
+		// Backstop: a panic anywhere in the watch loop (e.g. inside a handler
+		// that slips past per-event isolation) would otherwise crash the
+		// process. Protect catches it on this goroutine so the deferred
+		// wg.Done still runs and Stop's Wait cannot hang. A recovered panic
+		// marks the watcher not running so the manager's next sync reconciles
+		// its lifecycle.
 		defer w.wg.Done()
-		w.watchLoop(handler)
+		rec, panicked := recoverpkg.Protect("watcher:"+w.collectionName, func() {
+			w.watchLoop(handler)
+		})
+		_ = rec
+		if panicked {
+			w.isRunning.Store(false)
+		}
 	}()
 
 	log.Printf("Watcher started for collection: %s", w.collectionName)
@@ -265,7 +279,7 @@ func (w *Watcher) watchOnce(handler func(streams.StreamRecord) error) error {
 		}
 
 		// Call handler
-		if err := handler(record); err != nil {
+		if err := w.invokeHandler(handler, record); err != nil {
 			w.recordError(fmt.Errorf("handle event: %w", err))
 			// Don't return here - let retry logic handle it
 		}
@@ -304,6 +318,23 @@ func (w *Watcher) watchOnce(handler func(streams.StreamRecord) error) error {
 	}
 
 	return nil
+}
+
+// invokeHandler calls the event handler, converting a panic inside it into a
+// returned error. A panicking handler (e.g. a nil field deref or a marshal
+// panic deep in the dispatch path) must not kill the watch loop; the event is
+// skipped and left undelivered, and the error flows through the normal
+// recordError path. The resume-token semantics are unchanged: the token still
+// advances after the handler call regardless of the returned error, exactly as
+// before, because the retry queue covers the failure.
+func (w *Watcher) invokeHandler(handler func(streams.StreamRecord) error, record streams.StreamRecord) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("handler panic: %v", r)
+			log.Printf("Watcher %s: handler panic (event skipped, event remains undelivered): %v\n%s", w.collectionName, r, debug.Stack())
+		}
+	}()
+	return handler(record)
 }
 
 // parseChange converts a MongoDB change event to a StreamRecord

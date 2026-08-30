@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sergiors/conduit/internal/dispatch"
+	"github.com/sergiors/conduit/internal/recover"
 	"github.com/sergiors/conduit/internal/redis"
 	"github.com/sergiors/conduit/internal/streams"
 )
@@ -83,8 +84,13 @@ func (p *Processor) Start(ctx context.Context) error {
 
 	p.wg.Add(1)
 	go func() {
+		// Backstop: a panic that slips past per-tick isolation would otherwise
+		// crash the process. Protect catches it on this goroutine so the
+		// deferred wg.Done still runs and Stop's Wait cannot hang.
 		defer p.wg.Done()
-		p.processLoop(p.ctx)
+		recover.Protect("retry:processor", func() {
+			p.processLoop(p.ctx)
+		})
 	}()
 
 	return nil
@@ -129,7 +135,14 @@ func (p *Processor) processLoop(ctx context.Context) {
 			log.Println("Retry processor stopping...")
 			return
 		case <-ticker.C:
-			p.processQueue(ctx)
+			// A panic while processing the queue must not kill the loop; the
+			// next tick retries.
+			if _, panicked := recover.ProtectErr("retry:processor", func() error {
+				p.processQueue(ctx)
+				return nil
+			}); panicked {
+				log.Println("Retry queue processing panicked; continuing loop")
+			}
 		}
 	}
 }

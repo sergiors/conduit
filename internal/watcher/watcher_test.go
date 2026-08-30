@@ -540,3 +540,71 @@ func TestManagerStartWatcherDerivesFromRunCtx(t *testing.T) {
 	_, exists := manager.watchers["orders"]
 	assert.False(t, exists, "no watcher should be created after the run context is cancelled")
 }
+
+func TestInvokeHandlerPanicIsolation(t *testing.T) {
+	t.Run("a panicking handler is converted to an error", func(t *testing.T) {
+		watcher := NewWatcher(nil, "conduit", "users", false, "", nil)
+
+		record := streams.StreamRecord{TableName: "users", EventID: "users:abc"}
+		err := watcher.invokeHandler(func(streams.StreamRecord) error {
+			var m map[string]int
+			m["key"] = 1 // nil map write panics
+			return nil
+		}, record)
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "handler panic")
+	})
+
+	t.Run("a normal handler error passes through unchanged", func(t *testing.T) {
+		watcher := NewWatcher(nil, "conduit", "users", false, "", nil)
+		sentinel := errors.New("dispatch failed")
+
+		record := streams.StreamRecord{TableName: "users", EventID: "users:abc"}
+		err := watcher.invokeHandler(func(streams.StreamRecord) error {
+			return sentinel
+		}, record)
+
+		assert.ErrorIs(t, err, sentinel)
+	})
+
+	t.Run("a clean handler returns nil", func(t *testing.T) {
+		watcher := NewWatcher(nil, "conduit", "users", false, "", nil)
+
+		record := streams.StreamRecord{TableName: "users", EventID: "users:abc"}
+		err := watcher.invokeHandler(func(streams.StreamRecord) error {
+			return nil
+		}, record)
+
+		assert.NoError(t, err)
+	})
+}
+
+func TestWatcherStartPanicHandlerDoesNotCrash(t *testing.T) {
+	// A handler that panics must not crash the test binary: the per-event
+	// isolation converts it to an error, and the goroutine backstop contains
+	// anything that slips past. Use a real lazily-connected client so
+	// watchOnce fails fast on server selection rather than panicking on a nil
+	// client deref.
+	client, err := mongo.Connect(
+		context.Background(),
+		options.Client().
+			ApplyURI("mongodb://127.0.0.1:1").
+			SetServerSelectionTimeout(100*time.Millisecond),
+	)
+	if err != nil {
+		t.Fatalf("connect mongo: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Disconnect(context.Background()) })
+
+	watcher := NewWatcher(client, "conduit", "users", false, "", nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	assert.NoError(t, watcher.Start(ctx, func(streams.StreamRecord) error {
+		var m map[string]int
+		m["key"] = 1 // nil map write panics
+		return nil
+	}))
+	assert.NoError(t, watcher.Stop(ctx))
+}

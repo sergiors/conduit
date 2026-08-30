@@ -187,6 +187,26 @@ func TestProcessorStop(t *testing.T) {
 	})
 }
 
+func TestProcessorLoopPanicIsolation(t *testing.T) {
+	// A panic inside processQueue (here: a nil redisClient deref in
+	// DequeueRetry) must not crash the process or kill the loop: the per-tick
+	// ProtectErr wrapper recovers it and the loop continues until Stop.
+	cfg := DefaultConfig()
+	cfg.Interval = 10 * time.Millisecond
+	processor := NewProcessor(nil, nil, cfg)
+	// Register a collection so processQueue actually reaches DequeueRetry on
+	// the nil redisClient, which panics.
+	processor.RegisterCollection("users")
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	assert.NoError(t, processor.Start(ctx))
+	// Let a few ticks run so processQueue panics and is recovered.
+	time.Sleep(50 * time.Millisecond)
+	assert.NoError(t, processor.Stop(ctx))
+}
+
 // successTransport is a mock transport that always succeeds.
 type successTransport struct{}
 
