@@ -228,6 +228,22 @@ func (m *Manager) Stop(ctx context.Context) error {
 
 // startWatcher creates and starts a watcher for a collection.
 //
+// Start-up contract:
+//   - The resume token is read from Redis FIRST, before any sinks are loaded or
+//     registered and before any state is written. Sinks are registered into the
+//     shared dispatcher with no rollback, so any failure after that point would
+//     leave side effects for a later reconciliation retry (duplicate sinks). The
+//     token read therefore happens first so a failure aborts with no side effects.
+//   - A resume-token read error (Redis transport/timeout/failover) aborts startup:
+//     startWatcher returns a wrapped error and the watcher is NOT registered in
+//     m.watchers. Starting with an empty token would resume from the current
+//     oplog position and silently skip every event since the last persisted
+//     token, so the failure must instead leave the collection to be retried by
+//     the manager's reconciliation (syncLoop / configChangeLoop).
+//   - A missing token (redis.Nil mapped to ("", nil) by GetResumeToken) means
+//     first run: startWatcher proceeds with an empty token and opens a fresh
+//     change stream without resumeAfter.
+//
 // The watcher's context (and the handleEvent closure it invokes) derives from
 // m.runCtx, not the caller's ctx: cancelling the manager's run context must
 // tear down any watcher, including one created concurrently by a
@@ -250,6 +266,24 @@ func (m *Manager) startWatcher(ctx context.Context, collection collections.Colle
 
 	log.Printf("Starting watcher for collection: %s", collection.CollectionName)
 
+	// Get resume token from Redis BEFORE registering sinks/writing state: if
+	// the read fails the watcher must not start (starting with an empty token
+	// would resume from the current oplog position and silently skip every
+	// event since the last persisted token), and the failure must leave no
+	// side effects for the next reconciliation attempt.
+	var resumeToken string
+	if m.redisClient != nil {
+		var err error
+		resumeToken, err = m.redisClient.GetResumeToken(ctx, collection.CollectionName)
+		if err != nil {
+			// redis.Nil never reaches here (GetResumeToken maps it to ("", nil)):
+			// that case legitimately starts a fresh stream. Any other error is a
+			// Redis problem: refuse to start and let the manager's reconciliation
+			// (syncLoop / configChangeLoop) start the watcher once Redis returns.
+			return fmt.Errorf("load resume token for %s: %w", collection.CollectionName, err)
+		}
+	}
+
 	// Register sinks for this collection
 	var sinkConfigs []collections.Sink
 	if m.collectionSettings != nil {
@@ -264,16 +298,6 @@ func (m *Manager) startWatcher(ctx context.Context, collection collections.Colle
 		log.Printf("Failed to register sinks for %s: %v", collection.CollectionName, err)
 	}
 	m.currentSinks[collection.CollectionName] = sinkConfigs
-
-	// Get resume token from Redis
-	var resumeToken string
-	if m.redisClient != nil {
-		var err error
-		resumeToken, err = m.redisClient.GetResumeToken(ctx, collection.CollectionName)
-		if err != nil {
-			log.Printf("Failed to get resume token for %s: %v", collection.CollectionName, err)
-		}
-	}
 
 	// Create watcher
 	watcher := NewWatcher(

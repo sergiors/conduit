@@ -544,6 +544,110 @@ func TestManagerStartWatcherDerivesFromRunCtx(t *testing.T) {
 	assert.False(t, exists, "no watcher should be created after the run context is cancelled")
 }
 
+// newStartWatcherMongoClient returns a lazily-connected mongo client pointed at
+// an unroutable address with a short server-selection timeout, so watchOnce
+// fails fast on connect instead of hanging or panicking on a nil client. It is
+// shared by the startWatcher resume-token tests.
+func newStartWatcherMongoClient(t *testing.T) *mongo.Client {
+	t.Helper()
+	client, err := mongo.Connect(
+		context.Background(),
+		options.Client().
+			ApplyURI("mongodb://127.0.0.1:1").
+			SetServerSelectionTimeout(100*time.Millisecond),
+	)
+	if err != nil {
+		t.Fatalf("connect mongo: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Disconnect(context.Background()) })
+	return client
+}
+
+// TestManagerStartWatcherResumeTokenFailure verifies that a resume-token read
+// error aborts startWatcher with no side effects: no watcher is registered,
+// no sinks are captured, and the error is returned wrapped. The manager's
+// reconciliation (syncLoop / configChangeLoop) retries startWatcher later, so
+// nothing durable may be left behind for that retry.
+func TestManagerStartWatcherResumeTokenFailure(t *testing.T) {
+	client := newStartWatcherMongoClient(t)
+	fr := newFakeRedis()
+
+	// A sentinel representing a transient Redis outage (timeout / failover).
+	fr.getErr = errors.New("redis down")
+
+	manager := NewManager(client, "conduit", nil, fr, nil, nil, DefaultConfig())
+	manager.runCtx, manager.runCancel = context.WithCancel(context.Background())
+	t.Cleanup(manager.runCancel)
+
+	err := manager.startWatcher(manager.runCtx, collections.Collection{CollectionName: "users"})
+
+	// The read error is propagated (wrapped), not swallowed.
+	assert.Error(t, err)
+	assert.ErrorContains(t, err, "redis down")
+
+	// No side effects for the next reconciliation attempt.
+	mgr := manager
+	mgr.mu.Lock()
+	_, watcherExists := mgr.watchers["users"]
+	_, sinkExists := mgr.currentSinks["users"]
+	mgr.mu.Unlock()
+	assert.False(t, watcherExists, "no watcher may be registered on resume-token failure")
+	assert.False(t, sinkExists, "no currentSinks entry may be written on resume-token failure")
+}
+
+func TestManagerStartWatcherResumeToken(t *testing.T) {
+	t.Run("existing token is used to resume the stream", func(t *testing.T) {
+		client := newStartWatcherMongoClient(t)
+		fr := newFakeRedis()
+		token := "existing-resume-token"
+		fr.resumeTokens["users"] = token
+
+		manager := NewManager(client, "conduit", nil, fr, nil, nil, DefaultConfig())
+		manager.runCtx, manager.runCancel = context.WithCancel(context.Background())
+		t.Cleanup(manager.runCancel)
+
+		err := manager.startWatcher(manager.runCtx, collections.Collection{CollectionName: "users"})
+		assert.NoError(t, err)
+
+		watcher, ok := manager.watchers["users"]
+		assert.True(t, ok, "watcher should be registered")
+		// The token must reach the watcher so watcher.go can SetResumeAfter it.
+		assert.Equal(t, token, watcher.resumeToken)
+	})
+
+	t.Run("missing token (redis.Nil as empty) starts a fresh stream", func(t *testing.T) {
+		client := newStartWatcherMongoClient(t)
+		fr := newFakeRedis()
+
+		manager := NewManager(client, "conduit", nil, fr, nil, nil, DefaultConfig())
+		manager.runCtx, manager.runCancel = context.WithCancel(context.Background())
+		t.Cleanup(manager.runCancel)
+
+		err := manager.startWatcher(manager.runCtx, collections.Collection{CollectionName: "users"})
+		assert.NoError(t, err)
+
+		watcher, ok := manager.watchers["users"]
+		assert.True(t, ok, "watcher should be registered")
+		// Empty token means no resumeAfter: a brand new change stream.
+		assert.Equal(t, "", watcher.resumeToken)
+	})
+
+	t.Run("nil redis client skips the token read and still starts", func(t *testing.T) {
+		client := newStartWatcherMongoClient(t)
+
+		manager := NewManager(client, "conduit", nil, nil, nil, nil, DefaultConfig())
+		manager.runCtx, manager.runCancel = context.WithCancel(context.Background())
+		t.Cleanup(manager.runCancel)
+
+		err := manager.startWatcher(manager.runCtx, collections.Collection{CollectionName: "users"})
+		assert.NoError(t, err)
+
+		watcher, ok := manager.watchers["users"]
+		assert.True(t, ok, "watcher should be registered")
+		assert.Equal(t, "", watcher.resumeToken)
+	})
+}
+
 func TestInvokeHandlerPanicIsolation(t *testing.T) {
 	t.Run("a panicking handler is converted to an error", func(t *testing.T) {
 		watcher := NewWatcher(nil, "conduit", "users", false, "", nil)
@@ -588,6 +692,7 @@ func TestInvokeHandlerPanicIsolation(t *testing.T) {
 // manager persisted.
 type fakeRedis struct {
 	mu            sync.Mutex
+	getErr        error
 	resumeTokens  map[string]string
 	resumeCalls   int
 	processed     map[string]bool
@@ -607,6 +712,9 @@ func newFakeRedis() *fakeRedis {
 func (f *fakeRedis) GetResumeToken(ctx context.Context, collectionName string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.getErr != nil {
+		return "", f.getErr
+	}
 	return f.resumeTokens[collectionName], nil
 }
 

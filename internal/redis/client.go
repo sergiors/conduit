@@ -92,7 +92,10 @@ func (c *Client) processedKey(id string) string {
 }
 
 // ResumeToken operations
-// GetResumeToken retrieves the resume token for a collection
+// GetResumeToken retrieves the resume token for a collection.
+//
+// redis.Nil (a missing key — first execution) is mapped to the pair ("", nil),
+// which callers treat as "no resume token: start a fresh change stream".
 func (c *Client) GetResumeToken(ctx context.Context, collectionName string) (string, error) {
 	key := c.resumeTokenKey(collectionName)
 	token, err := c.client.Get(ctx, key).Result()
