@@ -14,16 +14,17 @@ import (
 )
 
 type Collection struct {
-	ID                 string    `bson:"_id,omitempty" json:"_id,omitempty"`
-	CollectionName     string    `bson:"collection_name,omitempty" json:"collection_name,omitempty"`
-	PartitionKey       string    `bson:"partition_key,omitempty" json:"partition_key,omitempty"`
-	SortKey            string    `bson:"sort_key,omitempty" json:"sort_key,omitempty"`
-	StreamEnabled      bool      `bson:"stream_enabled" json:"stream_enabled"`
-	OldImage           bool      `bson:"old_image" json:"old_image"`
-	TTLAttribute       string    `bson:"ttl_attribute,omitempty" json:"ttl_attribute,omitempty"`
-	DeletionProtection bool      `bson:"deletion_protection" json:"deletion_protection"`
-	CreatedAt          time.Time `bson:"created_at" json:"created_at"`
-	UpdatedAt          time.Time `bson:"updated_at" json:"updated_at"`
+	ID                 string               `bson:"_id,omitempty" json:"_id,omitempty"`
+	CollectionName     string               `bson:"collection_name,omitempty" json:"collection_name,omitempty"`
+	PartitionKey       string               `bson:"partition_key,omitempty" json:"partition_key,omitempty"`
+	SortKey            string               `bson:"sort_key,omitempty" json:"sort_key,omitempty"`
+	StreamEnabled      bool                 `bson:"stream_enabled" json:"stream_enabled"`
+	OldImage           bool                 `bson:"old_image" json:"old_image"`
+	StreamStartedAt    *primitive.Timestamp `bson:"stream_started_at,omitempty" json:"stream_started_at,omitempty"`
+	TTLAttribute       string               `bson:"ttl_attribute,omitempty" json:"ttl_attribute,omitempty"`
+	DeletionProtection bool                 `bson:"deletion_protection" json:"deletion_protection"`
+	CreatedAt          time.Time            `bson:"created_at" json:"created_at"`
+	UpdatedAt          time.Time            `bson:"updated_at" json:"updated_at"`
 }
 
 // Manager owns the lifecycle and configuration of CDC-monitored collections

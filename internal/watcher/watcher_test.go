@@ -23,7 +23,7 @@ import (
 
 func TestWatcherCreation(t *testing.T) {
 	t.Run("new watcher with correct configuration", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "users", true, "", nil)
+		watcher := NewWatcher(nil, "conduit", "users", true, "", nil, nil)
 
 		assert.NotNil(t, watcher)
 		assert.Equal(t, "conduit", watcher.database)
@@ -34,16 +34,64 @@ func TestWatcherCreation(t *testing.T) {
 
 	t.Run("watcher with resume token", func(t *testing.T) {
 		token := "test-resume-token"
-		watcher := NewWatcher(nil, "conduit", "orders", false, token, nil)
+		watcher := NewWatcher(nil, "conduit", "orders", false, token, nil, nil)
 
 		assert.NotNil(t, watcher)
 		assert.Equal(t, token, watcher.resumeToken)
 	})
 }
 
+// TestBuildChangeStreamOptions verifies the resume-position policy for a watch
+// session: resume token wins, then the first-start checkpoint, then neither
+// (a plain fresh stream). This is the deterministic unit test for the
+// first-start event window fix.
+func TestBuildChangeStreamOptions(t *testing.T) {
+	checkpoint := primitive.Timestamp{T: 1787932086, I: 1}
+
+	t.Run("token present wins over the checkpoint", func(t *testing.T) {
+		tokenDoc, err := bson.Marshal(bson.M{"_data": "826A91ADB6000000022B042C0100296E"})
+		require.NoError(t, err)
+		w := NewWatcher(nil, "conduit", "users", false, string(tokenDoc), &checkpoint, nil)
+
+		opts := w.buildChangeStreamOptions()
+		assert.NotNil(t, opts.ResumeAfter, "a resume token must set ResumeAfter")
+		// With a token present, the checkpoint must NOT be applied.
+		assert.Nil(t, opts.StartAtOperationTime, "the checkpoint must never override a resume token")
+	})
+
+	t.Run("no token with a checkpoint sets StartAtOperationTime", func(t *testing.T) {
+		w := NewWatcher(nil, "conduit", "users", false, "", &checkpoint, nil)
+
+		opts := w.buildChangeStreamOptions()
+		assert.Nil(t, opts.ResumeAfter, "no resume token")
+		assert.NotNil(t, opts.StartAtOperationTime, "fresh watcher with a checkpoint must anchor at it")
+		assert.Equal(t, checkpoint, *opts.StartAtOperationTime)
+	})
+
+	t.Run("no token and no checkpoint sets neither", func(t *testing.T) {
+		w := NewWatcher(nil, "conduit", "users", false, "", nil, nil)
+
+		opts := w.buildChangeStreamOptions()
+		assert.Nil(t, opts.ResumeAfter)
+		assert.Nil(t, opts.StartAtOperationTime, "no checkpoint, no token: fresh stream at current position")
+	})
+
+	t.Run("unparseable stored token behaves as absent (checkpoint applies)", func(t *testing.T) {
+		// A corrupt/invalid stored token string cannot be unmarshalled, so it
+		// is treated as absent and the checkpoint applies. (The invalidate
+		// path clears the token in Redis, but the in-memory value could be
+		// transiently corrupt after a restart.)
+		w := NewWatcher(nil, "conduit", "users", false, "not-valid-bson", &checkpoint, nil)
+
+		opts := w.buildChangeStreamOptions()
+		assert.Nil(t, opts.ResumeAfter, "unparseable token must not set ResumeAfter")
+		assert.NotNil(t, opts.StartAtOperationTime, "checkpoint must apply when the stored token is unparseable")
+	})
+}
+
 func TestWatcherStats(t *testing.T) {
 	t.Run("initial stats are correct", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "test", false, "", nil)
+		watcher := NewWatcher(nil, "conduit", "test", false, "", nil, nil)
 
 		stats := watcher.GetStats()
 		assert.Zero(t, stats.EventsProcessed)
@@ -52,14 +100,14 @@ func TestWatcherStats(t *testing.T) {
 	})
 
 	t.Run("IsRunning returns false before start", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "test", false, "", nil)
+		watcher := NewWatcher(nil, "conduit", "test", false, "", nil, nil)
 		assert.False(t, watcher.IsRunning())
 	})
 }
 
 func TestParseChange(t *testing.T) {
 	t.Run("parse insert operation", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "users", false, "", nil)
+		watcher := NewWatcher(nil, "conduit", "users", false, "", nil, nil)
 
 		change := bson.M{
 			"operationType": "insert",
@@ -79,7 +127,7 @@ func TestParseChange(t *testing.T) {
 	})
 
 	t.Run("parse update operation with old image", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "orders", true, "", nil)
+		watcher := NewWatcher(nil, "conduit", "orders", true, "", nil, nil)
 
 		change := bson.M{
 			"operationType": "update",
@@ -101,7 +149,7 @@ func TestParseChange(t *testing.T) {
 	})
 
 	t.Run("parse delete operation", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "sessions", true, "", nil)
+		watcher := NewWatcher(nil, "conduit", "sessions", true, "", nil, nil)
 
 		change := bson.M{
 			"operationType": "delete",
@@ -119,7 +167,7 @@ func TestParseChange(t *testing.T) {
 	})
 
 	t.Run("parse unknown operation type", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "test", false, "", nil)
+		watcher := NewWatcher(nil, "conduit", "test", false, "", nil, nil)
 
 		change := bson.M{
 			"operationType": "unknown",
@@ -131,7 +179,7 @@ func TestParseChange(t *testing.T) {
 	})
 
 	t.Run("parse missing operation type", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "test", false, "", nil)
+		watcher := NewWatcher(nil, "conduit", "test", false, "", nil, nil)
 
 		change := bson.M{}
 
@@ -141,7 +189,7 @@ func TestParseChange(t *testing.T) {
 	})
 
 	t.Run("event ID is derived from resume token", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "users", false, "", nil)
+		watcher := NewWatcher(nil, "conduit", "users", false, "", nil, nil)
 
 		change := bson.M{
 			"_id": bson.M{
@@ -167,8 +215,8 @@ func TestParseChange(t *testing.T) {
 			"fullDocument":  bson.M{"_id": "123"},
 		}
 
-		first := NewWatcher(nil, "conduit", "orders", false, "", nil)
-		second := NewWatcher(nil, "conduit", "orders", false, "", nil)
+		first := NewWatcher(nil, "conduit", "orders", false, "", nil, nil)
+		second := NewWatcher(nil, "conduit", "orders", false, "", nil, nil)
 
 		r1, err := first.parseChange(change)
 		assert.NoError(t, err)
@@ -180,7 +228,7 @@ func TestParseChange(t *testing.T) {
 	})
 
 	t.Run("event ID falls back to clusterTime and documentKey", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "orders", false, "", nil)
+		watcher := NewWatcher(nil, "conduit", "orders", false, "", nil, nil)
 
 		change := bson.M{
 			"operationType": "update",
@@ -200,8 +248,8 @@ func TestParseChange(t *testing.T) {
 			"documentKey":   bson.M{"_id": "789"},
 		}
 
-		first := NewWatcher(nil, "conduit", "sessions", false, "", nil)
-		second := NewWatcher(nil, "conduit", "sessions", false, "", nil)
+		first := NewWatcher(nil, "conduit", "sessions", false, "", nil, nil)
+		second := NewWatcher(nil, "conduit", "sessions", false, "", nil, nil)
 
 		r1, err := first.parseChange(change)
 		assert.NoError(t, err)
@@ -213,7 +261,7 @@ func TestParseChange(t *testing.T) {
 	})
 
 	t.Run("different changes produce different event IDs", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "users", false, "", nil)
+		watcher := NewWatcher(nil, "conduit", "users", false, "", nil, nil)
 
 		first, err := watcher.parseChange(bson.M{
 			"_id":           bson.M{"_data": "826A91ADB6000000022B04"},
@@ -233,7 +281,7 @@ func TestParseChange(t *testing.T) {
 	t.Run("event ID is never derived from time.Now", func(t *testing.T) {
 		// Parsing the same change twice within one watcher must also be
 		// deterministic (guards against any wall-clock dependency).
-		watcher := NewWatcher(nil, "conduit", "users", false, "", nil)
+		watcher := NewWatcher(nil, "conduit", "users", false, "", nil, nil)
 
 		change := bson.M{
 			"_id":           bson.M{"_data": "826A91ADB6000000022B04"},
@@ -254,7 +302,7 @@ func TestParseChangeDocumentID(t *testing.T) {
 	t.Run("insert with ObjectID _id yields hex", func(t *testing.T) {
 		// Identity is the MongoDB `_id` regardless of any pk/sk-style fields
 		// present in the full document.
-		watcher := NewWatcher(nil, "conduit", "orders", false, "", nil)
+		watcher := NewWatcher(nil, "conduit", "orders", false, "", nil, nil)
 		oid := primitive.NewObjectID()
 
 		change := bson.M{
@@ -273,7 +321,7 @@ func TestParseChangeDocumentID(t *testing.T) {
 	})
 
 	t.Run("insert with string _id is verbatim", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "users", false, "", nil)
+		watcher := NewWatcher(nil, "conduit", "users", false, "", nil, nil)
 
 		change := bson.M{
 			"operationType": "insert",
@@ -289,7 +337,7 @@ func TestParseChangeDocumentID(t *testing.T) {
 	t.Run("delete with only documentKey yields _id hex", func(t *testing.T) {
 		// A delete event without a pre-image still carries documentKey, so the
 		// identity is always available.
-		watcher := NewWatcher(nil, "conduit", "sessions", false, "", nil)
+		watcher := NewWatcher(nil, "conduit", "sessions", false, "", nil, nil)
 		oid := primitive.NewObjectID()
 
 		change := bson.M{
@@ -304,7 +352,7 @@ func TestParseChangeDocumentID(t *testing.T) {
 	})
 
 	t.Run("missing documentKey leaves DocumentID empty", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "users", false, "", nil)
+		watcher := NewWatcher(nil, "conduit", "users", false, "", nil, nil)
 
 		change := bson.M{
 			"operationType": "insert",
@@ -425,7 +473,7 @@ func errStaleTokenScenario(token []byte) error {
 
 func TestResumeTokenPreservation(t *testing.T) {
 	t.Run("terminal parse errors propagate out of watchOnce", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "users", false, "", nil)
+		watcher := NewWatcher(nil, "conduit", "users", false, "", nil, nil)
 
 		// A drop event must surface from parseChange instead of being
 		// swallowed, so watchLoop can stop the watcher.
@@ -503,7 +551,7 @@ func TestManagerStopIdempotent(t *testing.T) {
 
 func TestWatcherStopIdempotent(t *testing.T) {
 	t.Run("Stop on non-started watcher returns nil", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "users", false, "", nil)
+		watcher := NewWatcher(nil, "conduit", "users", false, "", nil, nil)
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 
@@ -531,7 +579,7 @@ func TestWatcherStopIdempotent(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = client.Disconnect(context.Background()) })
 
-		watcher := NewWatcher(client, "conduit", "users", false, "", nil)
+		watcher := NewWatcher(client, "conduit", "users", false, "", nil, nil)
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 
@@ -676,6 +724,30 @@ func TestManagerStartWatcherResumeToken(t *testing.T) {
 		assert.Equal(t, "", watcher.resumeToken)
 	})
 
+	t.Run("first-start checkpoint is passed to a fresh (no-token) watcher", func(t *testing.T) {
+		client := newStartWatcherMongoClient(t)
+		fr := newFakeRedis()
+		checkpoint := primitive.Timestamp{T: uint32(time.Now().Unix()), I: 1}
+
+		manager := NewManager(client, "conduit", nil, fr, nil, nil, DefaultConfig())
+		manager.runCtx, manager.runCancel = context.WithCancel(context.Background())
+		t.Cleanup(manager.runCancel)
+
+		// A freshly-enabled collection carries StreamStartedAt and, because the
+		// worker has never started it before, no resume token in Redis.
+		err := manager.startWatcher(manager.runCtx, collections.Collection{
+			CollectionName:  "users",
+			StreamStartedAt: &checkpoint,
+		})
+		assert.NoError(t, err)
+
+		watcher, ok := manager.watchers["users"]
+		assert.True(t, ok, "watcher should be registered")
+		assert.Equal(t, "", watcher.resumeToken, "no token yet")
+		assert.NotNil(t, watcher.startAtOperationTime, "checkpoint must reach the watcher")
+		assert.Equal(t, checkpoint, *watcher.startAtOperationTime)
+	})
+
 	t.Run("nil redis client skips the token read and still starts", func(t *testing.T) {
 		client := newStartWatcherMongoClient(t)
 
@@ -694,7 +766,7 @@ func TestManagerStartWatcherResumeToken(t *testing.T) {
 
 func TestInvokeHandlerPanicIsolation(t *testing.T) {
 	t.Run("a panicking handler is converted to an error", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "users", false, "", nil)
+		watcher := NewWatcher(nil, "conduit", "users", false, "", nil, nil)
 
 		record := streams.StreamRecord{TableName: "users", EventID: "users:abc"}
 		err := watcher.invokeHandler(func(streams.StreamRecord) error {
@@ -708,7 +780,7 @@ func TestInvokeHandlerPanicIsolation(t *testing.T) {
 	})
 
 	t.Run("a normal handler error passes through unchanged", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "users", false, "", nil)
+		watcher := NewWatcher(nil, "conduit", "users", false, "", nil, nil)
 		sentinel := errors.New("dispatch failed")
 
 		record := streams.StreamRecord{TableName: "users", EventID: "users:abc"}
@@ -720,7 +792,7 @@ func TestInvokeHandlerPanicIsolation(t *testing.T) {
 	})
 
 	t.Run("a clean handler returns nil", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "users", false, "", nil)
+		watcher := NewWatcher(nil, "conduit", "users", false, "", nil, nil)
 
 		record := streams.StreamRecord{TableName: "users", EventID: "users:abc"}
 		err := watcher.invokeHandler(func(streams.StreamRecord) error {
@@ -735,15 +807,15 @@ func TestInvokeHandlerPanicIsolation(t *testing.T) {
 // retry-enqueue activity so settlement tests can assert what the watcher and
 // manager persisted.
 type fakeRedis struct {
-	mu                sync.Mutex
-	getErr            error
-	resumeTokens      map[string]string
-	resumeCalls       int
-	processed         map[string]bool
-	markCalls         int
-	enqueueCalls      int
-	enqueueResult     error
-	subscribeErr      error
+	mu            sync.Mutex
+	getErr        error
+	resumeTokens  map[string]string
+	resumeCalls   int
+	processed     map[string]bool
+	markCalls     int
+	enqueueCalls  int
+	enqueueResult error
+	subscribeErr  error
 }
 
 func newFakeRedis() *fakeRedis {
@@ -766,6 +838,9 @@ func (f *fakeRedis) SetResumeToken(ctx context.Context, collectionName, token st
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.resumeCalls++
+	if f.getErr != nil {
+		return f.getErr
+	}
 	f.resumeTokens[collectionName] = token
 	return nil
 }
@@ -812,7 +887,7 @@ func (f *fakeRedis) resumeToken(collectionName string) string {
 // Start normally sets w.ctx, so set it here to exercise the detached-context
 // token persistence without spawning the watch goroutine.
 func newProcessEventWatcher(redisClient RedisClient) *Watcher {
-	watcher := NewWatcher(nil, "conduit", "users", false, "", redisClient)
+	watcher := NewWatcher(nil, "conduit", "users", false, "", nil, redisClient)
 	watcher.ctx = context.Background()
 	return watcher
 }
@@ -991,7 +1066,7 @@ func TestWatcherStartPanicHandlerDoesNotCrash(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = client.Disconnect(context.Background()) })
 
-	watcher := NewWatcher(client, "conduit", "users", false, "", nil)
+	watcher := NewWatcher(client, "conduit", "users", false, "", nil, nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
@@ -1225,9 +1300,109 @@ func TestHandleCollectionChangeDeletedStopsWatcher(t *testing.T) {
 // isRunning WITHOUT Stop being called. This is the deterministic regression for
 // the terminal-exit path (drop/invalidate) that previously left IsRunning()
 // reporting true on a dead watcher.
+// TestFirstStartCheckpointLiveStreamsPreStartEvents is the live end-to-end
+// verification for the first-start event window fix. It proves that a freshly
+// enabled collection whose checkpoint (stream_started_at) is BEFORE some
+// writes will, when the watcher opens a stream anchored at that checkpoint with
+// NO resume token, deliver those pre-start writes (they are not skipped). This
+// is exactly the enable → watcher-start gap the fix closes.
+func TestFirstStartCheckpointLiveStreamsPreStartEvents(t *testing.T) {
+	client := newLiveMongoClient(t)
+	fr := newFakeRedis()
+
+	const db = "conduit_test_firststart"
+	// Use the collections manager to capture a real stream_started_at via
+	// EnableStream, then simulate the gap: write events BEFORE starting a
+	// watcher anchored at that checkpoint, and assert the watcher observes them.
+	settings := collections.NewManager(client, db)
+
+	const name = "firststart_coll"
+	cleanup := func() {
+		bgCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if _, err := settings.Get(bgCtx, name); err == nil {
+			_ = settings.DisableDeletionProtection(bgCtx, name)
+			_ = settings.Delete(bgCtx, name)
+		}
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+
+	require.NoError(t, settings.Create(context.Background(), &collections.Collection{
+		CollectionName: name,
+	}))
+	// The checkpoint is captured here, at enablement.
+	require.NoError(t, settings.EnableStream(context.Background(), name, false))
+
+	enabled, err := settings.Get(context.Background(), name)
+	require.NoError(t, err)
+	require.NotNil(t, enabled.StreamStartedAt, "EnableStream must record a checkpoint")
+
+	// Simulate the enable → watcher-start window: write a document that happens
+	// AFTER the checkpoint but BEFORE the watcher is started. Without the fix
+	// this write is skipped (the stream would start at "now").
+	physical := client.Database(db).Collection(name)
+	writeCtx, writeCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer writeCancel()
+	_, err = physical.InsertOne(writeCtx, bson.M{"_id": "pre-start-doc", "v": 1})
+	require.NoError(t, err)
+
+	// Build the watcher anchored at the checkpoint (no resume token), exactly
+	// as the manager's startWatcher does for a freshly-enabled collection.
+	watcher := NewWatcher(client, db, name, false, "", enabled.StreamStartedAt, fr)
+
+	// The manager's handler settles every event: mark processed + dispatch.
+	observed := make(chan string, 8)
+	started := make(chan struct{})
+	startErr := make(chan error, 1)
+	go func() {
+		startErr <- watcher.Start(context.Background(), func(record streams.StreamRecord) error {
+			observed <- record.DocumentID
+			return nil
+		})
+		close(started)
+	}()
+	t.Cleanup(func() {
+		cctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = watcher.Stop(cctx)
+	})
+
+	// MongoDB's change stream, when anchored at a startAtOperationTime that
+	// does not correspond to an exact oplog entry, synthesizes an `init`
+	// anchor (a phantom INSERT and DELETE of _id "init") to establish the
+	// resume point before replaying real events. Loop until the real pre-start
+	// document is observed, ignoring the phantom anchor.
+	sawTarget := false
+	deadline := time.After(25 * time.Second)
+	for !sawTarget {
+		select {
+		case id := <-observed:
+			if id == "pre-start-doc" {
+				sawTarget = true
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for the pre-start write to be delivered")
+		}
+	}
+	assert.True(t, sawTarget, "the pre-watcher-start write must be delivered (not skipped)")
+
+	// The handler returned nil (event settled), so the resume token must have
+	// advanced and been persisted — evidence the event was actually processed,
+	// not merely observed on the stream.
+	require.Eventually(t, func() bool {
+		return fr.resumeToken(name) != ""
+	}, 5*time.Second, 20*time.Millisecond, "the settled event must advance and persist the resume token")
+	select {
+	case err := <-startErr:
+		_ = err
+	default:
+	}
+}
+
 func TestWatcherTerminalExitClearsIsRunning(t *testing.T) {
 	client := newStartWatcherMongoClient(t)
-	watcher := NewWatcher(client, "conduit", "users", false, "", nil)
+	watcher := NewWatcher(client, "conduit", "users", false, "", nil, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -1243,3 +1418,52 @@ func TestWatcherTerminalExitClearsIsRunning(t *testing.T) {
 	assert.Eventually(t, func() bool { return !watcher.IsRunning() }, 2*time.Second, 10*time.Millisecond)
 }
 
+// TestPersistTerminalToken verifies that a terminal drop/invalidate event's
+// own resume token is persisted (in-memory + best-effort Redis) so the next
+// session resumes after it instead of replaying it forever.
+func TestPersistTerminalToken(t *testing.T) {
+	tokenDoc, err := bson.Marshal(bson.M{"_data": "826A95F30D000000022B042C0100296E"})
+	require.NoError(t, err)
+
+	t.Run("updates in-memory token and persists to redis", func(t *testing.T) {
+		fr := newFakeRedis()
+		w := NewWatcher(nil, "conduit", "users", false, "old-token", nil, fr)
+		w.ctx = context.Background()
+
+		w.persistTerminalToken(tokenDoc)
+
+		assert.Equal(t, string(tokenDoc), w.resumeToken, "in-memory token must advance")
+		assert.Equal(t, string(tokenDoc), fr.resumeTokens["users"], "redis token must advance")
+	})
+
+	t.Run("redis failure still updates in-memory token", func(t *testing.T) {
+		fr := newFakeRedis()
+		fr.getErr = errors.New("redis down")
+		w := NewWatcher(nil, "conduit", "users", false, "old-token", nil, fr)
+		w.ctx = context.Background()
+
+		w.persistTerminalToken(tokenDoc)
+
+		assert.Equal(t, string(tokenDoc), w.resumeToken, "best-effort: in-memory token still advances")
+	})
+
+	t.Run("nil redis client is tolerated", func(t *testing.T) {
+		w := NewWatcher(nil, "conduit", "users", false, "old-token", nil, nil)
+		w.ctx = context.Background()
+
+		w.persistTerminalToken(tokenDoc)
+
+		assert.Equal(t, string(tokenDoc), w.resumeToken)
+	})
+
+	t.Run("nil token is a no-op", func(t *testing.T) {
+		fr := newFakeRedis()
+		w := NewWatcher(nil, "conduit", "users", false, "old-token", nil, fr)
+		w.ctx = context.Background()
+
+		w.persistTerminalToken(nil)
+
+		assert.Equal(t, "old-token", w.resumeToken)
+		assert.Equal(t, 0, fr.resumeCalls)
+	})
+}

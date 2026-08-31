@@ -32,7 +32,7 @@ Instead of every team rebuilding the same change-stream infrastructure, Conduit 
 - **Retry with exponential backoff** — failed deliveries are retried up to 5 times.
 - **Dead Letter Queue** — exhausted retries land in a per-collection DLQ.
 - **Resume tokens** — per-collection resume positions stored in Redis, saved only after successful processing.
-- **Automatic watcher management** — one watcher per enabled collection, synchronized dynamically with configuration.
+- **Automatic watcher management** — one watcher per enabled collection, synchronized dynamically with configuration (worker sync interval: 30s, plus immediate reaction to configuration changes via pub/sub).
 - **Deletion protection** — enabled by default; collections cannot be deleted until protection is explicitly disabled.
 - **TTL support** — configure a TTL attribute and Conduit creates the corresponding MongoDB TTL index.
 - **Read-only document API** — inspect collection documents through the REST API.
@@ -92,6 +92,8 @@ Configuration is applied at runtime through the REST API. Workers detect changes
 
 - `POST /api/collections/:name/stream` — enable streaming with `old_image`
 - `DELETE /api/collections/:name/stream` — disable streaming
+
+When a stream is enabled, Conduit records a start checkpoint. The first watcher run opens its change stream from that checkpoint, so every event written after enablement is streamed — there is no gap between enabling the stream and the worker picking it up (previously the first stream started at "now" and silently skipped that window).
 
 ### TTL
 
@@ -206,7 +208,15 @@ first delivery.
 
 ### Meilisearch
 
-Registered sink type with a skeleton implementation. The Meilisearch client integration is not yet wired in.
+Delivers stream records to Meilisearch for full-text indexing. Documents are
+upserted into the configured `index_name` (keyed by the change event's
+document id), and `REMOVE` events delete the document from the index.
+
+Durability: Meilisearch processes writes asynchronously — the enqueue call
+returns a task. This transport **waits for the task to complete** (bounded by
+a 30s enqueue timeout and a 5s task-wait timeout per document) before
+reporting success, so a delivered event is actually indexed; a failed or
+timed-out delivery is retried by the pipeline's retry queue.
 
 ```json
 {
@@ -239,6 +249,8 @@ MONGODB_DATABASE=conduit
 REDIS_URI=redis://localhost:6379
 PORT=8080
 API_KEY=your-secret-key
+# Optional: bounded by a 30s default; applies to the worker's graceful shutdown.
+# SHUTDOWN_TIMEOUT=45s
 # Optional: only needed for the EventBridge sink. AWS_ACCESS_KEY_ID,
 # AWS_SECRET_ACCESS_KEY, and AWS_REGION (plus optional AWS_SESSION_TOKEN) are
 # resolved via the AWS SDK default credential chain.

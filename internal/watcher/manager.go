@@ -299,13 +299,19 @@ func (m *Manager) startWatcher(ctx context.Context, collection collections.Colle
 	}
 	m.currentSinks[collection.CollectionName] = sinkConfigs
 
-	// Create watcher
+	// Create watcher. The collection's StreamStartedAt (the first-start
+	// checkpoint captured by EnableStream, present on a freshly-enabled or
+	// freshly-recreated collection) is passed through so a fresh watcher with
+	// no resume token resumes from enablement instead of "now" — closing the
+	// enable → watcher-start event window. Once a token exists it always wins
+	// (see buildChangeStreamOptions in watcher.go).
 	watcher := NewWatcher(
 		m.mongoClient,
 		m.database,
 		collection.CollectionName,
 		collection.OldImage,
 		resumeToken,
+		collection.StreamStartedAt,
 		m.redisClient,
 	)
 

@@ -32,24 +32,24 @@ var (
 // Two categories justify deleting the stored token (verified against MongoDB
 // 8.x):
 //   - The token itself is unusable:
-//     - code 9 "FailedToParse": token is not valid hex ("resume token string
-//       was not a valid hex string").
-//     - code 50811 "KeyString format error": token is structurally invalid.
+//   - code 9 "FailedToParse": token is not valid hex ("resume token string
+//     was not a valid hex string").
+//   - code 50811 "KeyString format error": token is structurally invalid.
 //   - The resume point predates the oplog window:
-//     - code 286 "ChangeStreamHistoryLost": the history the token points to
-//       is gone (e.g. the worker was down longer than the oplog preserves
-//       history). The token is not malformed, but keeping it would stall the
-//       watcher forever on a doomed resume, so it is invalidated and the
-//       stream restarts from the current position. The events between the old
-//       token and the oplog window start are unrecoverable either way, so this
-//       trades unrecoverable history for forward progress.
-//     - "cannot resume stream; the resume token was not found" (message match
-//       only): MongoDB 8.2 wraps this condition in code 280
-//       "ChangeStreamFatalError" at Watch/aggregate time — verified live by
-//       resuming with a structurally valid forged token whose clusterTime
-//       predates the oplog (twice reproduced). Code 280 is a wrapper for
-//       several fatal stream conditions and is NOT matched by itself; the
-//       message substring is specific to the missing-resume-point failure.
+//   - code 286 "ChangeStreamHistoryLost": the history the token points to
+//     is gone (e.g. the worker was down longer than the oplog preserves
+//     history). The token is not malformed, but keeping it would stall the
+//     watcher forever on a doomed resume, so it is invalidated and the
+//     stream restarts from the current position. The events between the old
+//     token and the oplog window start are unrecoverable either way, so this
+//     trades unrecoverable history for forward progress.
+//   - "cannot resume stream; the resume token was not found" (message match
+//     only): MongoDB 8.2 wraps this condition in code 280
+//     "ChangeStreamFatalError" at Watch/aggregate time — verified live by
+//     resuming with a structurally valid forged token whose clusterTime
+//     predates the oplog (twice reproduced). Code 280 is a wrapper for
+//     several fatal stream conditions and is NOT matched by itself; the
+//     message substring is specific to the missing-resume-point failure.
 //
 // A stale-but-structurally-valid token (e.g. after a collection drop) is NOT
 // treated as invalid: MongoDB delivers a `drop` event followed by
@@ -95,7 +95,10 @@ type Watcher struct {
 	collectionName string
 	oldImage       bool
 	resumeToken    string
-	redisClient    RedisClient
+	// startAtOperationTime is the first-start checkpoint captured at stream
+	// enablement; it anchors the stream only when no resume token exists.
+	startAtOperationTime *primitive.Timestamp
+	redisClient          RedisClient
 
 	// Runtime state
 	ctx       context.Context
@@ -115,15 +118,17 @@ func NewWatcher(
 	collectionName string,
 	oldImage bool,
 	resumeToken string,
+	startAtOperationTime *primitive.Timestamp,
 	redisClient RedisClient,
 ) *Watcher {
 	return &Watcher{
-		mongoClient:    mongoClient,
-		database:       database,
-		collectionName: collectionName,
-		oldImage:       oldImage,
-		resumeToken:    resumeToken,
-		redisClient:    redisClient,
+		mongoClient:          mongoClient,
+		database:             database,
+		collectionName:       collectionName,
+		oldImage:             oldImage,
+		resumeToken:          resumeToken,
+		startAtOperationTime: startAtOperationTime,
+		redisClient:          redisClient,
 		stats: WatcherStats{
 			StartTime: time.Now(),
 		},
@@ -264,28 +269,57 @@ func (w *Watcher) watchLoop(handler func(streams.StreamRecord) error) {
 	}
 }
 
-// watchOnce runs a single watch session
-func (w *Watcher) watchOnce(handler func(streams.StreamRecord) error) error {
-	// Build change stream options
+// buildChangeStreamOptions constructs the change stream options for a watch
+// session.
+//
+// Resume-position policy (priority, high to low):
+//   - resume token  : when set, resumeAfter anchors the stream exactly at the
+//     last settled event. This is the steady-state path and always wins.
+//   - first-start checkpoint : when NO token exists but a startAtOperationTime
+//     checkpoint was captured at stream enablement (collection.stream_started_at),
+//     SetStartAtOperationTime anchors the stream at enablement, so every event
+//     committed at/after enablement is streamed — closing the enable → first
+//     watcher-start window where a plain fresh stream would start at "now" and
+//     silently skip those events.
+//   - neither : a fresh stream starting at the current position (legacy
+//     behavior for collections enabled long before the worker started, or a
+//     token-invalidated restart with no checkpoint).
+//
+// A resume token is never overridden by the checkpoint: the checkpoint's only
+// job is to cover the first-start gap and post-invalidate fresh sessions.
+// After the first settled event, per-event token persistence takes over.
+func (w *Watcher) buildChangeStreamOptions() *options.ChangeStreamOptions {
 	opts := options.ChangeStream()
 	opts.SetFullDocument(options.UpdateLookup)
 
 	if w.oldImage {
-		// Use WhenAvailable instead of Required to allow delete events
-		// Required would fail if pre-image is not found (e.g., for deletes).
-		// The collection-level changeStreamPreAndPostImages capability is
-		// ensured by Manager.Create and Manager.EnableStream, so
-		// WhenAvailable reliably yields the pre-image here.
 		opts.SetFullDocumentBeforeChange(options.WhenAvailable)
 	}
 
-	// Set resume token if available
 	if w.resumeToken != "" {
 		var resumeToken bson.Raw
-		if err := bson.Unmarshal([]byte(w.resumeToken), &resumeToken); err == nil {
+		if err := bson.Unmarshal([]byte(w.resumeToken), &resumeToken); err != nil {
+			// A corrupt stored token behaves as absent: fall through to the
+			// checkpoint or a fresh stream instead of stalling on a doomed
+			// resume.
+			log.Printf("Resume token for %s is unparseable, falling through to checkpoint/fresh stream: %v", w.collectionName, err)
+		} else {
 			opts.SetResumeAfter(resumeToken)
+			return opts
 		}
 	}
+
+	// No token: anchor at the enablement checkpoint when one exists.
+	if w.startAtOperationTime != nil {
+		opts.SetStartAtOperationTime(w.startAtOperationTime)
+	}
+
+	return opts
+}
+
+// watchOnce runs a single watch session
+func (w *Watcher) watchOnce(handler func(streams.StreamRecord) error) error {
+	opts := w.buildChangeStreamOptions()
 
 	// Get collection
 	coll := w.mongoClient.Database(w.database).Collection(w.collectionName)
@@ -320,6 +354,12 @@ func (w *Watcher) watchOnce(handler func(streams.StreamRecord) error) error {
 			// watchLoop can stop the watcher. Unknown operation types are
 			// skipped like any other non-terminal parse problem.
 			if errors.Is(err, errCollectionDropped) || errors.Is(err, errChangeStreamInvalidated) {
+				// Persist the terminal event's own resume token before exiting:
+				// it was seen and handled, so the next session must resume
+				// after it — otherwise a historical drop replayed onto a
+				// recreated collection terminates the watcher on every sync
+				// (recreation restarts from the pre-drop token, forever).
+				w.persistTerminalToken(cursor.ResumeToken())
 				return err
 			}
 			w.recordError(fmt.Errorf("parse change: %w", err))
@@ -409,6 +449,33 @@ func (w *Watcher) invokeHandler(handler func(streams.StreamRecord) error, record
 		}
 	}()
 	return handler(record)
+}
+
+// persistTerminalToken saves the terminal event's own resume position so the
+// next session resumes after it instead of replaying the drop/invalidate from
+// the pre-drop position.
+func (w *Watcher) persistTerminalToken(token bson.Raw) {
+	if token == nil {
+		return
+	}
+	tokenData, err := bson.Marshal(token)
+	if err != nil {
+		log.Printf("Failed to marshal terminal resume token for %s: %v", w.collectionName, err)
+		return
+	}
+
+	w.resumeToken = string(tokenData)
+
+	// redisClient may be nil in tests; skip the durable write in that case.
+	if w.redisClient == nil {
+		return
+	}
+	bkctx, bkCancel := context.WithTimeout(context.WithoutCancel(w.ctx), 5*time.Second)
+	err = w.redisClient.SetResumeToken(bkctx, w.collectionName, w.resumeToken)
+	bkCancel()
+	if err != nil {
+		log.Printf("Failed to save terminal resume token for %s: %v", w.collectionName, err)
+	}
 }
 
 // parseChange converts a MongoDB change event to a StreamRecord

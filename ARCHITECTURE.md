@@ -82,6 +82,8 @@ A _stream_ is the CDC subscription for a collection. Streams are opt-in. A colle
 
 Because `old_image` affects how the MongoDB change stream is opened, stream configuration is immutable once enabled. To change it, the operator must disable the stream and then re-enable it.
 
+Enabling a stream captures a **first-start checkpoint**: a MongoDB cluster timestamp (taken from the API host clock with increment 1) persisted on the collection document as `stream_started_at`. The checkpoint's only job is to anchor the FIRST watcher run: with no resume token yet, the watcher opens its change stream with `startAtOperationTime == stream_started_at`, streaming every event from enablement instead of "now". This closes the enable → watcher-start window that otherwise silently dropped events written there. Once the first event is settled, normal per-event resume-token persistence takes over and the checkpoint is no longer consulted (a resume token always wins). The checkpoint is derived from the API host clock, so it relies on the operational assumption that the API host clock is reasonably aligned with the MongoDB cluster clock; small skew only shifts the replay anchor, never drops a token-covered event. `DisableStream` clears the checkpoint; re-enabling captures a fresh one.
+
 ## Sink
 
 A _sink_ is a destination for CDC events. Each sink belongs to exactly one collection and can filter by event type (`INSERT`, `MODIFY`, `REMOVE`) and by content of the `new_image` / `old_image` using the filter DSL: `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `contains`, `starts_with`, `ends_with`, `exists`, `in`, and `not_in`. See [`docs/filter.md`](docs/filter.md) for the full DSL reference.
@@ -446,14 +448,14 @@ The API returns `201 Created` with the collection body.
    - If the update matches no document, Conduit checks whether the collection exists. If it does, `ErrStreamAlreadyExists` is returned; otherwise `ErrCollectionNotFound`.
    - Stream configuration is therefore immutable while enabled.
 4. **Physical MongoDB configuration**: when `old_image` is `true`, `changeStreamPreAndPostImages` is ensured on the collection via `collMod` (idempotent; collections created through Conduit already have it). A failure aborts the enablement and rolls the recorded stream back: enabling a stream with `old_image` on a deployment that cannot produce pre-images would silently drop every pre-image at the source.
-5. **Configuration persistence**: `stream_enabled` and `old_image` are updated in `config.collections`.
+5. **Configuration persistence**: `stream_enabled`, `old_image`, and the first-start checkpoint `stream_started_at` (a `primitive.Timestamp` from the API host clock) are updated in `config.collections`. The checkpoint anchors the first watcher run so no event between enablement and watcher start is skipped.
 6. **Notification**: the API publishes the collection name to `cdc:config-change`.
 7. **Worker reaction**:
    - The watcher manager receives the Pub/Sub message (or discovers the change on the next poll).
    - It fetches the collection. Because `stream_enabled` is now `true` and no watcher exists, it calls `startWatcher`.
    - The manager loads the collection's sinks from `config.sinks` and registers them with the dispatcher.
    - It reads any existing resume token from `cdc:resume:{name}`.
-   - It creates a `Watcher` with the collection's `partition_key`, `sort_key`, and `old_image` settings, then starts the watch loop.
+   - It creates a `Watcher` with the collection's `partition_key`, `sort_key`, `old_image`, and `start_at_operation_time` (= `stream_started_at`) settings, then starts the watch loop.
    - It registers the collection with the retry processor.
 
 The API returns `201 Created`.
@@ -699,6 +701,7 @@ The following invariants are enforced by the code:
 - **There is at most one watcher per collection**. The manager's registry is keyed by collection name.
 - **Resume tokens are isolated per collection**. Key format: `cdc:resume:{collectionName}`.
 - **Resume tokens advance only after successful processing**. Failures route events to retry; the change stream cursor still advances, but the saved token reflects the last successfully handled event.
+- **A first-start checkpoint closes the enablement gap**. When a stream is enabled, `stream_started_at` is recorded; a fresh watcher with no resume token anchors its stream at that checkpoint (`startAtOperationTime`), so events written between enablement and the first watcher start are streamed instead of skipped.
 - **Resume tokens are never deleted on generic errors**. Transient failures (network, elections, cursor timeouts) preserve the token so the watcher resumes from the last successful position and skips nothing. The token is invalidated only when MongoDB explicitly rejects it as invalid (unparseable token, or a token from a dropped and recreated collection).
 - **Idempotency is required for all event processing**. Duplicate event IDs within the 24-hour TTL are skipped.
 - **Event IDs are deterministic and derived exclusively from change-stream data**. The primary source is the resume token (`_id._data`); `clusterTime` + `documentKey` serve as fallback. Application-generated timestamps (e.g. `time.Now()`) are never part of the ID, so the same MongoDB change produces the same ID across process restarts.
@@ -719,7 +722,7 @@ The following invariants are enforced by the code:
 1. `Manager.Start(ctx)` loads all stream-enabled collections via `ListStreamEnabled`.
 2. For each enabled collection, it calls `startWatcher`.
 3. It subscribes to Redis Pub/Sub on `cdc:config-change`.
-4. It starts a background sync loop that polls `config.collections` at `SyncInterval` (default 30 seconds in code; README mentions 15 minutes, but `DefaultConfig` uses 30 seconds).
+4. It starts a background sync loop that polls `config.collections` at `SyncInterval` (default 30 seconds, `DefaultConfig`).
 
 ## Synchronization
 
@@ -746,7 +749,7 @@ Whenever the API mutates configuration, it publishes the affected collection nam
 ## Restart Behavior
 
 - `restartWatcher` stops the existing watcher and starts a new one with fresh configuration.
-- On a MongoDB error, the watcher deletes its resume token, waits 5 seconds, and loops. The next `watchOnce` call starts from the latest position.
+- On a MongoDB error, the watcher deletes its resume token, waits 5 seconds, and loops. The next `watchOnce` call starts from the first-start checkpoint when one exists (resuming from enablement rather than "now"), otherwise from the latest position.
 - If the collection is dropped or the change stream is invalidated, the watcher cancels itself and exits cleanly.
 
 ## Sink Refresh
@@ -774,6 +777,14 @@ A mutable sink change flows end-to-end as:
 ## Resume Tokens
 
 Resume tokens are fetched from Redis when a watcher starts and saved to Redis after each successfully processed event. When a watcher restarts because of an `old_image` change or a transient error, it picks up the last token. If the token is invalid, the watcher clears it and resumes from the latest position.
+
+**First-start resume-policy (priority, high → low)** — `Watcher.buildChangeStreamOptions` decides where each watch session opens the stream:
+
+1. **Resume token** (when one exists): `resumeAfter` anchors the stream exactly at the last settled event (steady state; always wins).
+2. **First-start checkpoint** (no token, but `stream_started_at` present): `startAtOperationTime` anchors the stream at enablement, so every event from enablement is streamed — closing the enable → watcher-start gap and post-invalidate fresh sessions.
+3. **Neither**: a fresh stream at the current position (legacy behavior for collections enabled long before the worker, or a token-invalidated restart with no checkpoint).
+
+The checkpoint is captured at enablement from the API host clock (`primitive.Timestamp{T: unixNow, I: 1}`) — the pragmatic alternative to a causal-session `OperationTime`, documented as relying on approximate API-host/MongoDB clock agreement. After the first settled event, per-event token persistence in `processEvent` takes over and the checkpoint is never consulted again.
 
 ## Retry Registration
 

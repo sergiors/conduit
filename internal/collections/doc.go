@@ -29,9 +29,16 @@
 //	  "collection_name": "users",
 //	  "stream_enabled": true,
 //	  "old_image": true,
+//	  "stream_started_at": { "t": 1787932086, "i": 1 },
 //	  "ttl_attribute": "expiresAt",
 //	  "deletion_protection": true
 //	}
+//
+// stream_started_at is the first-start checkpoint captured by EnableStream (a
+// primitive.Timestamp from the API host clock with increment 1). The watcher
+// uses it as startAtOperationTime on its first run (when no resume token exists)
+// so events written between enablement and the watcher start are streamed rather
+// than skipped. DisableStream unsets it; re-enabling captures a fresh checkpoint.
 //
 // Usage:
 //

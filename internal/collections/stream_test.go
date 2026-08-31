@@ -35,6 +35,10 @@ func TestManagerStream(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, got.StreamEnabled)
 		assert.True(t, got.OldImage)
+		// The first-start checkpoint must be captured at enablement and be a
+		// recent timestamp (within a minute of now).
+		require.NotNil(t, got.StreamStartedAt, "EnableStream must record stream_started_at")
+		assert.InDelta(t, time.Now().Unix(), got.StreamStartedAt.T, 60, "checkpoint must be near the enablement time")
 	})
 
 	t.Run("re-enable stream with same old_image is immutable", func(t *testing.T) {
@@ -59,11 +63,15 @@ func TestManagerStream(t *testing.T) {
 		got, _ := manager.Get(ctx, "stream_test_table")
 		assert.False(t, got.StreamEnabled)
 		assert.False(t, got.OldImage)
+		// Disabling must clear the first-start checkpoint.
+		assert.Nil(t, got.StreamStartedAt, "DisableStream must unset stream_started_at")
 
 		require.NoError(t, manager.EnableStream(ctx, "stream_test_table", false))
 		got, _ = manager.Get(ctx, "stream_test_table")
 		assert.True(t, got.StreamEnabled)
 		assert.False(t, got.OldImage)
+		// Re-enable captures a fresh checkpoint.
+		require.NotNil(t, got.StreamStartedAt, "re-enable must capture a fresh checkpoint")
 	})
 
 	t.Run("disable stream is idempotent", func(t *testing.T) {
@@ -71,6 +79,7 @@ func TestManagerStream(t *testing.T) {
 		got, _ := manager.Get(ctx, "stream_test_table")
 		assert.False(t, got.StreamEnabled)
 		assert.False(t, got.OldImage)
+		assert.Nil(t, got.StreamStartedAt, "idempotent disable keeps the checkpoint cleared")
 	})
 
 	t.Run("stream on unknown collection returns not found", func(t *testing.T) {
