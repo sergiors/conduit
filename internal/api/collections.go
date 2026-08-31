@@ -50,7 +50,6 @@ func (s *Server) createCollection(c *gin.Context) {
 		return
 	}
 
-	s.publishConfigChange(ctx, collection.CollectionName)
 	c.JSON(http.StatusCreated, collection)
 }
 
@@ -76,6 +75,5 @@ func (s *Server) deleteCollection(c *gin.Context) {
 		return
 	}
 
-	s.publishConfigChange(ctx, name)
 	c.Status(http.StatusNoContent)
 }

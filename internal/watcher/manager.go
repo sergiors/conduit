@@ -481,10 +481,38 @@ func (m *Manager) configChangeLoop(ctx context.Context) {
 	}
 }
 
-// handleCollectionChange handles config changes for a single collection
+// handleCollectionChange handles config changes for a single collection. It
+// reconciles the watcher against the collection's current config document and
+// covers three cases:
+//
+//  1. Config gone (deleted): the collection's config document no longer exists,
+//     which means the collection was DELETED (deletion removes the config
+//     document via Settings.Delete and fires OnPublish). Stop the watcher
+//     immediately instead of waiting for the next sync cycle — the CDC stream
+//     must not run for a deleted collection.
+//  2. Stream disabled: the collection exists but its stream is disabled. Stop
+//     the watcher if running. No CDC-state purge here: a disabled stream may be
+//     re-enabled later, so its resume token and retry queue must survive.
+//  3. Otherwise: reconcile oldImage/sinks for the existing watcher.
 func (m *Manager) handleCollectionChange(ctx context.Context, collectionName string) {
 	collection, err := m.collectionSettings.Get(ctx, collectionName)
 	if err != nil {
+		// A published change for a collection whose config document is gone
+		// means the collection was DELETED: deletion removes the config
+		// document (settings.Delete) and fires OnPublish. Stop the watcher
+		// immediately instead of waiting for the next sync cycle — the CDC
+		// stream must not run for a deleted collection. No state purge here:
+		// Settings.OnPurge (the deleter) already owns Redis cleanup, and a
+		// deleted-then-recreated race is safe regardless (a stale token is
+		// either accepted by Watch or invalidated by the resume-token check,
+		// never a stall).
+		if errors.Is(err, collections.ErrCollectionNotFound) {
+			log.Printf("Collection %s not found (deleted), stopping watcher", collectionName)
+			if err := m.stopWatcher(ctx, collectionName); err != nil {
+				log.Printf("Failed to stop watcher for deleted collection %s: %v", collectionName, err)
+			}
+			return
+		}
 		log.Printf("Failed to fetch collection %s for config change: %v", collectionName, err)
 		return
 	}
@@ -494,9 +522,11 @@ func (m *Manager) handleCollectionChange(ctx context.Context, collectionName str
 	m.mu.RUnlock()
 
 	if !collection.StreamEnabled {
-		// Collection disabled - stop watcher if running
+		// Stream disabled — stop the watcher if running. No CDC-state purge
+		// here: a disabled stream may be re-enabled later, so its resume token
+		// and retry queue must survive.
 		if watcherExists {
-			log.Printf("Collection %s disabled, stopping watcher", collectionName)
+			log.Printf("Stream for collection %s is disabled, stopping watcher", collectionName)
 			if err := m.stopWatcher(ctx, collectionName); err != nil {
 				log.Printf("Failed to stop watcher for %s: %v", collectionName, err)
 			}
@@ -504,10 +534,11 @@ func (m *Manager) handleCollectionChange(ctx context.Context, collectionName str
 		return
 	}
 
-	// Collection enabled
+	// Stream enabled
 	if !watcherExists {
-		// New collection - start watcher with sinks
-		log.Printf("Collection %s enabled, starting watcher", collectionName)
+		// Collection configured with its stream enabled but no watcher yet:
+		// start one (this also registers the collection's sinks).
+		log.Printf("Stream for collection %s is enabled, starting watcher", collectionName)
 		if err := m.startWatcher(ctx, *collection); err != nil {
 			log.Printf("Failed to start watcher for %s: %v", collectionName, err)
 		}
@@ -624,9 +655,14 @@ func (m *Manager) syncWithCollections(ctx context.Context) {
 		}
 	}
 
-	// Stop watchers for disabled collections
+	// Stop watchers for collections that dropped out of the configured set
+	// (deleted, or their stream was disabled since the last sync). State
+	// cleanup for genuinely deleted collections is NOT the worker's job: only
+	// the deleters purge CDC state (API Settings.OnPurge), so the resume token
+	// and retry queue must survive here for a stream that may be re-enabled.
 	for collectionName := range currentWatchers {
 		if _, exists := enabledSet[collectionName]; !exists {
+			log.Printf("Collection %s is not configured (deleted or stream disabled), stopping watcher", collectionName)
 			if err := m.stopWatcher(ctx, collectionName); err != nil {
 				log.Printf("Failed to stop watcher for %s: %v", collectionName, err)
 			}

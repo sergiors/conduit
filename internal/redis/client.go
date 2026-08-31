@@ -121,6 +121,21 @@ func (c *Client) DeleteResumeToken(ctx context.Context, collectionName string) e
 	return c.client.Del(ctx, key).Err()
 }
 
+// DeleteCollectionState removes every per-collection CDC artifact from Redis:
+// the resume token, the retry queue and the dead-letter queue. It is the
+// cleanup hook for collection deletion. Idempotent: DEL on a non-existent key
+// is a no-op, and deleting one collection's keys never touches another
+// collection's (the keys are namespaced per collection by name). Callers use
+// the returned error only for logging/retry; a partial failure still deleted
+// some keys and can be retried safely.
+func (c *Client) DeleteCollectionState(ctx context.Context, collectionName string) error {
+	return c.client.Del(ctx,
+		c.resumeTokenKey(collectionName),
+		c.retryQueueKey(collectionName),
+		c.dlqKey(collectionName),
+	).Err()
+}
+
 // Idempotency operations
 // IsProcessed checks if an event has already been processed
 func (c *Client) IsProcessed(ctx context.Context, id string) (bool, error) {

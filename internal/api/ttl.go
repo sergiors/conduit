@@ -22,7 +22,6 @@ func (s *Server) createTTL(c *gin.Context) {
 		return
 	}
 
-	s.publishConfigChange(ctx, name)
 	c.Status(http.StatusCreated)
 }
 
@@ -35,6 +34,5 @@ func (s *Server) deleteTTL(c *gin.Context) {
 		return
 	}
 
-	s.publishConfigChange(ctx, name)
 	c.Status(http.StatusNoContent)
 }

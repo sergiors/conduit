@@ -35,7 +35,6 @@ func (s *Server) createSink(c *gin.Context) {
 		return
 	}
 
-	s.publishConfigChange(ctx, name)
 	c.JSON(http.StatusCreated, created)
 }
 
@@ -49,6 +48,5 @@ func (s *Server) deleteSink(c *gin.Context) {
 		return
 	}
 
-	s.publishConfigChange(ctx, name)
 	c.Status(http.StatusNoContent)
 }

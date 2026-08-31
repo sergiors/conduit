@@ -735,15 +735,15 @@ func TestInvokeHandlerPanicIsolation(t *testing.T) {
 // retry-enqueue activity so settlement tests can assert what the watcher and
 // manager persisted.
 type fakeRedis struct {
-	mu            sync.Mutex
-	getErr        error
-	resumeTokens  map[string]string
-	resumeCalls   int
-	processed     map[string]bool
-	markCalls     int
-	enqueueCalls  int
-	enqueueResult error
-	subscribeErr  error
+	mu                sync.Mutex
+	getErr            error
+	resumeTokens      map[string]string
+	resumeCalls       int
+	processed         map[string]bool
+	markCalls         int
+	enqueueCalls      int
+	enqueueResult     error
+	subscribeErr      error
 }
 
 func newFakeRedis() *fakeRedis {
@@ -1137,6 +1137,88 @@ func TestSyncWithCollectionsIdempotent(t *testing.T) {
 	assert.True(t, manager.watchers[name].IsRunning())
 }
 
+// TestHandleCollectionChangeDeletedStopsWatcher verifies that a config-change
+// notification for a collection whose config document is gone (i.e. DELETED)
+// stops the watcher immediately, instead of logging a fetch error and leaving
+// the CDC stream running until the next sync cycle. It also asserts the
+// not-found path does not touch other collections, and that a stream-disabled
+// (but existing) collection still just stops its watcher.
+func TestHandleCollectionChangeDeletedStopsWatcher(t *testing.T) {
+	client := newLiveMongoClient(t)
+	fr := newFakeRedis()
+
+	const db = "conduit_test_handlechange"
+	settings := collections.NewSettings(client, db)
+
+	names := []string{"gone_coll", "kept_coll", "disabled_coll"}
+	cleanup := func() {
+		bgCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		for _, name := range names {
+			if _, err := settings.Get(bgCtx, name); err == nil {
+				_ = settings.DisableDeletionProtection(bgCtx, name)
+				_ = settings.Delete(bgCtx, name)
+			}
+		}
+	}
+	cleanup() // remove leftovers from a previous run
+	t.Cleanup(cleanup)
+
+	// Create three stream-enabled collection configs.
+	for _, name := range names {
+		require.NoError(t, settings.Create(context.Background(), &collections.Collection{
+			CollectionName: name,
+			StreamEnabled:  true,
+		}))
+	}
+
+	manager := NewManager(client, db, settings, fr, nil, nil, DefaultConfig())
+	manager.runCtx, manager.runCancel = context.WithCancel(context.Background())
+	t.Cleanup(manager.runCancel)
+
+	// Start watchers for all three collections.
+	for _, name := range names {
+		require.NoError(t, manager.startWatcher(manager.runCtx, collections.Collection{CollectionName: name}))
+	}
+	require.Len(t, manager.watchers, 3)
+
+	t.Run("deleted collection stops its watcher and leaves others alone", func(t *testing.T) {
+		// Delete "gone_coll": disable deletion protection, then Delete removes
+		// the config document (and fires OnPublish, which the worker consumes
+		// as a config-change for a name that no longer exists).
+		require.NoError(t, settings.DisableDeletionProtection(context.Background(), "gone_coll"))
+		require.NoError(t, settings.Delete(context.Background(), "gone_coll"))
+
+		// The config document is gone, so Get returns ErrCollectionNotFound.
+		_, err := settings.Get(context.Background(), "gone_coll")
+		require.ErrorIs(t, err, collections.ErrCollectionNotFound)
+
+		manager.handleCollectionChange(context.Background(), "gone_coll")
+
+		// The deleted collection's watcher must be removed immediately.
+		manager.mu.RLock()
+		_, goneExists := manager.watchers["gone_coll"]
+		_, keptExists := manager.watchers["kept_coll"]
+		manager.mu.RUnlock()
+		assert.False(t, goneExists, "deleted collection's watcher must be stopped")
+		assert.True(t, keptExists, "unrelated collection's watcher must be untouched")
+	})
+
+	t.Run("stream-disabled collection still just stops its watcher", func(t *testing.T) {
+		// DisableStream keeps the config document (stream_enabled=false) but
+		// fires OnPublish; handleCollectionChange must stop the watcher without
+		// purging state (nothing observable in fakeRedis beyond no panic).
+		require.NoError(t, settings.DisableStream(context.Background(), "disabled_coll"))
+
+		manager.handleCollectionChange(context.Background(), "disabled_coll")
+
+		manager.mu.RLock()
+		_, disabledExists := manager.watchers["disabled_coll"]
+		manager.mu.RUnlock()
+		assert.False(t, disabledExists, "stream-disabled collection's watcher must be stopped")
+	})
+}
+
 // TestWatcherTerminalExitClearsIsRunning verifies the flag-no-longer-lies
 // contract for ALL exit paths: cancelling the watcher's own context (as Stop
 // would) makes the watch goroutine exit, and the Start backstop clears
@@ -1160,3 +1242,4 @@ func TestWatcherTerminalExitClearsIsRunning(t *testing.T) {
 
 	assert.Eventually(t, func() bool { return !watcher.IsRunning() }, 2*time.Second, 10*time.Millisecond)
 }
+

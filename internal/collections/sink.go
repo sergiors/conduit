@@ -90,6 +90,7 @@ func (s *Settings) GetSinks(ctx context.Context, collectionName string) ([]Sink,
 }
 
 // CreateSink creates a sink for a collection identified by name.
+// On success, fires OnPublish (best-effort).
 func (s *Settings) CreateSink(ctx context.Context, collectionName string, sink Sink) (*Sink, error) {
 	collection, err := s.Get(ctx, collectionName)
 	if err != nil {
@@ -117,11 +118,13 @@ func (s *Settings) CreateSink(ctx context.Context, collectionName string, sink S
 	if objectID, ok := result.InsertedID.(primitive.ObjectID); ok {
 		sink.ID = objectID.Hex()
 	}
+	s.notifyPublish(ctx, collectionName)
 	return &sink, nil
 }
 
 // DeleteSink deletes a sink by its ID, scoped to the collection identified by
 // name so a sink cannot be removed from a different collection.
+// On success, fires OnPublish (best-effort).
 func (s *Settings) DeleteSink(ctx context.Context, collectionName, sinkID string) error {
 	collection, err := s.Get(ctx, collectionName)
 	if err != nil {
@@ -140,6 +143,7 @@ func (s *Settings) DeleteSink(ctx context.Context, collectionName, sinkID string
 	if result.DeletedCount == 0 {
 		return ErrSinkNotFound
 	}
+	s.notifyPublish(ctx, collectionName)
 	return nil
 }
 

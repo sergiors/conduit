@@ -15,6 +15,7 @@ import (
 // The TTL configuration is immutable: once it is set, any subsequent SetTTL
 // returns ErrTTLAlreadyExists, even with the same value. To change it, disable
 // TTL first via DisableTTL. An empty attribute returns ErrValidation.
+// On success, fires OnPublish (best-effort).
 func (s *Settings) SetTTL(ctx context.Context, name, attribute string) error {
 	if attribute == "" {
 		return NewValidationError("ttl attribute is required")
@@ -44,11 +45,13 @@ func (s *Settings) SetTTL(ctx context.Context, name, attribute string) error {
 	if err != nil {
 		return fmt.Errorf("set ttl attribute: %w", err)
 	}
+	s.notifyPublish(ctx, name)
 	return nil
 }
 
 // DisableTTL drops the TTL index and clears the TTL attribute.
 // Idempotent. Returns ErrCollectionNotFound if the collection does not exist.
+// On success, fires OnPublish (best-effort).
 func (s *Settings) DisableTTL(ctx context.Context, name string) error {
 	collection, err := s.Get(ctx, name)
 	if err != nil {
@@ -75,6 +78,7 @@ func (s *Settings) DisableTTL(ctx context.Context, name string) error {
 		return err
 	}
 
+	s.notifyPublish(ctx, name)
 	return nil
 }
 

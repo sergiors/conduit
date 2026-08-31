@@ -228,6 +228,46 @@ func TestClientIntegration(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, initialLength+1, length)
 	})
+
+	t.Run("delete collection state removes all artifacts", func(t *testing.T) {
+		tableName := "test_table_delstate_" + time.Now().Format("20060102150405")
+
+		// Seed one artifact in each of the three per-collection stores.
+		require.NoError(t, client.SetResumeToken(ctx, tableName, "resume-token-data"))
+		require.NoError(t, client.EnqueueRetry(ctx, RetryEvent{
+			ID:             tableName + "-123",
+			CollectionName: tableName,
+			EventData:      []byte(`{"id": "123"}`),
+			RetryCount:     0,
+			MaxRetries:     5,
+			NextRetryAt:    time.Now().Add(-1 * time.Second),
+		}))
+		require.NoError(t, client.SendToDLQ(ctx, tableName, map[string]interface{}{"id": "123", "data": "test"}))
+
+		// All three exist before the purge.
+		token, err := client.GetResumeToken(ctx, tableName)
+		require.NoError(t, err)
+		assert.Equal(t, "resume-token-data", token)
+		retryLen, err := client.GetRetryQueueLength(ctx, tableName)
+		require.NoError(t, err)
+		assert.Equal(t, int64(1), retryLen)
+		dlqLen, err := client.GetDLQLength(ctx, tableName)
+		require.NoError(t, err)
+		assert.Equal(t, int64(1), dlqLen)
+
+		// Purge wipes all three.
+		require.NoError(t, client.DeleteCollectionState(ctx, tableName))
+
+		token, err = client.GetResumeToken(ctx, tableName)
+		require.NoError(t, err)
+		assert.Equal(t, "", token)
+		retryLen, err = client.GetRetryQueueLength(ctx, tableName)
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), retryLen)
+		dlqLen, err = client.GetDLQLength(ctx, tableName)
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), dlqLen)
+	})
 }
 
 func TestClientCreation(t *testing.T) {

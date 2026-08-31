@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -31,6 +32,25 @@ type Settings struct {
 	database   string
 	collection *mongo.Collection
 	sinks      *mongo.Collection
+
+	// OnPublish is an optional hook invoked after any successful configuration
+	// mutation (collection created or deleted, stream/TTL enabled or disabled,
+	// sink created or deleted), with the affected collection's name. It exists so
+	// callers can fan out config-change notifications without coupling this
+	// package to their infrastructure: cmd/api assigns it a method value that
+	// publishes to Redis pub/sub. nil (the zero value) means "no notification".
+	// Invocations are best-effort: an error is logged, never returned — a
+	// committed mutation must not be reported as failed because notification
+	// bookkeeping hiccuped.
+	OnPublish func(ctx context.Context, collectionName string) error
+
+	// OnPurge is an optional hook invoked by Delete ONLY, after the MongoDB-side
+	// deletion (drop + sinks + config document) has fully succeeded, to remove
+	// out-of-band CDC artifacts (e.g. Redis resume token, retry queue, dead-letter
+	// queue). Same contract as OnPublish: nil-safe, best-effort, name-scoped,
+	// idempotent. Delete runs it on a DETACHED bounded context (5s) so an
+	// abandoned request cannot cancel a committed deletion's cleanup.
+	OnPurge func(ctx context.Context, collectionName string) error
 }
 
 // NewSettings creates a new collection settings manager
@@ -40,6 +60,35 @@ func NewSettings(client *mongo.Client, database string) *Settings {
 		database:   database,
 		collection: client.Database(database).Collection("config.collections"),
 		sinks:      client.Database(database).Collection("config.sinks"),
+	}
+}
+
+// notifyPublish fires OnPublish best-effort after a successful configuration
+// mutation. It is nil-safe and never returns an error: a committed mutation
+// must not be reported as failed because notification bookkeeping hiccuped.
+// The hook runs on the caller's context (the same request ctx the handler used
+// today); a failure is logged and swallowed.
+func (s *Settings) notifyPublish(ctx context.Context, name string) {
+	if s.OnPublish == nil {
+		return
+	}
+	if err := s.OnPublish(ctx, name); err != nil {
+		log.Printf("failed to publish config change for %s: %v", name, err)
+	}
+}
+
+// purgeState runs OnPurge best-effort on a DETACHED bounded context (5s) so an
+// abandoned request cannot cancel a committed deletion's cleanup. It is
+// nil-safe and never returns an error; a failure is logged and swallowed. The
+// hook is idempotent, so a failed purge can be retried by re-running it.
+func (s *Settings) purgeState(ctx context.Context, name string) {
+	if s.OnPurge == nil {
+		return
+	}
+	purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := s.OnPurge(purgeCtx, name); err != nil {
+		log.Printf("failed to purge CDC state after deleting collection %s: %v", name, err)
 	}
 }
 
@@ -139,7 +188,8 @@ func (s *Settings) ensureKeyIndex(ctx context.Context, collectionName, primaryKe
 	return err
 }
 
-// Create inserts a new collection configuration and creates the MongoDB collection
+// Create inserts a new collection configuration and creates the MongoDB collection.
+// On success, fires OnPublish (best-effort).
 func (s *Settings) Create(ctx context.Context, collection *Collection) error {
 	name := collection.CollectionName
 	if name == "" {
@@ -174,6 +224,7 @@ func (s *Settings) Create(ctx context.Context, collection *Collection) error {
 	if objectID, ok := result.InsertedID.(primitive.ObjectID); ok {
 		collection.ID = objectID.Hex()
 	}
+	s.notifyPublish(ctx, name)
 	return nil
 }
 
@@ -206,9 +257,36 @@ func (s *Settings) List(ctx context.Context) ([]Collection, error) {
 	return collections, nil
 }
 
-// Delete removes a collection configuration and its MongoDB collection by collection name.
-// Returns ErrCollectionNotFound if the collection does not exist, or
-// ErrDeletionProtectionEnabled if deletion protection is on.
+// Delete removes a collection configuration and its MongoDB collection by
+// collection name. Returns ErrCollectionNotFound if the collection does not
+// exist, or ErrDeletionProtectionEnabled if deletion protection is on.
+//
+// Operation order (kept exact and unswappable):
+//  1. drop the physical MongoDB collection,
+//  2. delete the associated sinks,
+//  3. delete the config.collections document,
+//  4. purge out-of-band CDC state (OnPurge, detached bounded context),
+//  5. fire OnPublish (best-effort).
+//
+// Settings.Delete owns the side-effect fan-out via OnPurge then OnPublish, both
+// best-effort. Purge runs BEFORE publish: the pub/sub tick may cause the worker
+// to disable the collection, so better that the Redis keys are already gone.
+// Neither hook is required (nil is a no-op) and neither failure is returned —
+// a committed deletion must not be reported as failed because bookkeeping
+// hiccuped. Cleanup of the Redis CDC state (resume token, retry queue,
+// dead-letter queue) is performed by Delete itself via OnPurge; the hook is
+// idempotent, and a failed purge can be retried by deleting the collection
+// again or by invoking OnPurge manually. Settings and its hooks are the single
+// owner of deletion cleanup — the worker manager never purges on disable,
+// because disabled != deleted.
+//
+// Known minor edge: a delete immediately followed by a recreate of the same
+// name inside one worker sync interval may resume the recreated watcher from
+// the pre-delete resume token. This is harmless: the token positions at an old
+// oplog point on the SAME collection name — MongoDB either accepts it (no
+// error) or invalidates it and the stream restarts — never stalling. The
+// purge fires synchronously before the config-change pub/sub tick, so this
+// window is narrow.
 func (s *Settings) Delete(ctx context.Context, name string) error {
 	// Get collection to check deletion protection
 	collection, err := s.Get(ctx, name)
@@ -234,5 +312,15 @@ func (s *Settings) Delete(ctx context.Context, name string) error {
 
 	// Delete the configuration
 	_, err = s.collection.DeleteOne(ctx, bson.M{"collection_name": name})
-	return err
+	if err != nil {
+		return err
+	}
+
+	// The MongoDB-side deletion has fully succeeded. From here on every side
+	// effect is best-effort bookkeeping: its failure must never turn a
+	// committed deletion into an error. Purge first, then publish.
+	s.purgeState(ctx, name)
+	s.notifyPublish(ctx, name)
+
+	return nil
 }

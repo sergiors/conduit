@@ -26,7 +26,6 @@ func (s *Server) createStream(c *gin.Context) {
 		return
 	}
 
-	s.publishConfigChange(ctx, name)
 	c.Status(http.StatusCreated)
 }
 
@@ -39,6 +38,5 @@ func (s *Server) deleteStream(c *gin.Context) {
 		return
 	}
 
-	s.publishConfigChange(ctx, name)
 	c.Status(http.StatusNoContent)
 }

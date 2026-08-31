@@ -43,10 +43,16 @@ func main() {
 	}
 	defer redisClient.Close()
 
+	// Infrastructure side effects of collections.Settings mutations: publish a
+	// config-change notification and purge CDC state after a successful delete.
+	// Injected as method values so both the settings package and the API layer
+	// stay decoupled from Redis.
+	collectionSettings.OnPublish = redisClient.PublishConfigChange
+	collectionSettings.OnPurge = redisClient.DeleteCollectionState
+
 	server := api.New(api.Dependencies{
 		CollectionSettings: collectionSettings,
 		MongoClient:        mongoClient,
-		RedisClient:        redisClient,
 		APIKey:             cfg.APIKey,
 	})
 

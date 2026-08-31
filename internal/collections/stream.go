@@ -31,6 +31,7 @@ import (
 // subsequent EnableStream returns ErrStreamAlreadyExists, even with the same
 // old_image value. To change it, disable the stream first via DisableStream.
 // Returns ErrCollectionNotFound if the collection does not exist.
+// On success, fires OnPublish (best-effort).
 func (s *Settings) EnableStream(ctx context.Context, name string, oldImage bool) error {
 	// Atomic conditional update. It only succeeds when the stream is not enabled
 	// yet. Once enabled, old_image cannot be redefined through this route. This
@@ -75,6 +76,7 @@ func (s *Settings) EnableStream(ctx context.Context, name string, oldImage bool)
 		}
 	}
 
+	s.notifyPublish(ctx, name)
 	return nil
 }
 
@@ -101,7 +103,7 @@ func (s *Settings) rollbackStream(ctx context.Context, name string) error {
 // changeStreamPreAndPostImages capability (that capability can only be granted,
 // never revoked through Conduit, so a later re-enable with old_image works
 // immediately). Idempotent. Returns ErrCollectionNotFound if the collection
-// does not exist.
+// does not exist. On success, fires OnPublish (best-effort).
 func (s *Settings) DisableStream(ctx context.Context, name string) error {
 	if _, err := s.Get(ctx, name); err != nil {
 		return err
@@ -119,6 +121,7 @@ func (s *Settings) DisableStream(ctx context.Context, name string) error {
 		return err
 	}
 
+	s.notifyPublish(ctx, name)
 	return nil
 }
 

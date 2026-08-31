@@ -1,20 +1,15 @@
 package api
 
 import (
-	"context"
-	"log"
-
 	"github.com/gin-gonic/gin"
 	"github.com/sergiors/conduit/internal/collections"
 	"github.com/sergiors/conduit/internal/mongo"
-	"github.com/sergiors/conduit/internal/redis"
 )
 
 // Dependencies holds the business/infrastructure packages the API layer needs.
 type Dependencies struct {
 	CollectionSettings *collections.Settings
 	MongoClient        *mongo.Client
-	RedisClient        *redis.Client
 	APIKey             string
 }
 
@@ -38,15 +33,4 @@ func (s *Server) Router() *gin.Engine {
 	s.registerRoutes(r)
 
 	return r
-}
-
-// publishConfigChange publishes a configuration change event.
-// Errors are logged but never returned to the client.
-func (s *Server) publishConfigChange(ctx context.Context, name string) {
-	if s.deps.RedisClient == nil {
-		return
-	}
-	if err := s.deps.RedisClient.PublishConfigChange(ctx, name); err != nil {
-		log.Printf("Failed to publish config change: %v", err)
-	}
 }
