@@ -50,3 +50,25 @@ func (s *Server) deleteSink(c *gin.Context) {
 
 	c.Status(http.StatusNoContent)
 }
+
+// updateSink applies a partial (PATCH) update to a sink's mutable fields —
+// filter and event_types. type and spec are immutable: attempting to
+// change them returns 400 sink_identity_immutable (create a new sink instead).
+func (s *Server) updateSink(c *gin.Context) {
+	ctx := c.Request.Context()
+	name := c.Param("name")
+	id := c.Param("id")
+
+	var update collections.SinkUpdate
+	if !bindStrictJSON(c, &update) {
+		return
+	}
+
+	updated, err := s.deps.Collections.UpdateSink(ctx, name, id, update)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, updated)
+}

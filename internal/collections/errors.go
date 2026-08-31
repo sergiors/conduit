@@ -16,7 +16,11 @@ var (
 	ErrTTLAlreadyExists          = errors.New("ttl is already enabled")
 	ErrProtectionAlreadyExists   = errors.New("deletion protection is already enabled")
 	ErrSinkNotFound              = errors.New("sink not found")
-	ErrValidation                = errors.New("validation failed")
+	ErrSinkAlreadyExists         = errors.New("an equivalent sink already exists")
+	// ErrSinkIdentityImmutable is returned when a client attempts to modify a
+	// sink's immutable fields (type, spec) through the update endpoint.
+	ErrSinkIdentityImmutable = errors.New("sink type and spec are immutable; create a new sink instead")
+	ErrValidation            = errors.New("validation failed")
 )
 
 // ValidationError wraps a dynamic client-validation message while remaining

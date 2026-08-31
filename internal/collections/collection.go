@@ -109,7 +109,18 @@ func (m *Manager) CreateIndex(ctx context.Context) error {
 	sinkIndex := mongo.IndexModel{
 		Keys: bson.D{{Key: "collection_id", Value: 1}},
 	}
-	_, err := m.sinks.Indexes().CreateOne(ctx, sinkIndex)
+	if _, err := m.sinks.Indexes().CreateOne(ctx, sinkIndex); err != nil {
+		return err
+	}
+
+	// Unique compound index backing the duplicate-sink rejection: two sinks
+	// with the same fingerprint (functional identity) for the same collection
+	// cannot coexist. This makes the CreateSink pre-check race-safe.
+	sinkFingerprintIndex := mongo.IndexModel{
+		Keys:    bson.D{{Key: "collection_id", Value: 1}, {Key: "fingerprint", Value: 1}},
+		Options: options.Index().SetUnique(true),
+	}
+	_, err := m.sinks.Indexes().CreateOne(ctx, sinkFingerprintIndex)
 	return err
 }
 

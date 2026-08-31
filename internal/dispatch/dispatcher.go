@@ -5,6 +5,7 @@ import (
 	"log"
 	"sync"
 
+	"github.com/sergiors/conduit/internal/collections"
 	"github.com/sergiors/conduit/internal/streams"
 )
 
@@ -79,6 +80,28 @@ func (d *Dispatcher) Close() error {
 		}
 	}
 	return lastErr
+}
+
+// Update atomically replaces the runtime configuration of an existing sink
+// (matched by its stable identity), preserving its transport. It applies the
+// new persisted config in place via RuntimeSink.UpdateConfig, so the transport
+// is never closed or recreated and dispatch is not interrupted. Returns false
+// when no sink with the given identity is registered.
+func (d *Dispatcher) Update(collection string, sink collections.Sink) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	sinks, ok := d.sinks[collection]
+	if !ok {
+		return false
+	}
+	for _, rs := range sinks {
+		if rs.Key() == sink.Identity() {
+			rs.UpdateConfig(sink)
+			return true
+		}
+	}
+	return false
 }
 
 // Remove removes a single runtime sink by its stable key, closing it first.

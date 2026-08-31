@@ -66,6 +66,10 @@ func responseFor(err error) (int, string, string) {
 		return http.StatusNotFound, "document_not_found", err.Error()
 	case errors.Is(err, collections.ErrSinkNotFound):
 		return http.StatusNotFound, "sink_not_found", err.Error()
+	case errors.Is(err, collections.ErrSinkAlreadyExists):
+		return http.StatusConflict, "sink_already_exists", err.Error()
+	case errors.Is(err, collections.ErrSinkIdentityImmutable):
+		return http.StatusBadRequest, "sink_identity_immutable", err.Error()
 	case errors.Is(err, collections.ErrDeletionProtectionEnabled):
 		return http.StatusForbidden, "deletion_protection_enabled", err.Error()
 	case errors.Is(err, collections.ErrValidation):

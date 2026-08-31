@@ -3,22 +3,30 @@ package dispatch
 import (
 	"context"
 	"strings"
+	"sync/atomic"
 
 	"github.com/sergiors/conduit/internal/collections"
 	"github.com/sergiors/conduit/internal/streams"
 )
 
+// sinkSnapshot is an immutable copy of a sink's persisted configuration,
+// swapped atomically so Send evaluates against a consistent view without a
+// lock.
+type sinkSnapshot struct {
+	sink       collections.Sink
+	eventTypes map[string]bool
+}
+
 // RuntimeSink is the active, in-memory representation of a persisted sink.
-// It glues the persisted configuration to a concrete Transport and is
-// responsible for common sink behavior: event type filtering, filter
-// evaluation, and stable identity. Transports receive only events that
-// should actually be delivered.
+// Transports receive only events that pass the sink's event types and filter.
 type RuntimeSink struct {
 	collections.Sink
 
 	Transport Transport
 
-	eventTypes map[string]bool
+	// snapshot holds the current filter/event-types set, swapped atomically
+	// so Send and UpdateConfig are safe to race.
+	snapshot atomic.Pointer[sinkSnapshot]
 }
 
 // NewRuntimeSink creates a runtime sink from its persisted configuration and
@@ -28,18 +36,24 @@ func NewRuntimeSink(sink collections.Sink, transport Transport) *RuntimeSink {
 		Sink:      sink,
 		Transport: transport,
 	}
-	if len(sink.EventTypes) > 0 {
-		rs.eventTypes = make(map[string]bool, len(sink.EventTypes))
-		for _, et := range sink.EventTypes {
-			rs.eventTypes[strings.ToUpper(et)] = true
-		}
-	}
+	rs.snapshot.Store(newSinkSnapshot(sink))
 	return rs
 }
 
-// Key returns a stable identifier derived from the persisted sink. It is the
-// same value used when diffing sink configurations, so the dispatcher can be
-// addressed by sink identity without involving the transport.
+// newSinkSnapshot builds a snapshot, normalizing event types to uppercase so
+// evaluation is case-insensitive.
+func newSinkSnapshot(sink collections.Sink) *sinkSnapshot {
+	cfg := &sinkSnapshot{sink: sink}
+	if len(sink.EventTypes) > 0 {
+		cfg.eventTypes = make(map[string]bool, len(sink.EventTypes))
+		for _, et := range sink.EventTypes {
+			cfg.eventTypes[strings.ToUpper(et)] = true
+		}
+	}
+	return cfg
+}
+
+// Key returns the sink's identity, used to address it in the dispatcher.
 func (rs *RuntimeSink) Key() string {
 	return rs.Sink.Identity()
 }
@@ -47,14 +61,22 @@ func (rs *RuntimeSink) Key() string {
 // Send evaluates the sink's routing rules and, if the event should be
 // delivered, delegates to the transport.
 func (rs *RuntimeSink) Send(ctx context.Context, record streams.StreamRecord) error {
-	if !rs.eventTypeAllowed(record.RecordType) {
+	cfg := rs.snapshot.Load()
+	if !eventTypeAllowed(cfg.eventTypes, record.RecordType) {
 		return nil
 	}
-	match := rs.Filter.Matches(record.NewImage, record.OldImage)
-	if !match {
+	if !cfg.sink.Filter.Matches(record.NewImage, record.OldImage) {
 		return nil
 	}
 	return rs.Transport.Send(ctx, record)
+}
+
+// UpdateConfig atomically swaps the sink's filter and event types,
+// preserving the transport. Must be called under the dispatcher's mutex so
+// the embedded Sink field (read by Key) is not raced.
+func (rs *RuntimeSink) UpdateConfig(sink collections.Sink) {
+	rs.Sink = sink
+	rs.snapshot.Store(newSinkSnapshot(sink))
 }
 
 // Close closes the underlying transport.
@@ -65,9 +87,9 @@ func (rs *RuntimeSink) Close() error {
 	return rs.Transport.Close()
 }
 
-func (rs *RuntimeSink) eventTypeAllowed(rt streams.RecordType) bool {
-	if len(rs.eventTypes) == 0 {
+func eventTypeAllowed(eventTypes map[string]bool, rt streams.RecordType) bool {
+	if len(eventTypes) == 0 {
 		return true
 	}
-	return rs.eventTypes[string(rt)]
+	return eventTypes[string(rt)]
 }

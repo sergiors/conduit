@@ -148,9 +148,12 @@ func TestManagerMutatorsFireOnPublish(t *testing.T) {
 			name:  "CreateSink",
 			setup: func() error { return manager.EnableStream(ctx, name, false) },
 			call: func() error {
+				// A distinct spec so the fingerprint differs from the baseline
+				// sink created above — an equivalent sink would now be
+				// rejected with ErrSinkAlreadyExists.
 				_, err := manager.CreateSink(ctx, name, Sink{
 					Type: SinkTypeHTTP,
-					Spec: map[string]interface{}{"endpoint": "http://localhost:3000/events"},
+					Spec: map[string]interface{}{"endpoint": "http://localhost:3000/other-events"},
 				})
 				return err
 			},

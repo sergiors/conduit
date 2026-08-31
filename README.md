@@ -107,6 +107,7 @@ Configuration is applied at runtime through the REST API. Workers detect changes
 
 - `GET /api/collections/:name/sinks` — list sinks
 - `POST /api/collections/:name/sinks` — create a sink
+- `PATCH /api/collections/:name/sinks/:id` — update a sink's mutable fields (`filter`, `event_types`); `type`/`spec` are immutable and return `400 sink_identity_immutable`
 - `DELETE /api/collections/:name/sinks/:id` — delete a sink
 
 ### Documents
@@ -146,6 +147,8 @@ Each sink type owns its own configuration, which lives in a `spec` object in the
 - The filter is a **flat, AND-only** predicate: an event is delivered only when *every* declared criterion matches. Complex boolean expressions (OR, etc.) are expressed by creating **multiple sinks** on the same destination.
 
 The full operator reference is in [`docs/filter.md`](docs/filter.md).
+
+`filter` and `event_types` changes apply **live**: a PATCH is picked up on the next config refresh and swapped atomically into the running sink without recreating its transport or interrupting delivery. Changing `type`/`spec` (where events go) is immutable and requires creating a new sink.
 
 ### HTTP
 

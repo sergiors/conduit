@@ -96,11 +96,11 @@ Sinks are persisted separately from collections in `config.sinks` so that a coll
 
 - **No filter block declared** (`old_image` or `new_image` absent from `filter`): that image is not inspected at all — the block is ignored.
 - **Empty filter block declared** (`"new_image": {}`): matches every event that has that image.
-- **Every declared criterion must match** (AND across fields and within a field's conditions). An event is delivered only if *all* declared criteria match.
+- **Every declared criterion must match** (AND across fields and within a field's conditions). An event is delivered only if _all_ declared criteria match.
 - **A declared filter block whose corresponding image is absent evaluates to `false`.** A `REMOVE` event has no `new_image`; an image the collection does not record (`old_image=false`) is always absent. This is the intended semantics: "match on the content of `old_image`" logically requires an `old_image` to exist — an absent image cannot satisfy a content predicate, the same way EventBridge patterns do not match missing fields.
 - **Flat, AND-only predicates.** Filters are flat AND-only predicates per image block: every declared criterion must match. Recursive logical groups (`and` / `or`) were implemented and subsequently **removed**; boolean composition is intentionally delegated to multiple sinks — a design choice of simplicity over expression power.
 
-Sink filters are **declarative and intentionally decoupled from the collection's current configuration**: creation does not reject an `old_image` filter when the collection's stream currently has `old_image=false`, nor `new_image` criteria that cannot match `REMOVE` events. Configuration is immutable per stream cycle, but it *can* change over the sink's lifetime (disable stream → re-enable with `old_image=true`), and a sink that already encodes its pre-image requirements is then correct without modification. Coupling sink definitions to the collection's current mode would turn a transient configuration state into a permanent restriction and break that forward compatibility. The consequence is deliberate: when the corresponding image is absent, every declared criterion fails and the event is silently not delivered — if an image is essential to the filter, also subscribe to the event types that carry it (`event_types`, plus `{"old_image": {"exists": true}}`-style predicates where appropriate) and/or enable `old_image` on the collection.
+Sink filters are **declarative and intentionally decoupled from the collection's current configuration**: creation does not reject an `old_image` filter when the collection's stream currently has `old_image=false`, nor `new_image` criteria that cannot match `REMOVE` events. Configuration is immutable per stream cycle, but it _can_ change over the sink's lifetime (disable stream → re-enable with `old_image=true`), and a sink that already encodes its pre-image requirements is then correct without modification. Coupling sink definitions to the collection's current mode would turn a transient configuration state into a permanent restriction and break that forward compatibility. The consequence is deliberate: when the corresponding image is absent, every declared criterion fails and the event is silently not delivered — if an image is essential to the filter, also subscribe to the event types that carry it (`event_types`, plus `{"old_image": {"exists": true}}`-style predicates where appropriate) and/or enable `old_image` on the collection.
 
 ## Dispatcher
 
@@ -286,6 +286,7 @@ Isolating the watch loop to one collection makes failure domains small. If one c
 - `NewDispatcher()` creates a dispatcher.
 - `Register(collection, sink)` adds a sink for a collection.
 - `Remove(collection, name)` removes and closes a single sink.
+- `Update(collection, sink)` atomically applies a new persisted config to an existing sink in place, preserving its transport.
 - `Clear(collection)` removes all sinks for a collection.
 - `Dispatch(ctx, collection, record)` sends the record to all registered sinks.
 - `Close()` closes every sink.
@@ -561,16 +562,35 @@ Stored in MongoDB as `config.collections`.
 
 Stored in MongoDB as `config.sinks`.
 
-| Field             | Type                  | Meaning                                                                 |
-| ----------------- | --------------------- | ----------------------------------------------------------------------- |
-| `_id`             | ObjectID              | Sink identifier, exposed as `id`.                                       |
-| `collection_id`   | string (ObjectID hex) | Reference to `config.collections._id`. Not exposed.                     |
-| `type`            | string                | Sink type: `http`, `eventbridge`, `meilisearch`.                        |
-| `spec`            | object                | Opaque, type-specific spec. Interpreted by the sink package.          |
-| `event_types`     | []string              | Subset of `INSERT`, `MODIFY`, `REMOVE`. Empty means all.                |
-| `filter`          | object                | Per-image filters (`old_image`, `new_image`).                           |
-| `created_at`      | timestamp             | Creation time.                                                          |
-| `updated_at`      | timestamp             | Last mutation time.                                                     |
+| Field           | Type                  | Meaning                                                                                       |
+| --------------- | --------------------- | --------------------------------------------------------------------------------------------- |
+| `_id`           | ObjectID              | Sink identifier, exposed as `id`.                                                             |
+| `collection_id` | string (ObjectID hex) | Reference to `config.collections._id`. Not exposed.                                           |
+| `type`          | string                | Sink type: `http`, `eventbridge`, `meilisearch`. **Immutable** (set at creation).             |
+| `spec`          | object                | Opaque, type-specific spec. Interpreted by the sink package. **Immutable** (set at creation). |
+| `event_types`   | []string              | Subset of `INSERT`, `MODIFY`, `REMOVE`. Empty means all. **Mutable** via PATCH.               |
+| `filter`        | object                | Per-image filters (`old_image`, `new_image`). **Mutable** via PATCH.                          |
+| `fingerprint`   | string                | Deterministic hash of the sink's immutable identity (type + spec); server-computed.           |
+| `created_at`    | timestamp             | Creation time.                                                                                |
+| `updated_at`    | timestamp             | Last mutation time.                                                                           |
+
+A sink's **fingerprint** is a deterministic SHA-256 hash of its **immutable
+identity** — `type` and `spec` canonicalized (map keys sorted, timestamps and
+ids excluded) — so two sinks that deliver to the same destination produce the
+same fingerprint regardless of JSON ordering or administrative fields. It
+deliberately **excludes** the mutable behavior (`filter`, `event_types`): those
+are updated in place via PATCH and must not change the destination identity. The
+fingerprint backs duplicate prevention:
+`CreateSink` rejects a second sink with the same fingerprint for the same
+collection (`409 sink_already_exists`), because two sinks with the same
+destination would be ambiguous. The check is race-safe via a unique compound
+index on (`collection_id`, `fingerprint`). Because `type`/`spec` are immutable,
+PATCH can never collide with this index.
+
+The split is intentional: **immutable** fields (`type`, `spec`) are _where_ a
+sink delivers events — changing them requires creating a new sink; **mutable**
+fields (`filter`, `event_types`) are _how/when_ it delivers, updated
+live via PATCH. Events keep flowing while an update lands.
 
 ### Why `spec` Is Opaque
 
@@ -603,6 +623,8 @@ Several configuration fields are immutable once set:
 
 This design makes configuration changes explicit and auditable. Operators must perform a disable/create cycle instead of silently mutating behavior.
 
+**Sinks are the intentional exception.** A sink's _identity_ (`type`, `spec` — where events go) is immutable and follows the delete/recreate pattern, but its _behavior_ (`filter`, `event_types` — how/when events are delivered) is mutable and updated live via `PATCH /api/collections/{name}/sinks/{id}`. Attempting to change `type`/`spec` via PATCH returns `400 sink_identity_immutable`. This split lets operators tune delivery (filtering, event types) without touching the destination, while keeping the "where events go" identity stable and audited.
+
 ## Why Changing Configuration Requires DELETE + POST
 
 Because sub-resources are immutable, the pattern is:
@@ -610,7 +632,7 @@ Because sub-resources are immutable, the pattern is:
 1. `DELETE` the existing sub-resource (e.g., delete stream, delete TTL).
 2. `POST` the new sub-resource.
 
-This matches the resource model: a stream or TTL either exists or does not. A `PUT` would imply partial modification, which the domain deliberately disallows.
+This matches the resource model: a stream or TTL either exists or does not. A `PUT` would imply partial modification, which the domain deliberately disallows. Sinks use `PATCH` for their mutable fields instead; only immutable identity changes (`type`/`spec`) require delete/recreate.
 
 ## Why POST Is Used Instead of PUT
 
@@ -733,8 +755,21 @@ Whenever the API mutates configuration, it publishes the affected collection nam
 
 - New sinks are built and registered.
 - Removed sinks are closed and unregistered.
+- Existing sinks whose **mutable** config changed (`filter`, `event_types`) are updated **in place** via `dispatcher.Update`: the persisted config is swapped atomically inside the running `RuntimeSink` (an `atomic.Pointer` snapshot), so the transport is preserved and dispatch is not interrupted.
 
-Sink identity is based on the persisted sink ID. Because sinks are immutable, a change to any field inside `spec` is naturally observed as the deletion of one sink and the creation of another.
+Sink identity is based on the persisted sink ID. `type`/`spec` are immutable for the sink's lifetime, but the mutable fields can change via PATCH; because each refresh reloads from `config.sinks`, a PATCHed sink converges on the next tick without restarting.
+
+### How sink updates propagate
+
+A mutable sink change flows end-to-end as:
+
+1. **PATCH** `PATCH /api/collections/{name}/sinks/{id}` updates the mutable fields (`filter`, `event_types`) in `config.sinks` and fires `OnPublish`.
+2. **Notify** — `OnPublish` publishes a config-change notification to Redis.
+3. **Refresh** — the manager's `configChangeLoop` (or the periodic `syncLoop`) calls `refreshSinks`, which reloads the persisted sinks from `config.sinks`.
+4. **Reconcile** — `ReconcileSinks` diffs the desired set against the current runtime set by sink ID; a mismatch in any mutable field emits `ChangeUpdated`.
+5. **Apply** — `ApplyChanges` routes `ChangeUpdated` to `dispatcher.Update`, which finds the live `RuntimeSink` by identity and calls `UpdateConfig` on it. `UpdateConfig` builds a fresh immutable snapshot (normalized event types + filter) and stores it in the sink's `atomic.Pointer`. The transport is never closed or recreated, and the change stream is never restarted.
+
+**What is applied live:** `filter` and `event_types` changes take effect atomically on the next refresh, without recreating the transport or interrupting dispatch. **What requires a new sink:** changing the immutable identity (`type`/`spec` — where events go) is rejected by PATCH (`400 sink_identity_immutable`); it requires delete + create, which rebuilds the transport by design. Sinks run whenever they exist (there is no `enabled` state); delivery is stopped by deleting the sink or disabling the stream.
 
 ## Resume Tokens
 
@@ -755,6 +790,7 @@ When a watcher is started, the manager calls `retryProcessor.RegisterCollection`
 - `ErrCollectionNotFound`
 - `ErrDocumentNotFound`
 - `ErrSinkNotFound`
+- `ErrSinkIdentityImmutable`
 - `ErrDeletionProtectionEnabled`
 - `ErrValidation`
 - `ErrStreamAlreadyExists`
@@ -774,6 +810,7 @@ Callers identify these with `errors.Is`, never by string matching.
 | `ErrCollectionNotFound`                      | 404         | `collection_not_found`        |
 | `ErrDocumentNotFound`                        | 404         | `document_not_found`          |
 | `ErrSinkNotFound`                            | 404         | `sink_not_found`              |
+| `ErrSinkIdentityImmutable`                   | 400         | `sink_identity_immutable`     |
 | `ErrDeletionProtectionEnabled`               | 403         | `deletion_protection_enabled` |
 | `ErrStreamAlreadyExists`                     | 409         | `stream_already_exists`       |
 | `ErrTTLAlreadyExists`                        | 409         | `ttl_already_exists`          |
@@ -805,7 +842,7 @@ The following principles are reflected in the codebase:
 - **Business logic lives in the domain.** `collections.Manager` is the sole authority for configuration mutations.
 - **Infrastructure is isolated.** MongoDB and Redis are wrapped in dedicated packages that expose domain-shaped operations rather than raw driver methods.
 - **Configuration is the source of truth.** The worker does not hard-code which collections to watch; it reconciles its runtime state against `config.collections`.
-- **Resources are immutable whenever possible.** Stream, TTL, and protection sub-resources are immutable once set; changing them requires explicit deletion and recreation.
+- **Resources are immutable whenever possible.** Stream, TTL, and protection sub-resources are immutable once set; changing them requires explicit deletion and recreation. Sinks are the exception: their _identity_ (`type`/`spec`) is immutable, but their _behavior_ (`filter`, `event_types`) is mutable via PATCH.
 - **Small focused files.** Each Go file has one responsibility: one handler per API file, one concept per collections file, one sink implementation per file.
 - **Explicit behavior over magic.** There are no hidden watchers, no automatic sink enablement, and no implicit defaults that override operator intent.
 - **No global mutable state.** All components receive dependencies through constructors.

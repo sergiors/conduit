@@ -2,11 +2,17 @@ package collections
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"reflect"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
 )
 
 // ValidEventTypes are the allowed event types for sinks.
@@ -22,15 +28,15 @@ type Sink struct {
 	Spec         map[string]interface{} `bson:"spec" json:"spec"`
 	EventTypes   []string               `bson:"event_types,omitempty" json:"event_types"`
 	Filter       Filter                 `bson:"filter,omitempty" json:"filter,omitempty"`
+	Fingerprint  string                 `bson:"fingerprint,omitempty" json:"fingerprint,omitempty"`
 	CreatedAt    time.Time              `bson:"created_at" json:"created_at"`
 	UpdatedAt    time.Time              `bson:"updated_at" json:"updated_at"`
 }
 
 // ValidateEventTypes validates that all event types are valid.
-// An empty slice is treated as "all event types" and is valid.
 func (s *Sink) ValidateEventTypes() error {
 	if len(s.EventTypes) == 0 {
-		return nil // Empty means all types, which is valid
+		return nil
 	}
 
 	validSet := make(map[string]bool)
@@ -46,10 +52,7 @@ func (s *Sink) ValidateEventTypes() error {
 	return nil
 }
 
-// Validate checks the common sink configuration required by every sink type:
-// a type, a spec, and valid event types. The filter needs no validation: it
-// is a flat, AND-only predicate over image blocks, so invalid filter states
-// are unrepresentable at the type level.
+// Validate checks the common sink configuration required by every sink type.
 func (s *Sink) Validate() error {
 	if s.Type == "" {
 		return NewValidationError("sink type is required")
@@ -63,10 +66,59 @@ func (s *Sink) Validate() error {
 	return nil
 }
 
-// Identity returns a stable identifier for the sink. Since sinks are immutable,
-// the persisted ID is the only identity needed by the runtime.
+// Identity returns a stable identifier for the sink.
 func (s Sink) Identity() string {
 	return s.ID
+}
+
+// fingerprintPayload is the canonical representation of a sink's immutable
+// functional identity: type + spec.
+type fingerprintPayload struct {
+	Type Type                   `json:"type"`
+	Spec map[string]interface{} `json:"spec"`
+}
+
+// Fingerprint returns a deterministic hash of the sink's immutable functional
+// identity (type + spec). Two sinks with the same fingerprint deliver to the
+// same destination and cannot coexist in one collection; CreateSink rejects
+// them.
+func (s *Sink) ComputeFingerprint() (string, error) {
+	payload := fingerprintPayload{
+		Type: s.Type,
+		Spec: s.Spec,
+	}
+
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("marshal sink fingerprint: %w", err)
+	}
+
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+// GetSink returns a single sink by its ID, scoped to the collection identified
+// by name so a sink cannot be read from a different collection.
+func (m *Manager) GetSink(ctx context.Context, collectionName, sinkID string) (*Sink, error) {
+	collection, err := m.Get(ctx, collectionName)
+	if err != nil {
+		return nil, err
+	}
+
+	objectID, err := primitive.ObjectIDFromHex(sinkID)
+	if err != nil {
+		return nil, ErrSinkNotFound
+	}
+
+	var sink Sink
+	err = m.sinks.FindOne(ctx, bson.M{"_id": objectID, "collection_id": collection.ID}).Decode(&sink)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, ErrSinkNotFound
+		}
+		return nil, fmt.Errorf("find sink: %w", err)
+	}
+	return &sink, nil
 }
 
 // GetSinks returns the sinks for a collection identified by name.
@@ -108,14 +160,32 @@ func (m *Manager) CreateSink(ctx context.Context, collectionName string, sink Si
 		return nil, err
 	}
 
+	fp, err := sink.ComputeFingerprint()
+	if err != nil {
+		return nil, err
+	}
+
+	// Reject an equivalent sink before inserting; the unique compound
+	// index (collection_id, fingerprint) covers concurrent creations.
+	existing := m.sinks.FindOne(ctx, bson.M{"collection_id": collection.ID, "fingerprint": fp})
+	if err := existing.Err(); err == nil {
+		return nil, ErrSinkAlreadyExists
+	} else if !errors.Is(err, mongo.ErrNoDocuments) {
+		return nil, fmt.Errorf("find duplicate sink: %w", err)
+	}
+
 	now := time.Now()
 	sink.ID = ""
 	sink.CollectionID = collection.ID
+	sink.Fingerprint = fp
 	sink.CreatedAt = now
 	sink.UpdatedAt = now
 
 	result, err := m.sinks.InsertOne(ctx, sink)
 	if err != nil {
+		if mongo.IsDuplicateKeyError(err) {
+			return nil, ErrSinkAlreadyExists
+		}
 		return nil, fmt.Errorf("insert sink: %w", err)
 	}
 	if objectID, ok := result.InsertedID.(primitive.ObjectID); ok {
@@ -157,4 +227,78 @@ func (m *Manager) deleteSinksByCollectionID(ctx context.Context, collectionID st
 		return fmt.Errorf("delete sinks: %w", err)
 	}
 	return nil
+}
+
+// SinkUpdate carries the fields a client may PATCH on a sink. Type and Spec
+// are included structurally so an attempted identity change is detectable and
+// rejected with ErrSinkIdentityImmutable.
+type SinkUpdate struct {
+	Filter     *Filter                `json:"filter,omitempty"`
+	EventTypes []string               `json:"event_types,omitempty"`
+	Type       *Type                  `json:"type,omitempty"`
+	Spec       map[string]interface{} `json:"spec,omitempty"`
+}
+
+func specsEqual(a, b map[string]interface{}) bool {
+	return reflect.DeepEqual(a, b)
+}
+
+// UpdateSink updates the mutable fields of an existing sink (filter,
+// event_types). type and spec are immutable — changing them returns
+// ErrSinkIdentityImmutable (create a new sink instead).
+func (m *Manager) UpdateSink(ctx context.Context, collectionName, sinkID string, update SinkUpdate) (*Sink, error) {
+	current, err := m.GetSink(ctx, collectionName, sinkID)
+	if err != nil {
+		return nil, err
+	}
+
+	if update.Type != nil && *update.Type != current.Type {
+		return nil, ErrSinkIdentityImmutable
+	}
+	if update.Spec != nil && !specsEqual(current.Spec, update.Spec) {
+		return nil, ErrSinkIdentityImmutable
+	}
+
+	if update.Filter == nil && update.EventTypes == nil {
+		return nil, NewValidationError("no mutable fields provided for sink update")
+	}
+
+	updated := *current
+	if update.Filter != nil {
+		updated.Filter = *update.Filter
+	}
+	if update.EventTypes != nil {
+		updated.EventTypes = update.EventTypes
+	}
+
+	if err := updated.ValidateEventTypes(); err != nil {
+		return nil, err
+	}
+
+	updated.UpdatedAt = time.Now()
+
+	result, err := m.sinks.UpdateOne(
+		ctx,
+		bson.M{"_id": mustObjectID(sinkID), "collection_id": current.CollectionID},
+		bson.M{"$set": bson.M{
+			"filter":      updated.Filter,
+			"event_types": updated.EventTypes,
+			"updated_at":  updated.UpdatedAt,
+		}},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("update sink: %w", err)
+	}
+	if result.MatchedCount == 0 {
+		return nil, ErrSinkNotFound
+	}
+
+	m.notifyPublish(ctx, collectionName)
+	return &updated, nil
+}
+
+// mustObjectID converts a hex string to an ObjectID, or returns primitive.NilObjectID.
+func mustObjectID(hex string) primitive.ObjectID {
+	objectID, _ := primitive.ObjectIDFromHex(hex)
+	return objectID
 }

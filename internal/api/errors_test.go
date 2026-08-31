@@ -23,6 +23,8 @@ func TestResponseFor(t *testing.T) {
 		{"collection not found", collections.ErrCollectionNotFound, http.StatusNotFound, "collection_not_found", "collection not found"},
 		{"document not found", collections.ErrDocumentNotFound, http.StatusNotFound, "document_not_found", "document not found"},
 		{"sink not found", collections.ErrSinkNotFound, http.StatusNotFound, "sink_not_found", "sink not found"},
+		{"sink already exists is 409", collections.ErrSinkAlreadyExists, http.StatusConflict, "sink_already_exists", "an equivalent sink already exists"},
+		{"sink identity immutable is 400", collections.ErrSinkIdentityImmutable, http.StatusBadRequest, "sink_identity_immutable", "sink type and spec are immutable; create a new sink instead"},
 		{"deletion protection enabled", collections.ErrDeletionProtectionEnabled, http.StatusForbidden, "deletion_protection_enabled", "deletion protection is enabled"},
 		{"wrapped collection not found", fmt.Errorf("get: %w", collections.ErrCollectionNotFound), http.StatusNotFound, "collection_not_found", "get: collection not found"},
 		{"validation error is 400", collections.NewValidationError("bad input"), http.StatusBadRequest, "validation_error", "bad input"},

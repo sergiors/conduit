@@ -33,6 +33,7 @@ func (s *Server) registerRoutes(r *gin.Engine) {
 	api.GET("/collections/:name/sinks", s.getSinks)
 	api.POST("/collections/:name/sinks", s.createSink)
 	api.DELETE("/collections/:name/sinks/:id", s.deleteSink)
+	api.PATCH("/collections/:name/sinks/:id", s.updateSink)
 
 	// Collection documents
 	api.GET("/collections/:name/documents", s.listDocuments)

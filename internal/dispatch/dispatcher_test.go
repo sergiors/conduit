@@ -172,6 +172,131 @@ func TestDispatcherClear(t *testing.T) {
 	})
 }
 
+// countingTransport is a transport spy that counts sends and closes so tests
+// can assert that an update preserves the live transport.
+type countingTransport struct {
+	sent   int
+	closed int
+}
+
+func (c *countingTransport) Send(ctx context.Context, record streams.StreamRecord) error {
+	c.sent++
+	return nil
+}
+
+func (c *countingTransport) Close() error {
+	c.closed++
+	return nil
+}
+
+func TestDispatcherUpdateKeepsTransport(t *testing.T) {
+	ctx := context.Background()
+	d := NewDispatcher()
+	transport := &countingTransport{}
+
+	// Register a sink that only accepts INSERT events.
+	original := collections.Sink{
+		ID:         "s1",
+		Type:       collections.SinkTypeHTTP,
+		Spec:       map[string]interface{}{"endpoint": "https://example.com"},
+		EventTypes: []string{"INSERT"},
+	}
+	d.Register("table1", NewRuntimeSink(original, transport))
+
+	// Update the sink's mutable config: filter + event types.
+	updated := collections.Sink{
+		ID:         "s1",
+		Type:       collections.SinkTypeHTTP,
+		Spec:       map[string]interface{}{"endpoint": "https://example.com"},
+		EventTypes: []string{"MODIFY"},
+		Filter: collections.Filter{
+			NewImage: collections.ImageFilter{
+				"status": collections.FilterCondition{Eq: "active"},
+			},
+		},
+	}
+	assert.True(t, d.Update("table1", updated), "update of a registered sink should succeed")
+
+	// The transport must be preserved, not closed.
+	assert.Zero(t, transport.closed, "update must not close the live transport")
+
+	// The same *RuntimeSink pointer must be retained (identity stable).
+	d.mu.RLock()
+	rs := d.sinks["table1"][0]
+	d.mu.RUnlock()
+	assert.Equal(t, "s1", rs.Key())
+
+	// Events matching the NEW filter and event type are delivered.
+	err := d.Dispatch(ctx, "table1", streams.StreamRecord{
+		RecordType: streams.ModifyRecord,
+		NewImage:   bson.M{"status": "active"},
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, 1, transport.sent, "event matching new filter/event type should be delivered")
+
+	// An event type excluded by the new event_types is not delivered.
+	err = d.Dispatch(ctx, "table1", streams.StreamRecord{
+		RecordType: streams.InsertRecord,
+		NewImage:   bson.M{"status": "active"},
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, 1, transport.sent, "INSERT is excluded by new event_types")
+
+	// An event matching the new event type but not the new filter is not delivered.
+	err = d.Dispatch(ctx, "table1", streams.StreamRecord{
+		RecordType: streams.ModifyRecord,
+		NewImage:   bson.M{"status": "paused"},
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, 1, transport.sent, "event not matching new filter should be skipped")
+}
+
+func TestDispatcherUpdateMissingReturnsFalse(t *testing.T) {
+	d := NewDispatcher()
+	d.Register("table1", newTestSink(&MockTransport{}))
+
+	// Updating an unregistered key returns false and does not panic.
+	assert.False(t, d.Update("table1", collections.Sink{ID: "missing"}))
+	assert.False(t, d.Update("unknown", collections.Sink{ID: "s1"}))
+}
+
+func TestDispatcherUpdateEventTypesNormalization(t *testing.T) {
+	ctx := context.Background()
+	d := NewDispatcher()
+	transport := &countingTransport{}
+
+	d.Register("table1", NewRuntimeSink(collections.Sink{ID: "s1"}, transport))
+
+	// Update with lowercase event types; UpdateConfig must normalize to uppercase.
+	assert.True(t, d.Update("table1", collections.Sink{ID: "s1", EventTypes: []string{"insert"}}))
+
+	err := d.Dispatch(ctx, "table1", streams.StreamRecord{RecordType: streams.InsertRecord})
+	assert.NoError(t, err)
+	assert.Equal(t, 1, transport.sent, "lowercase event type should be normalized and match INSERT")
+}
+
+func TestDispatcherUpdateConcurrentSend(t *testing.T) {
+	ctx := context.Background()
+	d := NewDispatcher()
+	transport := &countingTransport{}
+
+	d.Register("table1", NewRuntimeSink(collections.Sink{ID: "s1", EventTypes: []string{"INSERT"}}, transport))
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 1000; i++ {
+			d.Update("table1", collections.Sink{ID: "s1", EventTypes: []string{"MODIFY"}})
+			d.Update("table1", collections.Sink{ID: "s1", EventTypes: []string{"INSERT"}})
+		}
+	}()
+
+	for i := 0; i < 1000; i++ {
+		_ = d.Dispatch(ctx, "table1", streams.StreamRecord{RecordType: streams.InsertRecord})
+	}
+	<-done
+}
+
 func TestDispatcherClose(t *testing.T) {
 	t.Run("close all sinks", func(t *testing.T) {
 		d := NewDispatcher()
