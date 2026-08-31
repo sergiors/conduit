@@ -161,7 +161,9 @@ func (w *Worker) Run(ctx context.Context) error {
 }
 
 func main() {
-	cfg := config.Load()
+	// Worker-specific config: APIKey and Port are intentionally omitted — the
+	// worker neither serves HTTP nor holds the API's auth secret.
+	cfg := config.LoadWorker()
 
 	worker, err := NewWorker(cfg)
 	if err != nil {

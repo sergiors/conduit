@@ -21,3 +21,34 @@ func TestLoadShutdownTimeout(t *testing.T) {
 		assert.Equal(t, 30*time.Second, loadShutdownTimeout("not-a-duration"))
 	})
 }
+
+func TestLoadWorker_RequiredVariables(t *testing.T) {
+	t.Setenv("MONGODB_URI", "mongodb://localhost:27017")
+	t.Setenv("MONGODB_DATABASE", "conduit")
+	t.Setenv("REDIS_URI", "redis://localhost:6379")
+	t.Setenv("SHUTDOWN_TIMEOUT", "10s")
+
+	cfg := LoadWorker()
+
+	assert.Equal(t, "mongodb://localhost:27017", cfg.MongoDBURI)
+	assert.Equal(t, "conduit", cfg.MongoDBDatabase)
+	assert.Equal(t, "redis://localhost:6379", cfg.RedisURI)
+	assert.Equal(t, 10*time.Second, cfg.ShutdownTimeout)
+	// The worker must not depend on the API's credential nor serve HTTP.
+	assert.Equal(t, "", cfg.APIKey)
+	assert.Equal(t, "", cfg.Port)
+}
+
+func TestLoadWorker_ShutdownTimeoutDefault(t *testing.T) {
+	t.Setenv("MONGODB_URI", "mongodb://localhost:27017")
+	t.Setenv("MONGODB_DATABASE", "conduit")
+	t.Setenv("REDIS_URI", "redis://localhost:6379")
+	// Clear SHUTDOWN_TIMEOUT explicitly so a developer's exported value cannot
+	// leak in and mask a regression here (a set-but-invalid value would fall
+	// back to the default anyway, but a valid value would not).
+	t.Setenv("SHUTDOWN_TIMEOUT", "")
+
+	cfg := LoadWorker()
+
+	assert.Equal(t, 30*time.Second, cfg.ShutdownTimeout)
+}

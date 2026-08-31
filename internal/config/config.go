@@ -19,7 +19,10 @@ type Config struct {
 	ShutdownTimeout time.Duration
 }
 
-// Load reads the application configuration from the environment.
+// Load is the API binary's loader. It reads the full application
+// configuration from the environment, hard-requiring API_KEY because the API's
+// bearer-token auth middleware depends on fail-closed behavior. Worker binaries
+// should use LoadWorker instead, which requires only what the worker consumes.
 func Load() Config {
 	return Config{
 		MongoDBURI:      requiredEnv("MONGODB_URI"),
@@ -27,6 +30,21 @@ func Load() Config {
 		RedisURI:        requiredEnv("REDIS_URI"),
 		Port:            getEnv("PORT", "8080"),
 		APIKey:          requiredEnv("API_KEY"),
+	}
+}
+
+// LoadWorker reads the worker process's configuration from the environment.
+//
+// The worker connects to MongoDB and Redis and never serves HTTP nor holds the
+// API auth secret, so API_KEY and PORT are intentionally not read from the
+// environment: a worker-only deployment must not need the API's credential.
+// Only the settings the worker consumes are populated; Port and APIKey are left
+// at their zero values.
+func LoadWorker() Config {
+	return Config{
+		MongoDBURI:      requiredEnv("MONGODB_URI"),
+		MongoDBDatabase: requiredEnv("MONGODB_DATABASE"),
+		RedisURI:        requiredEnv("REDIS_URI"),
 		ShutdownTimeout: loadShutdownTimeout(getEnv("SHUTDOWN_TIMEOUT", "30s")),
 	}
 }
