@@ -16,9 +16,9 @@ import (
 // compose network.
 const localMongoURI = "mongodb://localhost:27017/?directConnection=true"
 
-// newTestSettings connects to MongoDB and returns a Settings instance for
+// newTestManager connects to MongoDB and returns a Manager instance for
 // integration tests. It skips the test if MongoDB is not available.
-func newTestSettings(t *testing.T) (*Settings, *mongo.Client, context.Context) {
+func newTestManager(t *testing.T) (*Manager, *mongo.Client, context.Context) {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping integration test")
@@ -33,5 +33,5 @@ func newTestSettings(t *testing.T) (*Settings, *mongo.Client, context.Context) {
 	}
 	t.Cleanup(func() { client.Disconnect(context.Background()) })
 
-	return NewSettings(client, "conduit_test"), client, ctx
+	return NewManager(client, "conduit_test"), client, ctx
 }

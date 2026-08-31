@@ -73,7 +73,7 @@ func TestTableTimestamps(t *testing.T) {
 		table := Collection{
 			CollectionName: "test",
 		}
-		// Simulate what Settings.Create does
+		// Simulate what Manager.Create does
 		table.CreatedAt = time.Now()
 		table.UpdatedAt = time.Now()
 		after := time.Now()
@@ -85,23 +85,23 @@ func TestTableTimestamps(t *testing.T) {
 	})
 }
 
-func TestSettingsCreateIndex(t *testing.T) {
-	settings, _, ctx := newTestSettings(t)
+func TestManagerCreateIndex(t *testing.T) {
+	manager, _, ctx := newTestManager(t)
 
-	err := settings.CreateIndex(ctx)
+	err := manager.CreateIndex(ctx)
 	require.NoError(t, err, "should create unique index on collection_name")
 }
 
-func TestSettingsCRUD(t *testing.T) {
-	settings, client, ctx := newTestSettings(t)
+func TestManagerCRUD(t *testing.T) {
+	manager, client, ctx := newTestManager(t)
 
 	// Cleanup before test - remove any leftover test collections
 	for _, name := range []string{"test_table", "protected_table", "collection_table", "stream_table", "no_stream_table", "fresh_table", "new_collection_name"} {
-		if table, err := settings.Get(ctx, name); err == nil {
+		if table, err := manager.Get(ctx, name); err == nil {
 			if table.DeletionProtection {
-				_ = settings.DisableDeletionProtection(ctx, name)
+				_ = manager.DisableDeletionProtection(ctx, name)
 			}
-			_ = settings.Delete(ctx, name)
+			_ = manager.Delete(ctx, name)
 		}
 	}
 
@@ -114,7 +114,7 @@ func TestSettingsCRUD(t *testing.T) {
 			OldImage:       true,
 		}
 
-		err := settings.Create(ctx, table)
+		err := manager.Create(ctx, table)
 		require.NoError(t, err)
 		assert.NotZero(t, table.CreatedAt)
 		assert.NotZero(t, table.UpdatedAt)
@@ -133,7 +133,7 @@ func TestSettingsCRUD(t *testing.T) {
 	})
 
 	t.Run("get table", func(t *testing.T) {
-		table, err := settings.Get(ctx, "test_table")
+		table, err := manager.Get(ctx, "test_table")
 		require.NoError(t, err)
 		assert.Equal(t, "test_table", table.CollectionName)
 		assert.True(t, table.StreamEnabled)
@@ -141,7 +141,7 @@ func TestSettingsCRUD(t *testing.T) {
 	})
 
 	t.Run("list tables", func(t *testing.T) {
-		tables, err := settings.List(ctx)
+		tables, err := manager.List(ctx)
 		require.NoError(t, err)
 		assert.NotEmpty(t, tables)
 	})
@@ -153,23 +153,23 @@ func TestSettingsCRUD(t *testing.T) {
 			StreamEnabled:      true,
 			DeletionProtection: true,
 		}
-		err := settings.Create(ctx, protectedTable)
+		err := manager.Create(ctx, protectedTable)
 		require.NoError(t, err)
 
 		// Try to delete - should fail
-		err = settings.Delete(ctx, protectedTable.CollectionName)
+		err = manager.Delete(ctx, protectedTable.CollectionName)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "deletion protection is enabled")
 
 		// Collection should still exist
-		exists, err := settings.Get(ctx, "protected_table")
+		exists, err := manager.Get(ctx, "protected_table")
 		assert.NoError(t, err)
 		assert.NotNil(t, exists)
 
 		// Cleanup - disable protection first
-		err = settings.DisableDeletionProtection(ctx, protectedTable.CollectionName)
+		err = manager.DisableDeletionProtection(ctx, protectedTable.CollectionName)
 		require.NoError(t, err)
-		err = settings.Delete(ctx, protectedTable.CollectionName)
+		err = manager.Delete(ctx, protectedTable.CollectionName)
 		require.NoError(t, err)
 	})
 
@@ -180,7 +180,7 @@ func TestSettingsCRUD(t *testing.T) {
 			StreamEnabled:      true,
 			DeletionProtection: false,
 		}
-		err := settings.Create(ctx, tableWithCollection)
+		err := manager.Create(ctx, tableWithCollection)
 		require.NoError(t, err)
 
 		// Verify collection exists
@@ -190,13 +190,13 @@ func TestSettingsCRUD(t *testing.T) {
 		assert.Contains(t, collections, "collection_table")
 
 		// Delete table
-		err = settings.DisableDeletionProtection(ctx, tableWithCollection.CollectionName)
+		err = manager.DisableDeletionProtection(ctx, tableWithCollection.CollectionName)
 		require.NoError(t, err)
-		err = settings.Delete(ctx, tableWithCollection.CollectionName)
+		err = manager.Delete(ctx, tableWithCollection.CollectionName)
 		require.NoError(t, err)
 
 		// Verify configuration is removed
-		_, err = settings.Get(ctx, "collection_table")
+		_, err = manager.Get(ctx, "collection_table")
 		assert.Error(t, err)
 
 		// Verify collection is removed
@@ -207,16 +207,16 @@ func TestSettingsCRUD(t *testing.T) {
 
 	t.Run("delete table", func(t *testing.T) {
 		// Get the existing test_table and disable deletion protection before deleting
-		table, err := settings.Get(ctx, "test_table")
+		table, err := manager.Get(ctx, "test_table")
 		require.NoError(t, err)
 
-		err = settings.DisableDeletionProtection(ctx, table.CollectionName)
+		err = manager.DisableDeletionProtection(ctx, table.CollectionName)
 		require.NoError(t, err)
 
-		err = settings.Delete(ctx, table.CollectionName)
+		err = manager.Delete(ctx, table.CollectionName)
 		require.NoError(t, err)
 
-		_, err = settings.Get(ctx, "test_table")
+		_, err = manager.Get(ctx, "test_table")
 		assert.Error(t, err)
 	})
 }

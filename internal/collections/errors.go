@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-// Sentinel domain errors returned by Settings. Callers MUST identify them
+// Sentinel domain errors returned by Manager. Callers MUST identify them
 // with errors.Is (never by comparing err.Error()), so HTTP status mapping
 // does not depend on fragile string matching.
 var (

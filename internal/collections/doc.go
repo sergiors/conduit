@@ -3,7 +3,9 @@
 // This package manages collection configurations stored in MongoDB:
 //   - Collection: Represents a MongoDB collection with CDC settings
 //   - Sink: A sink configuration stored in its own collection
-//   - Settings: CRUD operations for collection configurations
+//   - Manager: owns collection lifecycle and their physical MongoDB
+//     infrastructure (collections, indexes, TTL, change-stream capability,
+//     deletion with state-purge fan-out)
 //
 // Key Features:
 //   - Per-collection stream enable/disable
@@ -33,7 +35,7 @@
 //
 // Usage:
 //
-//	settings := collections.NewSettings(mongoClient, database)
+//	manager := collections.NewManager(mongoClient, database)
 //
 //	// Create collection
 //	collection := collections.Collection{
@@ -41,10 +43,10 @@
 //	    StreamEnabled:     true,
 //	    OldImage:          true,
 //	}
-//	if err := settings.Create(ctx, collection); err != nil {
+//	if err := manager.Create(ctx, collection); err != nil {
 //	    log.Fatal(err)
 //	}
 //
 //	// List enabled collections
-//	collections, err := settings.ListStreamEnabled(ctx)
+//	collections, err := manager.ListStreamEnabled(ctx)
 package collections

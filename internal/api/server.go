@@ -8,9 +8,9 @@ import (
 
 // Dependencies holds the business/infrastructure packages the API layer needs.
 type Dependencies struct {
-	CollectionSettings *collections.Settings
-	MongoClient        *mongo.Client
-	APIKey             string
+	Collections *collections.Manager
+	MongoClient *mongo.Client
+	APIKey      string
 }
 
 // Server exposes HTTP endpoints. It contains no business rules; it only binds

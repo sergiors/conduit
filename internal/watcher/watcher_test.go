@@ -1037,7 +1037,7 @@ func TestSyncWithCollectionsRecreatesDeadWatcher(t *testing.T) {
 	fr := newFakeRedis()
 
 	const db = "conduit_test_lifecycle"
-	settings := collections.NewSettings(client, db)
+	settings := collections.NewManager(client, db)
 
 	names := []string{"recovery_test", "recovery_test2"}
 	cleanup := func() {
@@ -1102,7 +1102,7 @@ func TestSyncWithCollectionsIdempotent(t *testing.T) {
 	fr := newFakeRedis()
 
 	const db = "conduit_test_lifecycle"
-	settings := collections.NewSettings(client, db)
+	settings := collections.NewManager(client, db)
 
 	const name = "recovery_test"
 	cleanup := func() {
@@ -1148,7 +1148,7 @@ func TestHandleCollectionChangeDeletedStopsWatcher(t *testing.T) {
 	fr := newFakeRedis()
 
 	const db = "conduit_test_handlechange"
-	settings := collections.NewSettings(client, db)
+	settings := collections.NewManager(client, db)
 
 	names := []string{"gone_coll", "kept_coll", "disabled_coll"}
 	cleanup := func() {

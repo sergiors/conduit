@@ -17,7 +17,7 @@ func (s *Server) createTTL(c *gin.Context) {
 		return
 	}
 
-	if err := s.deps.CollectionSettings.SetTTL(ctx, name, body.Attribute); err != nil {
+	if err := s.deps.Collections.SetTTL(ctx, name, body.Attribute); err != nil {
 		writeError(c, err)
 		return
 	}
@@ -29,7 +29,7 @@ func (s *Server) deleteTTL(c *gin.Context) {
 	ctx := c.Request.Context()
 	name := c.Param("name")
 
-	if err := s.deps.CollectionSettings.DisableTTL(ctx, name); err != nil {
+	if err := s.deps.Collections.DisableTTL(ctx, name); err != nil {
 		writeError(c, err)
 		return
 	}

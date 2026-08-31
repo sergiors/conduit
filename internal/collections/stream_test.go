@@ -14,73 +14,73 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSettingsStream(t *testing.T) {
-	settings, _, ctx := newTestSettings(t)
+func TestManagerStream(t *testing.T) {
+	manager, _, ctx := newTestManager(t)
 
 	// Cleanup leftovers
-	if _, err := settings.Get(ctx, "stream_test_table"); err == nil {
-		_ = settings.DisableDeletionProtection(ctx, "stream_test_table")
-		_ = settings.Delete(ctx, "stream_test_table")
+	if _, err := manager.Get(ctx, "stream_test_table"); err == nil {
+		_ = manager.DisableDeletionProtection(ctx, "stream_test_table")
+		_ = manager.Delete(ctx, "stream_test_table")
 	}
 
 	table := &Collection{
 		CollectionName: "stream_test_table",
 		StreamEnabled:  false,
 	}
-	require.NoError(t, settings.Create(ctx, table))
+	require.NoError(t, manager.Create(ctx, table))
 
 	t.Run("enable stream with old_image", func(t *testing.T) {
-		require.NoError(t, settings.EnableStream(ctx, "stream_test_table", true))
-		got, err := settings.Get(ctx, "stream_test_table")
+		require.NoError(t, manager.EnableStream(ctx, "stream_test_table", true))
+		got, err := manager.Get(ctx, "stream_test_table")
 		require.NoError(t, err)
 		assert.True(t, got.StreamEnabled)
 		assert.True(t, got.OldImage)
 	})
 
 	t.Run("re-enable stream with same old_image is immutable", func(t *testing.T) {
-		err := settings.EnableStream(ctx, "stream_test_table", true)
+		err := manager.EnableStream(ctx, "stream_test_table", true)
 		assert.Error(t, err)
 		assert.True(t, errors.Is(err, ErrStreamAlreadyExists), "should match ErrStreamAlreadyExists")
-		got, _ := settings.Get(ctx, "stream_test_table")
+		got, _ := manager.Get(ctx, "stream_test_table")
 		assert.True(t, got.StreamEnabled)
 		assert.True(t, got.OldImage)
 	})
 
 	t.Run("change old_image after enabled is immutable", func(t *testing.T) {
-		err := settings.EnableStream(ctx, "stream_test_table", false)
+		err := manager.EnableStream(ctx, "stream_test_table", false)
 		assert.Error(t, err)
 		assert.True(t, errors.Is(err, ErrStreamAlreadyExists), "should match ErrStreamAlreadyExists")
-		got, _ := settings.Get(ctx, "stream_test_table")
+		got, _ := manager.Get(ctx, "stream_test_table")
 		assert.True(t, got.OldImage, "old_image should remain unchanged")
 	})
 
 	t.Run("disable stream resets both and allows redefinition", func(t *testing.T) {
-		require.NoError(t, settings.DisableStream(ctx, "stream_test_table"))
-		got, _ := settings.Get(ctx, "stream_test_table")
+		require.NoError(t, manager.DisableStream(ctx, "stream_test_table"))
+		got, _ := manager.Get(ctx, "stream_test_table")
 		assert.False(t, got.StreamEnabled)
 		assert.False(t, got.OldImage)
 
-		require.NoError(t, settings.EnableStream(ctx, "stream_test_table", false))
-		got, _ = settings.Get(ctx, "stream_test_table")
+		require.NoError(t, manager.EnableStream(ctx, "stream_test_table", false))
+		got, _ = manager.Get(ctx, "stream_test_table")
 		assert.True(t, got.StreamEnabled)
 		assert.False(t, got.OldImage)
 	})
 
 	t.Run("disable stream is idempotent", func(t *testing.T) {
-		require.NoError(t, settings.DisableStream(ctx, "stream_test_table"))
-		got, _ := settings.Get(ctx, "stream_test_table")
+		require.NoError(t, manager.DisableStream(ctx, "stream_test_table"))
+		got, _ := manager.Get(ctx, "stream_test_table")
 		assert.False(t, got.StreamEnabled)
 		assert.False(t, got.OldImage)
 	})
 
 	t.Run("stream on unknown collection returns not found", func(t *testing.T) {
-		assert.True(t, errors.Is(settings.EnableStream(ctx, "does_not_exist", true), ErrCollectionNotFound))
-		assert.True(t, errors.Is(settings.DisableStream(ctx, "does_not_exist"), ErrCollectionNotFound))
+		assert.True(t, errors.Is(manager.EnableStream(ctx, "does_not_exist", true), ErrCollectionNotFound))
+		assert.True(t, errors.Is(manager.DisableStream(ctx, "does_not_exist"), ErrCollectionNotFound))
 	})
 
 	// Cleanup
-	require.NoError(t, settings.DisableDeletionProtection(ctx, "stream_test_table"))
-	require.NoError(t, settings.Delete(ctx, "stream_test_table"))
+	require.NoError(t, manager.DisableDeletionProtection(ctx, "stream_test_table"))
+	require.NoError(t, manager.Delete(ctx, "stream_test_table"))
 }
 
 // TestEnableStreamEnsuresPreImageCapability is the regression test for the
@@ -96,17 +96,17 @@ func TestSettingsStream(t *testing.T) {
 // must surface fullDocumentBeforeChange on the change stream that the watcher
 // opens — not just the collMod side effect.
 func TestEnableStreamEnsuresPreImageCapability(t *testing.T) {
-	settings, client, ctx := newTestSettings(t)
+	manager, client, ctx := newTestManager(t)
 
 	const name = "preimage_capability_test_table"
 
 	// Cleanup leftovers
-	if _, err := settings.Get(ctx, name); err == nil {
-		_ = settings.DisableDeletionProtection(ctx, name)
-		_ = settings.Delete(ctx, name)
+	if _, err := manager.Get(ctx, name); err == nil {
+		_ = manager.DisableDeletionProtection(ctx, name)
+		_ = manager.Delete(ctx, name)
 	}
 
-	// A collection created outside Settings.Create (no pre-image capability),
+	// A collection created outside Manager.Create (no pre-image capability),
 	// mirroring pre-b415252 Conduit and external provisioning.
 	require.NoError(t, client.Database("conduit_test").CreateCollection(ctx, name))
 	t.Cleanup(func() {
@@ -120,12 +120,12 @@ func TestEnableStreamEnsuresPreImageCapability(t *testing.T) {
 
 	// Enable the stream with old_image; EnableStream must repair the gap.
 	table := &Collection{CollectionName: name, StreamEnabled: false}
-	require.NoError(t, settings.Create(ctx, table))
-	require.NoError(t, settings.EnableStream(ctx, name, true))
+	require.NoError(t, manager.Create(ctx, table))
+	require.NoError(t, manager.EnableStream(ctx, name, true))
 	t.Cleanup(func() {
 		bgCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		_ = settings.DisableStream(bgCtx, name)
+		_ = manager.DisableStream(bgCtx, name)
 	})
 
 	// The change stream is opened through the same options the watcher uses,
@@ -219,24 +219,24 @@ func hasPreImageCapability(ctx context.Context, t *testing.T, client *mongo.Clie
 	return opts.ChangeStreamPreAndPostImages.Enabled
 }
 
-func TestSettingsListStreamEnabled(t *testing.T) {
-	settings, _, ctx := newTestSettings(t)
+func TestManagerListStreamEnabled(t *testing.T) {
+	manager, _, ctx := newTestManager(t)
 
 	// Create stream-enabled table
 	streamTable := &Collection{
 		CollectionName: "stream_table",
 		StreamEnabled:  true,
 	}
-	_ = settings.Create(ctx, streamTable)
+	_ = manager.Create(ctx, streamTable)
 
 	// Create non-stream table
 	nonStreamTable := &Collection{
 		CollectionName: "no_stream_table",
 		StreamEnabled:  false,
 	}
-	_ = settings.Create(ctx, nonStreamTable)
+	_ = manager.Create(ctx, nonStreamTable)
 
-	tables, err := settings.ListStreamEnabled(ctx)
+	tables, err := manager.ListStreamEnabled(ctx)
 	require.NoError(t, err)
 
 	found := false
@@ -252,6 +252,6 @@ func TestSettingsListStreamEnabled(t *testing.T) {
 	assert.True(t, found, "stream_table should be in the list")
 
 	// Cleanup
-	_ = settings.Delete(ctx, streamTable.CollectionName)
-	_ = settings.Delete(ctx, nonStreamTable.CollectionName)
+	_ = manager.Delete(ctx, streamTable.CollectionName)
+	_ = manager.Delete(ctx, nonStreamTable.CollectionName)
 }

@@ -21,7 +21,7 @@ func (s *Server) createStream(c *gin.Context) {
 		return
 	}
 
-	if err := s.deps.CollectionSettings.EnableStream(ctx, name, *body.OldImage); err != nil {
+	if err := s.deps.Collections.EnableStream(ctx, name, *body.OldImage); err != nil {
 		writeError(c, err)
 		return
 	}
@@ -33,7 +33,7 @@ func (s *Server) deleteStream(c *gin.Context) {
 	ctx := c.Request.Context()
 	name := c.Param("name")
 
-	if err := s.deps.CollectionSettings.DisableStream(ctx, name); err != nil {
+	if err := s.deps.Collections.DisableStream(ctx, name); err != nil {
 		writeError(c, err)
 		return
 	}

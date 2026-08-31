@@ -50,61 +50,61 @@ func (r *hookRecorder) reset() {
 	r.calls = nil
 }
 
-// TestSettingsDeleteHooks verifies that Delete owns the side-effect fan-out:
+// TestManagerDeleteHooks verifies that Delete owns the side-effect fan-out:
 // OnPurge fires exactly once (before OnPublish) with the deleted collection's
 // name, and OnPublish fires exactly once. Both hooks return an error to prove
 // a hook failure never turns a committed deletion into an error (the (c)
 // contract).
-func TestSettingsDeleteHooks(t *testing.T) {
-	settings, _, ctx := newTestSettings(t)
+func TestManagerDeleteHooks(t *testing.T) {
+	manager, _, ctx := newTestManager(t)
 	const name = "hooks_delete_table"
 
 	// Cleanup leftovers from a previous run.
-	if _, err := settings.Get(ctx, name); err == nil {
-		_ = settings.DisableDeletionProtection(ctx, name)
-		_ = settings.Delete(ctx, name)
+	if _, err := manager.Get(ctx, name); err == nil {
+		_ = manager.DisableDeletionProtection(ctx, name)
+		_ = manager.Delete(ctx, name)
 	}
 
 	purgeRec := &hookRecorder{err: assert.AnError}
 	publishRec := &hookRecorder{err: assert.AnError}
-	settings.OnPurge = purgeRec.record()
-	settings.OnPublish = publishRec.record()
+	manager.OnPurge = purgeRec.record()
+	manager.OnPublish = publishRec.record()
 
-	require.NoError(t, settings.Create(ctx, &Collection{CollectionName: name}))
-	require.NoError(t, settings.DisableDeletionProtection(ctx, name))
+	require.NoError(t, manager.Create(ctx, &Collection{CollectionName: name}))
+	require.NoError(t, manager.DisableDeletionProtection(ctx, name))
 
 	// Reset so we only count Delete's fan-out, not the setup mutations.
 	purgeRec.reset()
 	publishRec.reset()
 
-	require.NoError(t, settings.Delete(ctx, name))
+	require.NoError(t, manager.Delete(ctx, name))
 
 	assert.Equal(t, []string{name}, purgeRec.names(), "OnPurge should fire exactly once with the name")
 	assert.Equal(t, []string{name}, publishRec.names(), "OnPublish should fire exactly once with the name")
 }
 
-// TestSettingsMutatorsFireOnPublish verifies that every successful configuration
+// TestManagerMutatorsFireOnPublish verifies that every successful configuration
 // mutation fires OnPublish exactly once with the affected collection's name.
 // The injected hook returns an error, so each successful call also proves a
 // hook failure never fails the mutator (the (c) contract).
-func TestSettingsMutatorsFireOnPublish(t *testing.T) {
-	settings, _, ctx := newTestSettings(t)
+func TestManagerMutatorsFireOnPublish(t *testing.T) {
+	manager, _, ctx := newTestManager(t)
 	const name = "hooks_mutators_table"
 
 	// Cleanup leftovers from a previous run.
-	if _, err := settings.Get(ctx, name); err == nil {
-		_ = settings.DisableDeletionProtection(ctx, name)
-		_ = settings.Delete(ctx, name)
+	if _, err := manager.Get(ctx, name); err == nil {
+		_ = manager.DisableDeletionProtection(ctx, name)
+		_ = manager.Delete(ctx, name)
 	}
 
 	// Create the collection with the stream enabled so sinks can be created.
-	require.NoError(t, settings.Create(ctx, &Collection{CollectionName: name, StreamEnabled: true}))
+	require.NoError(t, manager.Create(ctx, &Collection{CollectionName: name, StreamEnabled: true}))
 
 	rec := &hookRecorder{err: assert.AnError}
-	settings.OnPublish = rec.record()
+	manager.OnPublish = rec.record()
 
 	// A sink to delete in the DeleteSink case.
-	sink, err := settings.CreateSink(ctx, name, Sink{
+	sink, err := manager.CreateSink(ctx, name, Sink{
 		Type: SinkTypeHTTP,
 		Spec: map[string]interface{}{"endpoint": "http://localhost:3000/events"},
 	})
@@ -115,8 +115,8 @@ func TestSettingsMutatorsFireOnPublish(t *testing.T) {
 	// Both operations are idempotent, so this is safe regardless of the
 	// current state.
 	resetBaseline := func() {
-		require.NoError(t, settings.DisableStream(ctx, name))
-		require.NoError(t, settings.DisableTTL(ctx, name))
+		require.NoError(t, manager.DisableStream(ctx, name))
+		require.NoError(t, manager.DisableTTL(ctx, name))
 	}
 
 	cases := []struct {
@@ -127,28 +127,28 @@ func TestSettingsMutatorsFireOnPublish(t *testing.T) {
 		{
 			name:  "EnableStream",
 			setup: func() error { return nil },
-			call:  func() error { return settings.EnableStream(ctx, name, false) },
+			call:  func() error { return manager.EnableStream(ctx, name, false) },
 		},
 		{
 			name:  "DisableStream",
-			setup: func() error { return settings.EnableStream(ctx, name, false) },
-			call:  func() error { return settings.DisableStream(ctx, name) },
+			setup: func() error { return manager.EnableStream(ctx, name, false) },
+			call:  func() error { return manager.DisableStream(ctx, name) },
 		},
 		{
 			name:  "SetTTL",
 			setup: func() error { return nil },
-			call:  func() error { return settings.SetTTL(ctx, name, "expires_at") },
+			call:  func() error { return manager.SetTTL(ctx, name, "expires_at") },
 		},
 		{
 			name:  "DisableTTL",
-			setup: func() error { return settings.SetTTL(ctx, name, "expires_at") },
-			call:  func() error { return settings.DisableTTL(ctx, name) },
+			setup: func() error { return manager.SetTTL(ctx, name, "expires_at") },
+			call:  func() error { return manager.DisableTTL(ctx, name) },
 		},
 		{
 			name:  "CreateSink",
-			setup: func() error { return settings.EnableStream(ctx, name, false) },
+			setup: func() error { return manager.EnableStream(ctx, name, false) },
 			call: func() error {
-				_, err := settings.CreateSink(ctx, name, Sink{
+				_, err := manager.CreateSink(ctx, name, Sink{
 					Type: SinkTypeHTTP,
 					Spec: map[string]interface{}{"endpoint": "http://localhost:3000/events"},
 				})
@@ -158,7 +158,7 @@ func TestSettingsMutatorsFireOnPublish(t *testing.T) {
 		{
 			name:  "DeleteSink",
 			setup: func() error { return nil },
-			call:  func() error { return settings.DeleteSink(ctx, name, sink.ID) },
+			call:  func() error { return manager.DeleteSink(ctx, name, sink.ID) },
 		},
 	}
 
@@ -174,38 +174,38 @@ func TestSettingsMutatorsFireOnPublish(t *testing.T) {
 	}
 
 	// Cleanup.
-	require.NoError(t, settings.DisableDeletionProtection(ctx, name))
-	require.NoError(t, settings.Delete(ctx, name))
+	require.NoError(t, manager.DisableDeletionProtection(ctx, name))
+	require.NoError(t, manager.Delete(ctx, name))
 }
 
-// TestSettingsMutatorsDoNotFireOnPublishOnFailure verifies that a failed
+// TestManagerMutatorsDoNotFireOnPublishOnFailure verifies that a failed
 // mutation does not fire OnPublish. EnableStream is immutable: the second call
 // returns ErrStreamAlreadyExists and must not publish.
-func TestSettingsMutatorsDoNotFireOnPublishOnFailure(t *testing.T) {
-	settings, _, ctx := newTestSettings(t)
+func TestManagerMutatorsDoNotFireOnPublishOnFailure(t *testing.T) {
+	manager, _, ctx := newTestManager(t)
 	const name = "hooks_mutators_fail"
 
 	// Cleanup leftovers from a previous run.
-	if _, err := settings.Get(ctx, name); err == nil {
-		_ = settings.DisableDeletionProtection(ctx, name)
-		_ = settings.Delete(ctx, name)
+	if _, err := manager.Get(ctx, name); err == nil {
+		_ = manager.DisableDeletionProtection(ctx, name)
+		_ = manager.Delete(ctx, name)
 	}
-	require.NoError(t, settings.Create(ctx, &Collection{CollectionName: name, StreamEnabled: false}))
+	require.NoError(t, manager.Create(ctx, &Collection{CollectionName: name, StreamEnabled: false}))
 
 	rec := &hookRecorder{}
-	settings.OnPublish = rec.record()
+	manager.OnPublish = rec.record()
 
 	// First enable succeeds and fires once.
-	require.NoError(t, settings.EnableStream(ctx, name, false))
+	require.NoError(t, manager.EnableStream(ctx, name, false))
 	assert.Equal(t, 1, rec.count())
 
 	// Second enable fails (immutable) and must NOT fire.
 	rec.reset()
-	err := settings.EnableStream(ctx, name, false)
+	err := manager.EnableStream(ctx, name, false)
 	require.ErrorIs(t, err, ErrStreamAlreadyExists)
 	assert.Equal(t, 0, rec.count(), "failed mutation must not fire OnPublish")
 
 	// Cleanup.
-	require.NoError(t, settings.DisableDeletionProtection(ctx, name))
-	require.NoError(t, settings.Delete(ctx, name))
+	require.NoError(t, manager.DisableDeletionProtection(ctx, name))
+	require.NoError(t, manager.Delete(ctx, name))
 }

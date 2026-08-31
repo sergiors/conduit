@@ -13,8 +13,8 @@ import (
 // EnableDeletionProtection returns ErrProtectionAlreadyExists. To change it,
 // disable protection first via DisableDeletionProtection. Returns
 // ErrCollectionNotFound if the collection does not exist.
-func (s *Settings) EnableDeletionProtection(ctx context.Context, name string) error {
-	collection, err := s.Get(ctx, name)
+func (m *Manager) EnableDeletionProtection(ctx context.Context, name string) error {
+	collection, err := m.Get(ctx, name)
 	if err != nil {
 		return err
 	}
@@ -23,7 +23,7 @@ func (s *Settings) EnableDeletionProtection(ctx context.Context, name string) er
 		return ErrProtectionAlreadyExists
 	}
 
-	_, err = s.collection.UpdateOne(
+	_, err = m.collection.UpdateOne(
 		ctx,
 		bson.M{"collection_name": name},
 		bson.M{"$set": bson.M{
@@ -36,12 +36,12 @@ func (s *Settings) EnableDeletionProtection(ctx context.Context, name string) er
 
 // DisableDeletionProtection disables deletion protection for a collection.
 // Idempotent. Returns ErrCollectionNotFound if the collection does not exist.
-func (s *Settings) DisableDeletionProtection(ctx context.Context, name string) error {
-	if _, err := s.Get(ctx, name); err != nil {
+func (m *Manager) DisableDeletionProtection(ctx context.Context, name string) error {
+	if _, err := m.Get(ctx, name); err != nil {
 		return err
 	}
 
-	_, err := s.collection.UpdateOne(
+	_, err := m.collection.UpdateOne(
 		ctx,
 		bson.M{"collection_name": name},
 		bson.M{"$set": bson.M{

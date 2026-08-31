@@ -11,7 +11,7 @@ func (s *Server) getSinks(c *gin.Context) {
 	ctx := c.Request.Context()
 	name := c.Param("name")
 
-	sinks, err := s.deps.CollectionSettings.GetSinks(ctx, name)
+	sinks, err := s.deps.Collections.GetSinks(ctx, name)
 	if err != nil {
 		writeError(c, err)
 		return
@@ -29,7 +29,7 @@ func (s *Server) createSink(c *gin.Context) {
 		return
 	}
 
-	created, err := s.deps.CollectionSettings.CreateSink(ctx, name, sink)
+	created, err := s.deps.Collections.CreateSink(ctx, name, sink)
 	if err != nil {
 		writeError(c, err)
 		return
@@ -43,7 +43,7 @@ func (s *Server) deleteSink(c *gin.Context) {
 	name := c.Param("name")
 	id := c.Param("id")
 
-	if err := s.deps.CollectionSettings.DeleteSink(ctx, name, id); err != nil {
+	if err := s.deps.Collections.DeleteSink(ctx, name, id); err != nil {
 		writeError(c, err)
 		return
 	}

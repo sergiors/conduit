@@ -26,8 +26,12 @@ type Collection struct {
 	UpdatedAt          time.Time `bson:"updated_at" json:"updated_at"`
 }
 
-// Settings manages collection configurations in MongoDB
-type Settings struct {
+// Manager owns the lifecycle and configuration of CDC-monitored collections
+// AND their physical MongoDB infrastructure: collections, indexes, TTL,
+// change-stream capability, and deletion with state-purge fan-out. It is not
+// merely persisted settings — it also creates and drops physical collections,
+// ensures key/TTL/stream-capability indexes, and fires OnPurge/OnPublish hooks.
+type Manager struct {
 	client     *mongo.Client
 	database   string
 	collection *mongo.Collection
@@ -53,9 +57,9 @@ type Settings struct {
 	OnPurge func(ctx context.Context, collectionName string) error
 }
 
-// NewSettings creates a new collection settings manager
-func NewSettings(client *mongo.Client, database string) *Settings {
-	return &Settings{
+// NewManager creates a new collection manager
+func NewManager(client *mongo.Client, database string) *Manager {
+	return &Manager{
 		client:     client,
 		database:   database,
 		collection: client.Database(database).Collection("config.collections"),
@@ -68,11 +72,11 @@ func NewSettings(client *mongo.Client, database string) *Settings {
 // must not be reported as failed because notification bookkeeping hiccuped.
 // The hook runs on the caller's context (the same request ctx the handler used
 // today); a failure is logged and swallowed.
-func (s *Settings) notifyPublish(ctx context.Context, name string) {
-	if s.OnPublish == nil {
+func (m *Manager) notifyPublish(ctx context.Context, name string) {
+	if m.OnPublish == nil {
 		return
 	}
-	if err := s.OnPublish(ctx, name); err != nil {
+	if err := m.OnPublish(ctx, name); err != nil {
 		log.Printf("failed to publish config change for %s: %v", name, err)
 	}
 }
@@ -81,37 +85,37 @@ func (s *Settings) notifyPublish(ctx context.Context, name string) {
 // abandoned request cannot cancel a committed deletion's cleanup. It is
 // nil-safe and never returns an error; a failure is logged and swallowed. The
 // hook is idempotent, so a failed purge can be retried by re-running it.
-func (s *Settings) purgeState(ctx context.Context, name string) {
-	if s.OnPurge == nil {
+func (m *Manager) purgeState(ctx context.Context, name string) {
+	if m.OnPurge == nil {
 		return
 	}
 	purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	if err := s.OnPurge(purgeCtx, name); err != nil {
+	if err := m.OnPurge(purgeCtx, name); err != nil {
 		log.Printf("failed to purge CDC state after deleting collection %s: %v", name, err)
 	}
 }
 
-// CreateIndex creates the indexes required by the settings.
-func (s *Settings) CreateIndex(ctx context.Context) error {
+// CreateIndex creates the indexes required by the manager.
+func (m *Manager) CreateIndex(ctx context.Context) error {
 	collectionIndex := mongo.IndexModel{
 		Keys:    bson.D{{Key: "collection_name", Value: 1}},
 		Options: options.Index().SetUnique(true),
 	}
-	if _, err := s.collection.Indexes().CreateOne(ctx, collectionIndex); err != nil {
+	if _, err := m.collection.Indexes().CreateOne(ctx, collectionIndex); err != nil {
 		return err
 	}
 
 	sinkIndex := mongo.IndexModel{
 		Keys: bson.D{{Key: "collection_id", Value: 1}},
 	}
-	_, err := s.sinks.Indexes().CreateOne(ctx, sinkIndex)
+	_, err := m.sinks.Indexes().CreateOne(ctx, sinkIndex)
 	return err
 }
 
 // createCollection ensures the physical MongoDB collection exists.
-func (s *Settings) createCollection(ctx context.Context, collection *Collection) error {
-	db := s.client.Database(s.database)
+func (m *Manager) createCollection(ctx context.Context, collection *Collection) error {
+	db := m.client.Database(m.database)
 	collectionName := collection.CollectionName
 
 	// Check if collection already exists
@@ -122,7 +126,7 @@ func (s *Settings) createCollection(ctx context.Context, collection *Collection)
 
 	if len(collections) > 0 {
 		// Collection already exists, just ensure the key index
-		if err := s.ensureKeyIndex(ctx, collectionName, collection.PartitionKey, collection.SortKey); err != nil {
+		if err := m.ensureKeyIndex(ctx, collectionName, collection.PartitionKey, collection.SortKey); err != nil {
 			return fmt.Errorf("ensure key index: %w", err)
 		}
 		return nil
@@ -157,14 +161,14 @@ func (s *Settings) createCollection(ctx context.Context, collection *Collection)
 		return fmt.Errorf("delete placeholder: %w", err)
 	}
 
-	if err := s.ensureKeyIndex(ctx, collectionName, collection.PartitionKey, collection.SortKey); err != nil {
+	if err := m.ensureKeyIndex(ctx, collectionName, collection.PartitionKey, collection.SortKey); err != nil {
 		return fmt.Errorf("ensure key index: %w", err)
 	}
 
 	return nil
 }
 
-func (s *Settings) ensureKeyIndex(ctx context.Context, collectionName, primaryKey, sortKey string) error {
+func (m *Manager) ensureKeyIndex(ctx context.Context, collectionName, primaryKey, sortKey string) error {
 	if primaryKey == "" {
 		return nil
 	}
@@ -184,13 +188,13 @@ func (s *Settings) ensureKeyIndex(ctx context.Context, collectionName, primaryKe
 		Options: options.Index().SetName(indexName).SetUnique(true),
 	}
 
-	_, err := s.client.Database(s.database).Collection(collectionName).Indexes().CreateOne(ctx, indexModel)
+	_, err := m.client.Database(m.database).Collection(collectionName).Indexes().CreateOne(ctx, indexModel)
 	return err
 }
 
 // Create inserts a new collection configuration and creates the MongoDB collection.
 // On success, fires OnPublish (best-effort).
-func (s *Settings) Create(ctx context.Context, collection *Collection) error {
+func (m *Manager) Create(ctx context.Context, collection *Collection) error {
 	name := collection.CollectionName
 	if name == "" {
 		return NewValidationError("collection name is required")
@@ -212,11 +216,11 @@ func (s *Settings) Create(ctx context.Context, collection *Collection) error {
 	collection.UpdatedAt = now
 
 	// Create the actual MongoDB collection for CDC monitoring
-	if err := s.createCollection(ctx, collection); err != nil {
+	if err := m.createCollection(ctx, collection); err != nil {
 		return fmt.Errorf("create collection: %w", err)
 	}
 
-	result, err := s.collection.InsertOne(ctx, collection)
+	result, err := m.collection.InsertOne(ctx, collection)
 	if err != nil {
 		return err
 	}
@@ -224,14 +228,14 @@ func (s *Settings) Create(ctx context.Context, collection *Collection) error {
 	if objectID, ok := result.InsertedID.(primitive.ObjectID); ok {
 		collection.ID = objectID.Hex()
 	}
-	s.notifyPublish(ctx, name)
+	m.notifyPublish(ctx, name)
 	return nil
 }
 
 // Get retrieves a collection by name
-func (s *Settings) Get(ctx context.Context, name string) (*Collection, error) {
+func (m *Manager) Get(ctx context.Context, name string) (*Collection, error) {
 	var collection Collection
-	err := s.collection.FindOne(ctx, bson.M{"collection_name": name}).Decode(&collection)
+	err := m.collection.FindOne(ctx, bson.M{"collection_name": name}).Decode(&collection)
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			return nil, ErrCollectionNotFound
@@ -243,8 +247,8 @@ func (s *Settings) Get(ctx context.Context, name string) (*Collection, error) {
 }
 
 // List returns all collection configurations
-func (s *Settings) List(ctx context.Context) ([]Collection, error) {
-	cursor, err := s.collection.Find(ctx, bson.M{})
+func (m *Manager) List(ctx context.Context) ([]Collection, error) {
+	cursor, err := m.collection.Find(ctx, bson.M{})
 	if err != nil {
 		return nil, err
 	}
@@ -268,7 +272,7 @@ func (s *Settings) List(ctx context.Context) ([]Collection, error) {
 //  4. purge out-of-band CDC state (OnPurge, detached bounded context),
 //  5. fire OnPublish (best-effort).
 //
-// Settings.Delete owns the side-effect fan-out via OnPurge then OnPublish, both
+// Manager.Delete owns the side-effect fan-out via OnPurge then OnPublish, both
 // best-effort. Purge runs BEFORE publish: the pub/sub tick may cause the worker
 // to disable the collection, so better that the Redis keys are already gone.
 // Neither hook is required (nil is a no-op) and neither failure is returned —
@@ -276,7 +280,7 @@ func (s *Settings) List(ctx context.Context) ([]Collection, error) {
 // hiccuped. Cleanup of the Redis CDC state (resume token, retry queue,
 // dead-letter queue) is performed by Delete itself via OnPurge; the hook is
 // idempotent, and a failed purge can be retried by deleting the collection
-// again or by invoking OnPurge manually. Settings and its hooks are the single
+// again or by invoking OnPurge manually. Manager and its hooks are the single
 // owner of deletion cleanup — the worker manager never purges on disable,
 // because disabled != deleted.
 //
@@ -287,9 +291,9 @@ func (s *Settings) List(ctx context.Context) ([]Collection, error) {
 // error) or invalidates it and the stream restarts — never stalling. The
 // purge fires synchronously before the config-change pub/sub tick, so this
 // window is narrow.
-func (s *Settings) Delete(ctx context.Context, name string) error {
+func (m *Manager) Delete(ctx context.Context, name string) error {
 	// Get collection to check deletion protection
-	collection, err := s.Get(ctx, name)
+	collection, err := m.Get(ctx, name)
 	if err != nil {
 		return err
 	}
@@ -300,18 +304,18 @@ func (s *Settings) Delete(ctx context.Context, name string) error {
 	}
 
 	// Drop the MongoDB collection
-	db := s.client.Database(s.database)
+	db := m.client.Database(m.database)
 	if err := db.Collection(collection.CollectionName).Drop(ctx); err != nil {
 		return fmt.Errorf("drop collection: %w", err)
 	}
 
 	// Delete associated sinks
-	if err := s.deleteSinksByCollectionID(ctx, collection.ID); err != nil {
+	if err := m.deleteSinksByCollectionID(ctx, collection.ID); err != nil {
 		return err
 	}
 
 	// Delete the configuration
-	_, err = s.collection.DeleteOne(ctx, bson.M{"collection_name": name})
+	_, err = m.collection.DeleteOne(ctx, bson.M{"collection_name": name})
 	if err != nil {
 		return err
 	}
@@ -319,8 +323,8 @@ func (s *Settings) Delete(ctx context.Context, name string) error {
 	// The MongoDB-side deletion has fully succeeded. From here on every side
 	// effect is best-effort bookkeeping: its failure must never turn a
 	// committed deletion into an error. Purge first, then publish.
-	s.purgeState(ctx, name)
-	s.notifyPublish(ctx, name)
+	m.purgeState(ctx, name)
+	m.notifyPublish(ctx, name)
 
 	return nil
 }

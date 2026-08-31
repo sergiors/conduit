@@ -10,7 +10,7 @@ func (s *Server) createProtection(c *gin.Context) {
 	ctx := c.Request.Context()
 	name := c.Param("name")
 
-	if err := s.deps.CollectionSettings.EnableDeletionProtection(ctx, name); err != nil {
+	if err := s.deps.Collections.EnableDeletionProtection(ctx, name); err != nil {
 		writeError(c, err)
 		return
 	}
@@ -22,7 +22,7 @@ func (s *Server) deleteProtection(c *gin.Context) {
 	ctx := c.Request.Context()
 	name := c.Param("name")
 
-	if err := s.deps.CollectionSettings.DisableDeletionProtection(ctx, name); err != nil {
+	if err := s.deps.Collections.DisableDeletionProtection(ctx, name); err != nil {
 		writeError(c, err)
 		return
 	}

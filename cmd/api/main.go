@@ -29,8 +29,8 @@ func main() {
 	}
 	defer mongoClient.Close(context.Background())
 
-	collectionSettings := collections.NewSettings(mongoClient.Client, cfg.MongoDBDatabase)
-	if err := collectionSettings.CreateIndex(ctx); err != nil {
+	collectionsManager := collections.NewManager(mongoClient.Client, cfg.MongoDBDatabase)
+	if err := collectionsManager.CreateIndex(ctx); err != nil {
 		log.Fatalf("Failed to create collection index: %v", err)
 	}
 
@@ -43,17 +43,17 @@ func main() {
 	}
 	defer redisClient.Close()
 
-	// Infrastructure side effects of collections.Settings mutations: publish a
+	// Infrastructure side effects of collections.Manager mutations: publish a
 	// config-change notification and purge CDC state after a successful delete.
-	// Injected as method values so both the settings package and the API layer
-	// stay decoupled from Redis.
-	collectionSettings.OnPublish = redisClient.PublishConfigChange
-	collectionSettings.OnPurge = redisClient.DeleteCollectionState
+	// Injected as method values so both the collections package and the API
+	// layer stay decoupled from Redis.
+	collectionsManager.OnPublish = redisClient.PublishConfigChange
+	collectionsManager.OnPurge = redisClient.DeleteCollectionState
 
 	server := api.New(api.Dependencies{
-		CollectionSettings: collectionSettings,
-		MongoClient:        mongoClient,
-		APIKey:             cfg.APIKey,
+		Collections: collectionsManager,
+		MongoClient: mongoClient,
+		APIKey:      cfg.APIKey,
 	})
 
 	log.Printf("API server starting on port %s", cfg.Port)

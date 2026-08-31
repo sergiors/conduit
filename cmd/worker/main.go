@@ -22,7 +22,7 @@ import (
 type Worker struct {
 	mongoClient        *mongo.Client
 	redisClient        *redis.Client
-	collectionSettings *collections.Settings
+	collectionsManager *collections.Manager
 	dispatcher         *dispatch.Dispatcher
 	watcherManager     *watcher.Manager
 	retryProcessor     *retry.Processor
@@ -57,8 +57,8 @@ func NewWorker(cfg config.Config) (*Worker, error) {
 		return nil, err
 	}
 
-	// Initialize collection settings
-	settings := collections.NewSettings(mongoClient.Client, cfg.MongoDBDatabase)
+	// Initialize collection manager
+	collectionsManager := collections.NewManager(mongoClient.Client, cfg.MongoDBDatabase)
 
 	// Initialize dispatcher
 	dispatcher := dispatch.NewDispatcher()
@@ -74,7 +74,7 @@ func NewWorker(cfg config.Config) (*Worker, error) {
 	watcherManager := watcher.NewManager(
 		mongoClient.Client,
 		cfg.MongoDBDatabase,
-		settings,
+		collectionsManager,
 		redisClient,
 		dispatcher,
 		retryProcessor,
@@ -84,7 +84,7 @@ func NewWorker(cfg config.Config) (*Worker, error) {
 	return &Worker{
 		mongoClient:        mongoClient,
 		redisClient:        redisClient,
-		collectionSettings: settings,
+		collectionsManager: collectionsManager,
 		dispatcher:         dispatcher,
 		watcherManager:     watcherManager,
 		retryProcessor:     retryProcessor,
@@ -161,8 +161,6 @@ func (w *Worker) Run(ctx context.Context) error {
 }
 
 func main() {
-	// Worker-specific config: APIKey and Port are intentionally omitted — the
-	// worker neither serves HTTP nor holds the API's auth secret.
 	cfg := config.LoadWorker()
 
 	worker, err := NewWorker(cfg)

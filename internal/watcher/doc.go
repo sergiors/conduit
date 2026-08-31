@@ -15,7 +15,7 @@
 //
 // Usage:
 //
-//	manager := watcher.NewManager(mongoClient, database, collectionSettings, redisClient, dispatcher, watcher.DefaultConfig())
+//	manager := watcher.NewManager(mongoClient, database, collectionsManager, redisClient, dispatcher, watcher.DefaultConfig())
 //	if err := manager.Start(ctx); err != nil {
 //	    log.Fatal(err)
 //	}

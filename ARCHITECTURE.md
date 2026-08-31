@@ -68,9 +68,9 @@ Collections can operate in two modes:
 - **DynamoDB-compatible mode**: the operator defines a `partition_key` and an optional `sort_key`. Conduit creates a unique composite index on those fields and treats them as the logical primary key for CDC records.
 - **MongoDB-native mode**: no key schema is defined. Documents are identified purely by MongoDB `_id`, and no DynamoDB-style key index is created.
 
-## Collection Settings
+## Collection Manager
 
-_Collection Settings_ is the domain service (`internal/collections.Settings`) that owns every configuration mutation. It is the only place where the invariants around collections, streams, sinks, TTL, and deletion protection are enforced. The API layer delegates all business decisions to it.
+_Collection Manager_ is the domain service (`internal/collections.Manager`) that owns every configuration mutation and the physical MongoDB infrastructure behind it. It is the only place where the invariants around collections, streams, sinks, TTL, and deletion protection are enforced. The API layer delegates all business decisions to it.
 
 ## Document
 
@@ -158,13 +158,13 @@ The API layer is the control plane. It accepts HTTP requests, validates their sh
 
 ### Dependencies
 
-- `collections.Settings` for configuration CRUD.
+- `collections.Manager` for configuration CRUD and physical collection infrastructure.
 - `mongo.Client` for document reads.
 - `redis.Client` to publish configuration change notifications.
 
 ### What it Must Never Do
 
-- Make decisions about streams, TTL, deletion protection, or sink validity. Those belong to `collections.Settings`.
+- Make decisions about streams, TTL, deletion protection, or sink validity. Those belong to `collections.Manager`.
 - Leak raw infrastructure errors as HTTP responses. It must translate all errors through `responseFor`.
 - Modify request payloads beyond binding.
 
@@ -174,15 +174,15 @@ The API exists to give operators a stable, versioned HTTP surface while keeping 
 
 ---
 
-## Collections Settings
+## Collections Manager
 
 ### Responsibility
 
-`collections.Settings` is the heart of the control plane. It manages the `config.collections` and `config.sinks` MongoDB collections and enforces all domain invariants.
+`collections.Manager` is the heart of the control plane. It manages the `config.collections` and `config.sinks` MongoDB collections, enforces all domain invariants, and owns the physical MongoDB infrastructure (collection creation/drop, key/TTL/stream-capability indexes, and deletion state-purge fan-out).
 
 ### Public API
 
-- `NewSettings(client, database)` constructs the store.
+- `NewManager(client, database)` constructs the store.
 - `Create(ctx, &collection)` creates a collection and its physical MongoDB collection.
 - `Get`, `List`, `ListStreamEnabled`, `Delete` for collection lifecycle.
 - `EnableStream` / `DisableStream` for stream lifecycle.
@@ -393,7 +393,7 @@ Isolating Redis behind a domain-specific client prevents key-format errors from 
 
 ### What it Must Never Do
 
-- Enforce collection configuration invariants. That is `collections.Settings`.
+- Enforce collection configuration invariants. That is `collections.Manager`.
 - Create, initiate, or reconfigure replica sets. Topology is managed externally; the client is strictly read-only with respect to topology and only waits for readiness.
 
 ### Why it Exists
@@ -407,8 +407,8 @@ MongoDB connectivity and readiness gating are infrastructure concerns. Wrapping 
 ## Creating a Collection: `POST /api/collections`
 
 1. **HTTP binding**: `bindStrictJSON` parses only `collection_name`, `partition_key`, and `sort_key`. Unknown fields are rejected.
-2. **API handler** constructs a `collections.Collection` and calls `Settings.Create`.
-3. **Domain validation** inside `Settings.Create`:
+2. **API handler** constructs a `collections.Collection` and calls `Manager.Create`.
+3. **Domain validation** inside `Manager.Create`:
    - `collection_name` must be non-empty.
    - If `sort_key` is set, `partition_key` must also be set.
    - `partition_key` and `sort_key` cannot be the same.
@@ -427,7 +427,7 @@ The API returns `201 Created` with the collection body.
 ## Enabling a Stream: `POST /api/collections/{name}/stream`
 
 1. **HTTP binding**: the body must contain `old_image` (bool, required).
-2. **API handler** calls `Settings.EnableStream(ctx, name, oldImage)`.
+2. **API handler** calls `Manager.EnableStream(ctx, name, oldImage)`.
 3. **Domain enforcement**:
    - The update is conditional: it only succeeds when `stream_enabled` is not already `true`.
    - If the update matches no document, Conduit checks whether the collection exists. If it does, `ErrStreamAlreadyExists` is returned; otherwise `ErrCollectionNotFound`.
@@ -448,7 +448,7 @@ The API returns `201 Created`.
 ## Creating a Sink: `POST /api/collections/{name}/sinks`
 
 1. **HTTP binding**: the body is bound into a `collections.Sink`.
-2. **API handler** calls `Settings.CreateSink(ctx, name, spec)`.
+2. **API handler** calls `Manager.CreateSink(ctx, name, spec)`.
 3. **Domain enforcement**:
    - The collection must exist.
    - The collection must have `stream_enabled = true`.
@@ -653,7 +653,7 @@ The following invariants are enforced by the code:
 - **Key field names are configurable and never hard-coded as `pk`/`sk`**. The code uses whatever names the operator provides.
 - **`_id` is managed by MongoDB and is never derived from key fields**. Key fields are stored explicitly on documents.
 - **Deletion protection is enabled by default** on collection creation. The create handler overwrites any caller-provided value with `true`.
-- **A protected collection cannot be deleted**. `Settings.Delete` returns `ErrDeletionProtectionEnabled` unless protection is first disabled.
+- **A protected collection cannot be deleted**. `Manager.Delete` returns `ErrDeletionProtectionEnabled` unless protection is first disabled.
 - **Stream configuration is immutable while enabled**. `EnableStream` returns `ErrStreamAlreadyExists` if `stream_enabled` is already `true`, regardless of the requested `old_image` value.
 - **Disabling a stream resets `stream_enabled` and `old_image` to `false`**. This allows redefinition.
 - **TTL configuration is immutable while set**. `SetTTL` returns `ErrTTLAlreadyExists` if `ttl_attribute` is already non-empty.
@@ -790,7 +790,7 @@ The API logs Redis Pub/Sub failures but never returns them to the client, becaus
 The following principles are reflected in the codebase:
 
 - **API contains no business rules.** Every invariant lives in `internal/collections`. The API only binds, calls, and translates.
-- **Business logic lives in the domain.** `collections.Settings` is the sole authority for configuration mutations.
+- **Business logic lives in the domain.** `collections.Manager` is the sole authority for configuration mutations.
 - **Infrastructure is isolated.** MongoDB and Redis are wrapped in dedicated packages that expose domain-shaped operations rather than raw driver methods.
 - **Configuration is the source of truth.** The worker does not hard-code which collections to watch; it reconciles its runtime state against `config.collections`.
 - **Resources are immutable whenever possible.** Stream, TTL, and protection sub-resources are immutable once set; changing them requires explicit deletion and recreation.
@@ -810,7 +810,7 @@ The following principles are reflected in the codebase:
 
 Entry points for the two runtime processes.
 
-- `cmd/api/main.go`: Loads configuration, initializes MongoDB and Redis, creates `collections.Settings`, and starts the Gin HTTP server.
+- `cmd/api/main.go`: Loads configuration, initializes MongoDB and Redis, creates `collections.Manager`, and starts the Gin HTTP server.
 - `cmd/worker/main.go`: Loads configuration, initializes infrastructure, creates the dispatcher, retry processor, and watcher manager, and runs until a shutdown signal.
 
   **Graceful shutdown.** On SIGINT or SIGTERM the worker shuts down in dependency order, bounded by `SHUTDOWN_TIMEOUT` (default 30s): (1) the watcher manager is stopped first — cancelling its run context, waiting for its sync/config-change loops and every watcher, and closing pub/sub — so no new events flow while in-flight bookkeeping drains; (2) the retry processor is stopped, letting the current pass finish; (3) the dispatcher closes all sinks/transports; (4) Redis is closed; (5) MongoDB is closed. Terminal bookkeeping writes (resume-token persist, `MarkProcessed`, retry `Enqueue`/`Remove`) and change-stream cursor close use a short detached context so a mid-flight event is never lost when the live context is cancelled. No arbitrary sleeps are used; shutdown is driven entirely by context cancellation and `sync.WaitGroup` waits. Panics in worker goroutines are contained: each long-running goroutine has a recover backstop that logs with a stack trace, per-event/per-tick work is panic-isolated so a single bad event cannot kill its loop, and a panicking watcher marks itself stopped for the manager's sync to reconcile.
@@ -837,7 +837,7 @@ The package deliberately contains no business logic beyond HTTP translation.
 
 Domain package for configuration.
 
-- `collection.go`: `Collection` struct, `Settings` store, collection CRUD, physical MongoDB collection creation, key index management.
+- `collection.go`: `Collection` struct, `Manager` store, collection CRUD, physical MongoDB collection creation, key index management.
 - `stream.go`: Stream enable/disable with immutability and `changeStreamPreAndPostImages` configuration.
 - `sink.go`: `Sink` and `Sink` structs (common metadata only), sink CRUD, shared validation.
 - `ttl.go`: TTL index creation/removal with immutability.
@@ -940,7 +940,7 @@ The manager's `startWatcher` method instantiates `watcher.Watcher` directly toda
 
 ## New API Surfaces
 
-Because all business rules live in `collections.Settings`, a gRPC service, a Terraform provider, or a future UI backend can reuse the same domain layer without duplicating invariants.
+Because all business rules live in `collections.Manager`, a gRPC service, a Terraform provider, or a future UI backend can reuse the same domain layer without duplicating invariants.
 
 ## DLQ Replay
 

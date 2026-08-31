@@ -23,7 +23,7 @@ import (
 type Manager struct {
 	mongoClient        *mongo.Client
 	database           string
-	collectionSettings *collections.Settings
+	collectionsManager *collections.Manager
 	redisClient        RedisClient
 	dispatcher         Dispatcher
 	retryProcessor     *retry.Processor
@@ -93,7 +93,7 @@ func DefaultConfig() Config {
 func NewManager(
 	mongoClient *mongo.Client,
 	database string,
-	collectionSettings *collections.Settings,
+	collectionsManager *collections.Manager,
 	redisClient RedisClient,
 	dispatcher Dispatcher,
 	retryProcessor *retry.Processor,
@@ -102,7 +102,7 @@ func NewManager(
 	return &Manager{
 		mongoClient:        mongoClient,
 		database:           database,
-		collectionSettings: collectionSettings,
+		collectionsManager: collectionsManager,
 		redisClient:        redisClient,
 		dispatcher:         dispatcher,
 		retryProcessor:     retryProcessor,
@@ -128,7 +128,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.runCtx, m.runCancel = context.WithCancel(ctx)
 
 	// Initial load of stream-enabled collections
-	collections, err := m.collectionSettings.ListStreamEnabled(ctx)
+	collections, err := m.collectionsManager.ListStreamEnabled(ctx)
 	if err != nil {
 		return fmt.Errorf("load collections: %w", err)
 	}
@@ -286,7 +286,7 @@ func (m *Manager) startWatcher(ctx context.Context, collection collections.Colle
 
 	// Register sinks for this collection
 	var sinkConfigs []collections.Sink
-	if m.collectionSettings != nil {
+	if m.collectionsManager != nil {
 		var err error
 		sinkConfigs, err = m.loadSinks(ctx, collection.CollectionName)
 		if err != nil {
@@ -487,7 +487,7 @@ func (m *Manager) configChangeLoop(ctx context.Context) {
 //
 //  1. Config gone (deleted): the collection's config document no longer exists,
 //     which means the collection was DELETED (deletion removes the config
-//     document via Settings.Delete and fires OnPublish). Stop the watcher
+//     document via Manager.Delete and fires OnPublish). Stop the watcher
 //     immediately instead of waiting for the next sync cycle — the CDC stream
 //     must not run for a deleted collection.
 //  2. Stream disabled: the collection exists but its stream is disabled. Stop
@@ -495,14 +495,14 @@ func (m *Manager) configChangeLoop(ctx context.Context) {
 //     re-enabled later, so its resume token and retry queue must survive.
 //  3. Otherwise: reconcile oldImage/sinks for the existing watcher.
 func (m *Manager) handleCollectionChange(ctx context.Context, collectionName string) {
-	collection, err := m.collectionSettings.Get(ctx, collectionName)
+	collection, err := m.collectionsManager.Get(ctx, collectionName)
 	if err != nil {
 		// A published change for a collection whose config document is gone
 		// means the collection was DELETED: deletion removes the config
-		// document (settings.Delete) and fires OnPublish. Stop the watcher
+		// document (Manager.Delete) and fires OnPublish. Stop the watcher
 		// immediately instead of waiting for the next sync cycle — the CDC
 		// stream must not run for a deleted collection. No state purge here:
-		// Settings.OnPurge (the deleter) already owns Redis cleanup, and a
+		// Manager.OnPurge (the deleter) already owns Redis cleanup, and a
 		// deleted-then-recreated race is safe regardless (a stale token is
 		// either accepted by Watch or invalidated by the resume-token check,
 		// never a stall).
@@ -590,7 +590,7 @@ func (m *Manager) syncWithCollections(ctx context.Context) {
 	log.Println("Syncing watchers with config.collections...")
 
 	// Fetch current stream-enabled collections
-	collectionList, err := m.collectionSettings.ListStreamEnabled(ctx)
+	collectionList, err := m.collectionsManager.ListStreamEnabled(ctx)
 	if err != nil {
 		log.Printf("Failed to list collections: %v", err)
 		return
@@ -658,7 +658,7 @@ func (m *Manager) syncWithCollections(ctx context.Context) {
 	// Stop watchers for collections that dropped out of the configured set
 	// (deleted, or their stream was disabled since the last sync). State
 	// cleanup for genuinely deleted collections is NOT the worker's job: only
-	// the deleters purge CDC state (API Settings.OnPurge), so the resume token
+	// the deleters purge CDC state (API Manager.OnPurge), so the resume token
 	// and retry queue must survive here for a stream that may be re-enabled.
 	for collectionName := range currentWatchers {
 		if _, exists := enabledSet[collectionName]; !exists {
@@ -706,7 +706,7 @@ func (m *Manager) refreshSinks(ctx context.Context, collectionName string) error
 
 // loadSinks loads the persisted sinks for a collection by name.
 func (m *Manager) loadSinks(ctx context.Context, collectionName string) ([]collections.Sink, error) {
-	return m.collectionSettings.GetSinks(ctx, collectionName)
+	return m.collectionsManager.GetSinks(ctx, collectionName)
 }
 
 // registerSinks registers event sinks for a collection.

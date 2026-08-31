@@ -32,25 +32,25 @@ func TestSinkBSONTags(t *testing.T) {
 	assert.Equal(t, []interface{}{"INSERT"}, []interface{}(decoded["event_types"].(primitive.A)))
 }
 
-func TestSettingsSinkCRUD(t *testing.T) {
-	settings, client, ctx := newTestSettings(t)
+func TestManagerSinkCRUD(t *testing.T) {
+	manager, client, ctx := newTestManager(t)
 
 	// Cleanup any leftover from previous runs
-	if c, err := settings.Get(ctx, "sink_test_table"); err == nil {
+	if c, err := manager.Get(ctx, "sink_test_table"); err == nil {
 		if c.DeletionProtection {
-			_ = settings.DisableDeletionProtection(ctx, "sink_test_table")
+			_ = manager.DisableDeletionProtection(ctx, "sink_test_table")
 		}
-		_ = settings.Delete(ctx, "sink_test_table")
+		_ = manager.Delete(ctx, "sink_test_table")
 	}
 
 	table := &Collection{
 		CollectionName: "sink_test_table",
 		StreamEnabled:  true,
 	}
-	require.NoError(t, settings.Create(ctx, table))
+	require.NoError(t, manager.Create(ctx, table))
 
 	t.Run("create sink", func(t *testing.T) {
-		sink, err := settings.CreateSink(ctx, "sink_test_table", Sink{
+		sink, err := manager.CreateSink(ctx, "sink_test_table", Sink{
 			Type: SinkTypeHTTP,
 			Spec: map[string]interface{}{"endpoint": "http://localhost:3000/events"},
 		})
@@ -62,37 +62,37 @@ func TestSettingsSinkCRUD(t *testing.T) {
 	})
 
 	t.Run("get sinks", func(t *testing.T) {
-		sinks, err := settings.GetSinks(ctx, "sink_test_table")
+		sinks, err := manager.GetSinks(ctx, "sink_test_table")
 		require.NoError(t, err)
 		assert.Len(t, sinks, 1)
 	})
 
 	t.Run("delete sink", func(t *testing.T) {
-		sinks, err := settings.GetSinks(ctx, "sink_test_table")
+		sinks, err := manager.GetSinks(ctx, "sink_test_table")
 		require.NoError(t, err)
 		require.Len(t, sinks, 1)
 
-		require.NoError(t, settings.DeleteSink(ctx, "sink_test_table", sinks[0].ID))
+		require.NoError(t, manager.DeleteSink(ctx, "sink_test_table", sinks[0].ID))
 
-		sinks, err = settings.GetSinks(ctx, "sink_test_table")
+		sinks, err = manager.GetSinks(ctx, "sink_test_table")
 		require.NoError(t, err)
 		assert.Empty(t, sinks)
 	})
 
 	t.Run("delete sink not found", func(t *testing.T) {
-		err := settings.DeleteSink(ctx, "sink_test_table", "000000000000000000000000")
+		err := manager.DeleteSink(ctx, "sink_test_table", "000000000000000000000000")
 		assert.ErrorIs(t, err, ErrSinkNotFound)
 	})
 
 	t.Run("cascade delete sinks on collection delete", func(t *testing.T) {
-		_, err := settings.CreateSink(ctx, "sink_test_table", Sink{
+		_, err := manager.CreateSink(ctx, "sink_test_table", Sink{
 			Type: SinkTypeHTTP,
 			Spec: map[string]interface{}{"endpoint": "http://localhost:3000/events"},
 		})
 		require.NoError(t, err)
 
-		require.NoError(t, settings.DisableDeletionProtection(ctx, "sink_test_table"))
-		require.NoError(t, settings.Delete(ctx, "sink_test_table"))
+		require.NoError(t, manager.DisableDeletionProtection(ctx, "sink_test_table"))
+		require.NoError(t, manager.Delete(ctx, "sink_test_table"))
 
 		count, err := client.Database("conduit_test").Collection("config.sinks").
 			CountDocuments(ctx, bson.M{"collection_id": table.ID})
@@ -101,10 +101,10 @@ func TestSettingsSinkCRUD(t *testing.T) {
 	})
 
 	// Cleanup
-	if c, err := settings.Get(ctx, "sink_test_table"); err == nil {
+	if c, err := manager.Get(ctx, "sink_test_table"); err == nil {
 		if c.DeletionProtection {
-			_ = settings.DisableDeletionProtection(ctx, "sink_test_table")
+			_ = manager.DisableDeletionProtection(ctx, "sink_test_table")
 		}
-		_ = settings.Delete(ctx, "sink_test_table")
+		_ = manager.Delete(ctx, "sink_test_table")
 	}
 }

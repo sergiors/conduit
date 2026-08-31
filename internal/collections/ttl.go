@@ -16,12 +16,12 @@ import (
 // returns ErrTTLAlreadyExists, even with the same value. To change it, disable
 // TTL first via DisableTTL. An empty attribute returns ErrValidation.
 // On success, fires OnPublish (best-effort).
-func (s *Settings) SetTTL(ctx context.Context, name, attribute string) error {
+func (m *Manager) SetTTL(ctx context.Context, name, attribute string) error {
 	if attribute == "" {
 		return NewValidationError("ttl attribute is required")
 	}
 
-	collection, err := s.Get(ctx, name)
+	collection, err := m.Get(ctx, name)
 	if err != nil {
 		return err
 	}
@@ -30,11 +30,11 @@ func (s *Settings) SetTTL(ctx context.Context, name, attribute string) error {
 		return ErrTTLAlreadyExists
 	}
 
-	if err := s.createTTLIndex(ctx, name, attribute); err != nil {
+	if err := m.createTTLIndex(ctx, name, attribute); err != nil {
 		return fmt.Errorf("create ttl index: %w", err)
 	}
 
-	_, err = s.collection.UpdateOne(
+	_, err = m.collection.UpdateOne(
 		ctx,
 		bson.M{"collection_name": name},
 		bson.M{"$set": bson.M{
@@ -45,15 +45,15 @@ func (s *Settings) SetTTL(ctx context.Context, name, attribute string) error {
 	if err != nil {
 		return fmt.Errorf("set ttl attribute: %w", err)
 	}
-	s.notifyPublish(ctx, name)
+	m.notifyPublish(ctx, name)
 	return nil
 }
 
 // DisableTTL drops the TTL index and clears the TTL attribute.
 // Idempotent. Returns ErrCollectionNotFound if the collection does not exist.
 // On success, fires OnPublish (best-effort).
-func (s *Settings) DisableTTL(ctx context.Context, name string) error {
-	collection, err := s.Get(ctx, name)
+func (m *Manager) DisableTTL(ctx context.Context, name string) error {
+	collection, err := m.Get(ctx, name)
 	if err != nil {
 		return err
 	}
@@ -62,11 +62,11 @@ func (s *Settings) DisableTTL(ctx context.Context, name string) error {
 		return nil
 	}
 
-	if err := s.dropTTLIndex(ctx, name, collection.TTLAttribute); err != nil {
+	if err := m.dropTTLIndex(ctx, name, collection.TTLAttribute); err != nil {
 		return fmt.Errorf("drop ttl index: %w", err)
 	}
 
-	_, err = s.collection.UpdateOne(
+	_, err = m.collection.UpdateOne(
 		ctx,
 		bson.M{"collection_name": name},
 		bson.M{"$set": bson.M{
@@ -78,31 +78,31 @@ func (s *Settings) DisableTTL(ctx context.Context, name string) error {
 		return err
 	}
 
-	s.notifyPublish(ctx, name)
+	m.notifyPublish(ctx, name)
 	return nil
 }
 
 // createTTLIndex creates a TTL index on a collection.
-func (s *Settings) createTTLIndex(ctx context.Context, collection, field string) error {
+func (m *Manager) createTTLIndex(ctx context.Context, collection, field string) error {
 	indexModel := mongo.IndexModel{
 		Keys:    bson.D{{Key: field, Value: 1}},
 		Options: options.Index().SetExpireAfterSeconds(0),
 	}
-	_, err := s.client.Database(s.database).Collection(collection).Indexes().CreateOne(ctx, indexModel)
+	_, err := m.client.Database(m.database).Collection(collection).Indexes().CreateOne(ctx, indexModel)
 	return err
 }
 
 // dropTTLIndex drops the TTL index (named <field>_1 by MongoDB default naming)
 // from a collection. Tolerant: a missing index is not an error (idempotent).
-func (s *Settings) dropTTLIndex(ctx context.Context, collection, field string) error {
+func (m *Manager) dropTTLIndex(ctx context.Context, collection, field string) error {
 	name := field + "_1"
-	idxs, err := s.client.Database(s.database).Collection(collection).Indexes().ListSpecifications(ctx)
+	idxs, err := m.client.Database(m.database).Collection(collection).Indexes().ListSpecifications(ctx)
 	if err != nil {
 		return fmt.Errorf("list indexes: %w", err)
 	}
 	for _, idx := range idxs {
 		if idx.Name == name {
-			if _, err := s.client.Database(s.database).Collection(collection).Indexes().DropOne(ctx, name); err != nil {
+			if _, err := m.client.Database(m.database).Collection(collection).Indexes().DropOne(ctx, name); err != nil {
 				return fmt.Errorf("drop ttl index: %w", err)
 			}
 			return nil
