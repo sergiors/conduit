@@ -358,17 +358,6 @@ func (m *Manager) stopWatcher(ctx context.Context, collectionName string) error 
 	return nil
 }
 
-// restartWatcher stops and restarts a watcher with updated config
-func (m *Manager) restartWatcher(ctx context.Context, collection collections.Collection) error {
-	// Stop existing watcher
-	if err := m.stopWatcher(ctx, collection.CollectionName); err != nil {
-		return err
-	}
-
-	// Start new watcher with updated config
-	return m.startWatcher(ctx, collection)
-}
-
 // handleEvent processes an event with idempotency and retry logic.
 //
 // Settlement contract: it returns nil only when the event is settled (either
@@ -545,18 +534,6 @@ func (m *Manager) handleCollectionChange(ctx context.Context, collectionName str
 		return
 	}
 
-	// Existing watcher - check if oldImage changed (requires restart)
-	m.mu.RLock()
-	watcher := m.watchers[collectionName]
-	m.mu.RUnlock()
-
-	if watcher.OldImage() != collection.OldImage {
-		log.Printf("oldImage changed for %s, restarting watcher", collectionName)
-		if err := m.restartWatcher(ctx, *collection); err != nil {
-			log.Printf("Failed to restart watcher for %s: %v", collectionName, err)
-		}
-	}
-
 	// Always refresh sinks for existing watchers
 	if err := m.refreshSinks(ctx, collectionName); err != nil {
 		log.Printf("Failed to refresh sinks for %s: %v", collectionName, err)
@@ -641,13 +618,6 @@ func (m *Manager) syncWithCollections(ctx context.Context) {
 				log.Printf("recreated watcher for %s", collectionName)
 			}
 		} else {
-			// Existing collection - check if oldImage config changed
-			if existingWatcher.OldImage() != collection.OldImage {
-				log.Printf("oldImage config changed for %s (old=%v, new=%v), restarting watcher", collectionName, existingWatcher.OldImage(), collection.OldImage)
-				if err := m.restartWatcher(ctx, collection); err != nil {
-					log.Printf("Failed to restart watcher for %s: %v", collectionName, err)
-				}
-			}
 			// Always refresh sinks for existing collections
 			if err := m.refreshSinks(ctx, collectionName); err != nil {
 				log.Printf("Failed to refresh sinks for %s: %v", collectionName, err)

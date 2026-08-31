@@ -532,11 +532,6 @@ func (w *Watcher) IsRunning() bool {
 	return w.isRunning.Load()
 }
 
-// OldImage returns the oldImage configuration
-func (w *Watcher) OldImage() bool {
-	return w.oldImage
-}
-
 // eventID derives a stable identifier for a change event, used as the
 // idempotency key for delivery. It is derived exclusively from the MongoDB
 // change event itself — never from wall-clock time — so the same change always
