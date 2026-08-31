@@ -84,7 +84,7 @@ Because `old_image` affects how the MongoDB change stream is opened, stream conf
 
 ## Sink
 
-A _sink_ is a destination for CDC events. Each sink belongs to exactly one collection and can filter by event type (`INSERT`, `MODIFY`, `REMOVE`) and by content of the `new_image` / `old_image` using the filter DSL: `equals`, `not_equals`, `greater_than`, `greater_than_or_equal`, `less_than`, `less_than_or_equal`, `contains`, `begins_with`, `ends_with`, `exists`, `in`, and `not_in`. See [`docs/filter.md`](docs/filter.md) for the full DSL reference.
+A _sink_ is a destination for CDC events. Each sink belongs to exactly one collection and can filter by event type (`INSERT`, `MODIFY`, `REMOVE`) and by content of the `new_image` / `old_image` using the filter DSL: `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `contains`, `starts_with`, `ends_with`, `exists`, `in`, and `not_in`. See [`docs/filter.md`](docs/filter.md) for the full DSL reference.
 
 The shared `Sink` model carries only common metadata: `type`, an opaque `spec` payload, `event_types`, and `filter`. Type-specific settings (endpoint, region, host, etc.) live inside `spec` and are owned by the individual sink implementation. This keeps the shared model stable as new sink types are added.
 

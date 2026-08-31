@@ -52,7 +52,7 @@ func TestRuntimeSinkFilter(t *testing.T) {
 		sink := NewRuntimeSink(collections.Sink{
 			Filter: collections.Filter{
 				NewImage: collections.ImageFilter{
-					"status": collections.FilterCondition{BeginsWith: "active"},
+					"status": collections.FilterCondition{StartsWith: "active"},
 				},
 			},
 		}, transport)
@@ -70,7 +70,7 @@ func TestRuntimeSinkFilter(t *testing.T) {
 		sink := NewRuntimeSink(collections.Sink{
 			Filter: collections.Filter{
 				NewImage: collections.ImageFilter{
-					"status": collections.FilterCondition{BeginsWith: "active"},
+					"status": collections.FilterCondition{StartsWith: "active"},
 				},
 			},
 		}, transport)
@@ -92,11 +92,11 @@ func TestRuntimeSinkFilterFlat(t *testing.T) {
 	sink := NewRuntimeSink(collections.Sink{
 		Filter: collections.Filter{
 			NewImage: collections.ImageFilter{
-				"tenant": collections.FilterCondition{Equals: "acme"},
-				"status": collections.FilterCondition{Equals: "ACTIVE"},
+				"tenant": collections.FilterCondition{Eq: "acme"},
+				"status": collections.FilterCondition{Eq: "ACTIVE"},
 			},
 			OldImage: collections.ImageFilter{
-				"deleted": collections.FilterCondition{Equals: false},
+				"deleted": collections.FilterCondition{Eq: false},
 			},
 		},
 	}, &MockTransport{})

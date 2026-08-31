@@ -15,7 +15,7 @@ func TestMatchImageEmptyFilter(t *testing.T) {
 }
 
 func TestMatchImageNilImage(t *testing.T) {
-	f := ImageFilter{"valor": FilterCondition{GreaterThan: float64(100)}}
+	f := ImageFilter{"valor": FilterCondition{Gt: float64(100)}}
 	assert.False(t, MatchImage(nil, f))
 }
 
@@ -31,12 +31,12 @@ func TestMatchImageBSONM(t *testing.T) {
 	assert.True(t, MatchImage(img, f))
 }
 
-func TestMatchImageBeginsWith(t *testing.T) {
+func TestMatchImageStartsWith(t *testing.T) {
 	img := map[string]interface{}{"usuario": "admin_joao"}
 	prefix := "admin_"
-	assert.True(t, MatchImage(img, ImageFilter{"usuario": FilterCondition{BeginsWith: prefix}}))
+	assert.True(t, MatchImage(img, ImageFilter{"usuario": FilterCondition{StartsWith: prefix}}))
 	other := "user_"
-	assert.False(t, MatchImage(img, ImageFilter{"usuario": FilterCondition{BeginsWith: other}}))
+	assert.False(t, MatchImage(img, ImageFilter{"usuario": FilterCondition{StartsWith: other}}))
 }
 
 func TestMatchImageEndsWith(t *testing.T) {
@@ -59,25 +59,25 @@ func TestMatchImageExists(t *testing.T) {
 
 func TestMatchImageNumeric(t *testing.T) {
 	img := map[string]interface{}{"valor": float64(200)}
-	assert.True(t, MatchImage(img, ImageFilter{"valor": FilterCondition{GreaterThan: float64(100)}}))
-	assert.False(t, MatchImage(img, ImageFilter{"valor": FilterCondition{LessThan: float64(100)}}))
-	assert.True(t, MatchImage(img, ImageFilter{"valor": FilterCondition{GreaterThanOrEqual: float64(200)}}))
-	assert.True(t, MatchImage(img, ImageFilter{"valor": FilterCondition{LessThanOrEqual: float64(200)}}))
-	assert.True(t, MatchImage(img, ImageFilter{"valor": FilterCondition{Equals: float64(200)}}))
-	assert.False(t, MatchImage(img, ImageFilter{"valor": FilterCondition{Equals: float64(100)}}))
+	assert.True(t, MatchImage(img, ImageFilter{"valor": FilterCondition{Gt: float64(100)}}))
+	assert.False(t, MatchImage(img, ImageFilter{"valor": FilterCondition{Lt: float64(100)}}))
+	assert.True(t, MatchImage(img, ImageFilter{"valor": FilterCondition{Gte: float64(200)}}))
+	assert.True(t, MatchImage(img, ImageFilter{"valor": FilterCondition{Lte: float64(200)}}))
+	assert.True(t, MatchImage(img, ImageFilter{"valor": FilterCondition{Eq: float64(200)}}))
+	assert.False(t, MatchImage(img, ImageFilter{"valor": FilterCondition{Eq: float64(100)}}))
 }
 
 func TestMatchImageNumericIntTypes(t *testing.T) {
-	assert.True(t, MatchImage(map[string]interface{}{"v": int(50)}, ImageFilter{"v": FilterCondition{GreaterThan: float64(10)}}))
-	assert.True(t, MatchImage(map[string]interface{}{"v": int32(50)}, ImageFilter{"v": FilterCondition{GreaterThan: float64(10)}}))
-	assert.True(t, MatchImage(map[string]interface{}{"v": int64(50)}, ImageFilter{"v": FilterCondition{GreaterThan: float64(10)}}))
-	assert.True(t, MatchImage(map[string]interface{}{"v": float32(50)}, ImageFilter{"v": FilterCondition{GreaterThanOrEqual: float64(50)}}))
+	assert.True(t, MatchImage(map[string]interface{}{"v": int(50)}, ImageFilter{"v": FilterCondition{Gt: float64(10)}}))
+	assert.True(t, MatchImage(map[string]interface{}{"v": int32(50)}, ImageFilter{"v": FilterCondition{Gt: float64(10)}}))
+	assert.True(t, MatchImage(map[string]interface{}{"v": int64(50)}, ImageFilter{"v": FilterCondition{Gt: float64(10)}}))
+	assert.True(t, MatchImage(map[string]interface{}{"v": float32(50)}, ImageFilter{"v": FilterCondition{Gte: float64(50)}}))
 }
 
 func TestMatchImageNotEqualsNotIn(t *testing.T) {
 	img := map[string]interface{}{"estado": "SP"}
-	assert.True(t, MatchImage(img, ImageFilter{"estado": FilterCondition{NotEquals: "RJ"}}))
-	assert.False(t, MatchImage(img, ImageFilter{"estado": FilterCondition{NotEquals: "SP"}}))
+	assert.True(t, MatchImage(img, ImageFilter{"estado": FilterCondition{Ne: "RJ"}}))
+	assert.False(t, MatchImage(img, ImageFilter{"estado": FilterCondition{Ne: "SP"}}))
 	assert.True(t, MatchImage(img, ImageFilter{"estado": FilterCondition{NotIn: []any{"RJ", "MG"}}}))
 	assert.False(t, MatchImage(img, ImageFilter{"estado": FilterCondition{NotIn: []any{"SP", "MG"}}}))
 }
@@ -86,7 +86,7 @@ func TestMatchImageMultipleFieldsAnd(t *testing.T) {
 	img := map[string]interface{}{"valor": float64(200), "arquivo": "doc.pdf"}
 	suffix := ".pdf"
 	f := ImageFilter{
-		"valor":   FilterCondition{GreaterThan: float64(100)},
+		"valor":   FilterCondition{Gt: float64(100)},
 		"arquivo": FilterCondition{EndsWith: suffix},
 	}
 	assert.True(t, MatchImage(img, f))
@@ -99,7 +99,7 @@ func TestMatchImageAndWithinField(t *testing.T) {
 	img := map[string]interface{}{"email": "maria@gmail.com"}
 	prefix := "maria"
 	suffix := "gmail.com"
-	f := ImageFilter{"email": FilterCondition{BeginsWith: prefix, EndsWith: suffix}}
+	f := ImageFilter{"email": FilterCondition{StartsWith: prefix, EndsWith: suffix}}
 	assert.True(t, MatchImage(img, f))
 
 	no := false
@@ -111,13 +111,13 @@ func TestMatchImageExistsAndValueCondition(t *testing.T) {
 	img := map[string]interface{}{"email": "admin@test.com"}
 	yes := true
 	prefix := "admin"
-	f := ImageFilter{"email": FilterCondition{Exists: &yes, BeginsWith: prefix}}
+	f := ImageFilter{"email": FilterCondition{Exists: &yes, StartsWith: prefix}}
 	assert.True(t, MatchImage(img, f))
 }
 
 func TestMatchImageExtraFieldsIgnored(t *testing.T) {
 	img := map[string]interface{}{"valor": float64(200), "arquivo": "doc.pdf", "usuario": "admin"}
-	f := ImageFilter{"valor": FilterCondition{GreaterThan: float64(100)}}
+	f := ImageFilter{"valor": FilterCondition{Gt: float64(100)}}
 	assert.True(t, MatchImage(img, f))
 }
 
@@ -131,7 +131,7 @@ func TestMatchImageNilValueWithExistsFalse(t *testing.T) {
 
 func TestFilterOnlyOldImage(t *testing.T) {
 	criteria := Filter{
-		OldImage: ImageFilter{"status": FilterCondition{BeginsWith: "deleted_"}},
+		OldImage: ImageFilter{"status": FilterCondition{StartsWith: "deleted_"}},
 	}
 
 	// INSERT: no oldImage → filter fails → event skipped
@@ -153,7 +153,7 @@ func TestFilterOnlyOldImage(t *testing.T) {
 
 func TestFilterOnlyNewImage(t *testing.T) {
 	criteria := Filter{
-		NewImage: ImageFilter{"valor": FilterCondition{GreaterThan: float64(100)}},
+		NewImage: ImageFilter{"valor": FilterCondition{Gt: float64(100)}},
 	}
 
 	// old_image filter is empty → always passes
@@ -171,8 +171,8 @@ func TestFilterOnlyNewImage(t *testing.T) {
 
 func TestFilterBothImages(t *testing.T) {
 	criteria := Filter{
-		OldImage: ImageFilter{"status": FilterCondition{NotEquals: "active"}},
-		NewImage: ImageFilter{"status": FilterCondition{BeginsWith: "blocked_"}},
+		OldImage: ImageFilter{"status": FilterCondition{Ne: "active"}},
+		NewImage: ImageFilter{"status": FilterCondition{StartsWith: "blocked_"}},
 	}
 
 	// Both match → passes
@@ -199,7 +199,7 @@ func TestFilterAndWithinField(t *testing.T) {
 	criteria := Filter{
 		NewImage: ImageFilter{
 			"email": FilterCondition{
-				BeginsWith: "maria",
+				StartsWith: "maria",
 				EndsWith:   "gmail.com",
 			},
 		},
@@ -214,45 +214,45 @@ func TestFilterAndWithinField(t *testing.T) {
 
 func TestMatchImageDSL_Equality(t *testing.T) {
 	// equals: string / int / bool
-	assert.True(t, MatchImage(map[string]interface{}{"status": "active"}, ImageFilter{"status": FilterCondition{Equals: "active"}}))
-	assert.False(t, MatchImage(map[string]interface{}{"status": "active"}, ImageFilter{"status": FilterCondition{Equals: "pending"}}))
-	assert.True(t, MatchImage(map[string]interface{}{"age": float64(30)}, ImageFilter{"age": FilterCondition{Equals: float64(30)}}))
-	assert.True(t, MatchImage(map[string]interface{}{"age": int(30)}, ImageFilter{"age": FilterCondition{Equals: float64(30)}}))
-	assert.True(t, MatchImage(map[string]interface{}{"enabled": true}, ImageFilter{"enabled": FilterCondition{Equals: true}}))
-	assert.False(t, MatchImage(map[string]interface{}{"enabled": true}, ImageFilter{"enabled": FilterCondition{Equals: false}}))
+	assert.True(t, MatchImage(map[string]interface{}{"status": "active"}, ImageFilter{"status": FilterCondition{Eq: "active"}}))
+	assert.False(t, MatchImage(map[string]interface{}{"status": "active"}, ImageFilter{"status": FilterCondition{Eq: "pending"}}))
+	assert.True(t, MatchImage(map[string]interface{}{"age": float64(30)}, ImageFilter{"age": FilterCondition{Eq: float64(30)}}))
+	assert.True(t, MatchImage(map[string]interface{}{"age": int(30)}, ImageFilter{"age": FilterCondition{Eq: float64(30)}}))
+	assert.True(t, MatchImage(map[string]interface{}{"enabled": true}, ImageFilter{"enabled": FilterCondition{Eq: true}}))
+	assert.False(t, MatchImage(map[string]interface{}{"enabled": true}, ImageFilter{"enabled": FilterCondition{Eq: false}}))
 
 	// equals on numbers compares numerically across int/float widths
-	assert.True(t, MatchImage(map[string]interface{}{"age": int32(30)}, ImageFilter{"age": FilterCondition{Equals: float64(30)}}))
+	assert.True(t, MatchImage(map[string]interface{}{"age": int32(30)}, ImageFilter{"age": FilterCondition{Eq: float64(30)}}))
 
 	// equals on strings is exact: "5" != 5
-	assert.False(t, MatchImage(map[string]interface{}{"v": "5"}, ImageFilter{"v": FilterCondition{Equals: float64(5)}}))
+	assert.False(t, MatchImage(map[string]interface{}{"v": "5"}, ImageFilter{"v": FilterCondition{Eq: float64(5)}}))
 
 	// not_equals
-	assert.True(t, MatchImage(map[string]interface{}{"status": "active"}, ImageFilter{"status": FilterCondition{NotEquals: "pending"}}))
-	assert.False(t, MatchImage(map[string]interface{}{"status": "active"}, ImageFilter{"status": FilterCondition{NotEquals: "active"}}))
+	assert.True(t, MatchImage(map[string]interface{}{"status": "active"}, ImageFilter{"status": FilterCondition{Ne: "pending"}}))
+	assert.False(t, MatchImage(map[string]interface{}{"status": "active"}, ImageFilter{"status": FilterCondition{Ne: "active"}}))
 
 	// not_equals on a missing field → false (value-dependent operator requires the field to exist)
-	assert.False(t, MatchImage(map[string]interface{}{"status": "active"}, ImageFilter{"email": FilterCondition{NotEquals: "x@y.com"}}))
+	assert.False(t, MatchImage(map[string]interface{}{"status": "active"}, ImageFilter{"email": FilterCondition{Ne: "x@y.com"}}))
 }
 
 func TestMatchImageDSL_Comparisons(t *testing.T) {
 	img := map[string]interface{}{"age": float64(30)}
-	assert.True(t, MatchImage(img, ImageFilter{"age": FilterCondition{GreaterThan: float64(20)}}))
-	assert.False(t, MatchImage(img, ImageFilter{"age": FilterCondition{GreaterThan: float64(30)}}))
-	assert.True(t, MatchImage(img, ImageFilter{"age": FilterCondition{GreaterThanOrEqual: float64(30)}}))
-	assert.False(t, MatchImage(img, ImageFilter{"age": FilterCondition{GreaterThanOrEqual: float64(31)}}))
-	assert.True(t, MatchImage(img, ImageFilter{"age": FilterCondition{LessThan: float64(40)}}))
-	assert.False(t, MatchImage(img, ImageFilter{"age": FilterCondition{LessThan: float64(30)}}))
-	assert.True(t, MatchImage(img, ImageFilter{"age": FilterCondition{LessThanOrEqual: float64(30)}}))
-	assert.False(t, MatchImage(img, ImageFilter{"age": FilterCondition{LessThanOrEqual: float64(29)}}))
+	assert.True(t, MatchImage(img, ImageFilter{"age": FilterCondition{Gt: float64(20)}}))
+	assert.False(t, MatchImage(img, ImageFilter{"age": FilterCondition{Gt: float64(30)}}))
+	assert.True(t, MatchImage(img, ImageFilter{"age": FilterCondition{Gte: float64(30)}}))
+	assert.False(t, MatchImage(img, ImageFilter{"age": FilterCondition{Gte: float64(31)}}))
+	assert.True(t, MatchImage(img, ImageFilter{"age": FilterCondition{Lt: float64(40)}}))
+	assert.False(t, MatchImage(img, ImageFilter{"age": FilterCondition{Lt: float64(30)}}))
+	assert.True(t, MatchImage(img, ImageFilter{"age": FilterCondition{Lte: float64(30)}}))
+	assert.False(t, MatchImage(img, ImageFilter{"age": FilterCondition{Lte: float64(29)}}))
 
 	// int value compared against float operand
-	assert.True(t, MatchImage(map[string]interface{}{"age": int(30)}, ImageFilter{"age": FilterCondition{GreaterThan: float64(20)}}))
+	assert.True(t, MatchImage(map[string]interface{}{"age": int(30)}, ImageFilter{"age": FilterCondition{Gt: float64(20)}}))
 
 	// non-numeric value → false
-	assert.False(t, MatchImage(map[string]interface{}{"age": "thirty"}, ImageFilter{"age": FilterCondition{GreaterThan: float64(20)}}))
+	assert.False(t, MatchImage(map[string]interface{}{"age": "thirty"}, ImageFilter{"age": FilterCondition{Gt: float64(20)}}))
 	// non-numeric operand → false
-	assert.False(t, MatchImage(map[string]interface{}{"age": float64(30)}, ImageFilter{"age": FilterCondition{GreaterThan: "twenty"}}))
+	assert.False(t, MatchImage(map[string]interface{}{"age": float64(30)}, ImageFilter{"age": FilterCondition{Gt: "twenty"}}))
 }
 
 func TestMatchImageDSL_Contains(t *testing.T) {
@@ -283,10 +283,10 @@ func TestMatchImageDSL_InNotIn(t *testing.T) {
 	assert.False(t, MatchImage(map[string]interface{}{"region": "us-east-1"}, ImageFilter{"country": FilterCondition{NotIn: []any{"us", "br"}}}))
 }
 
-func TestMatchImageDSL_BeginsEndsWith(t *testing.T) {
-	// begins_with / ends_with
-	assert.True(t, MatchImage(map[string]interface{}{"status": "blocked_user"}, ImageFilter{"status": FilterCondition{BeginsWith: "blocked_"}}))
-	assert.False(t, MatchImage(map[string]interface{}{"status": "active_user"}, ImageFilter{"status": FilterCondition{BeginsWith: "blocked_"}}))
+func TestMatchImageDSL_StartsEndsWith(t *testing.T) {
+	// starts_with / ends_with
+	assert.True(t, MatchImage(map[string]interface{}{"status": "blocked_user"}, ImageFilter{"status": FilterCondition{StartsWith: "blocked_"}}))
+	assert.False(t, MatchImage(map[string]interface{}{"status": "active_user"}, ImageFilter{"status": FilterCondition{StartsWith: "blocked_"}}))
 	assert.True(t, MatchImage(map[string]interface{}{"file": "report.pdf"}, ImageFilter{"file": FilterCondition{EndsWith: ".pdf"}}))
 	assert.False(t, MatchImage(map[string]interface{}{"file": "report.doc"}, ImageFilter{"file": FilterCondition{EndsWith: ".pdf"}}))
 }
@@ -296,15 +296,15 @@ func TestMatchImageNestedPaths(t *testing.T) {
 		"address": map[string]interface{}{"city": "Berlin"},
 	}
 	// nested path equals
-	assert.True(t, MatchImage(img, ImageFilter{"address.city": FilterCondition{Equals: "Berlin"}}))
-	assert.False(t, MatchImage(img, ImageFilter{"address.city": FilterCondition{Equals: "Paris"}}))
+	assert.True(t, MatchImage(img, ImageFilter{"address.city": FilterCondition{Eq: "Berlin"}}))
+	assert.False(t, MatchImage(img, ImageFilter{"address.city": FilterCondition{Eq: "Paris"}}))
 
 	// missing intermediate → false
-	assert.False(t, MatchImage(img, ImageFilter{"address.zip": FilterCondition{Equals: "10115"}}))
-	assert.False(t, MatchImage(img, ImageFilter{"billing.city": FilterCondition{Equals: "Berlin"}}))
+	assert.False(t, MatchImage(img, ImageFilter{"address.zip": FilterCondition{Eq: "10115"}}))
+	assert.False(t, MatchImage(img, ImageFilter{"billing.city": FilterCondition{Eq: "Berlin"}}))
 
 	// flat field still works
-	assert.True(t, MatchImage(map[string]interface{}{"city": "Berlin"}, ImageFilter{"city": FilterCondition{Equals: "Berlin"}}))
+	assert.True(t, MatchImage(map[string]interface{}{"city": "Berlin"}, ImageFilter{"city": FilterCondition{Eq: "Berlin"}}))
 
 	// nested path with exists
 	yes := true
@@ -315,13 +315,13 @@ func TestMatchImageNestedPaths(t *testing.T) {
 func TestFilterJSONRoundTrip(t *testing.T) {
 	criteria := Filter{
 		NewImage: ImageFilter{
-			"status": FilterCondition{Equals: "active"},
-			"age":    FilterCondition{GreaterThan: float64(18)},
+			"status": FilterCondition{Eq: "active"},
+			"age":    FilterCondition{Gt: float64(18)},
 			"region": FilterCondition{In: []any{"us-east-1", "eu-west-1"}},
 			"email":  FilterCondition{Contains: "gmail"},
 		},
 		OldImage: ImageFilter{
-			"status": FilterCondition{NotEquals: "deleted"},
+			"status": FilterCondition{Ne: "deleted"},
 		},
 	}
 
@@ -354,8 +354,8 @@ func TestFilterMatchesNilReceiver(t *testing.T) {
 
 func TestFilterMatchesFlatBackwardCompat(t *testing.T) {
 	criteria := Filter{
-		NewImage: ImageFilter{"status": FilterCondition{BeginsWith: "active"}},
-		OldImage: ImageFilter{"status": FilterCondition{Equals: "pending"}},
+		NewImage: ImageFilter{"status": FilterCondition{StartsWith: "active"}},
+		OldImage: ImageFilter{"status": FilterCondition{Eq: "pending"}},
 	}
 	// both images match -> true
 	assert.True(t, criteria.Matches(
@@ -383,11 +383,11 @@ func TestFilterMatchesFlatSemantics(t *testing.T) {
 	// ACTIVE AND old_image.deleted false. All three predicates are ANDed.
 	criteria := Filter{
 		NewImage: ImageFilter{
-			"tenant": FilterCondition{Equals: "acme"},
-			"status": FilterCondition{Equals: "ACTIVE"},
+			"tenant": FilterCondition{Eq: "acme"},
+			"status": FilterCondition{Eq: "ACTIVE"},
 		},
 		OldImage: ImageFilter{
-			"deleted": FilterCondition{Equals: false},
+			"deleted": FilterCondition{Eq: false},
 		},
 	}
 
@@ -429,8 +429,8 @@ func TestFilterMatchesDeclaredBlockAbsentImage(t *testing.T) {
 	// even though the new_image block matches. There is no or group to
 	// compensate: all declared blocks are AND.
 	criteria := Filter{
-		OldImage: ImageFilter{"status": FilterCondition{Equals: "ACTIVE"}},
-		NewImage: ImageFilter{"status": FilterCondition{Equals: "ACTIVE"}},
+		OldImage: ImageFilter{"status": FilterCondition{Eq: "ACTIVE"}},
+		NewImage: ImageFilter{"status": FilterCondition{Eq: "ACTIVE"}},
 	}
 	assert.False(t, criteria.Matches(
 		map[string]interface{}{"status": "ACTIVE"},

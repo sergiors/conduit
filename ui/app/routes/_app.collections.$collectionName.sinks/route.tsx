@@ -28,7 +28,6 @@ import type { Route } from "./+types/route";
 import {
   conditionOptions,
   sinksFormSchema,
-  numericOperators,
   type Condition,
   type SinksForm,
   type FieldFilter,
@@ -78,28 +77,21 @@ function formToAPICriteria(
       if (!f.field) continue;
       const cond: import("./schema").FilterCondition = {};
       for (const condition of f.conditions || []) {
-        if (condition.type === "prefix" && condition.value) {
-          cond.prefix = condition.value;
-        } else if (condition.type === "suffix" && condition.value) {
-          cond.suffix = condition.value;
-        } else if (condition.type === "exists") {
+        if (condition.type === "exists") {
           cond.exists = condition.value === "true";
         } else if (
-          condition.type === "numeric" &&
-          condition.value &&
-          condition.numericOp
+          condition.type === "in" ||
+          condition.type === "not_in"
         ) {
-          cond.numeric = [condition.numericOp, Number(condition.value) || 0];
-        } else if (condition.type === "anything-but" && condition.value) {
-          if (condition.value.startsWith("[")) {
-            try {
-              cond["anything-but"] = JSON.parse(condition.value);
-            } catch {
-              cond["anything-but"] = condition.value;
-            }
-          } else {
-            cond["anything-but"] = condition.value;
+          const raw = condition.value?.trim();
+          if (raw) {
+            const parsed = raw.startsWith("[")
+              ? JSON.parse(raw)
+              : [raw];
+            cond[condition.type] = Array.isArray(parsed) ? parsed : [parsed];
           }
+        } else if (condition.value !== undefined && condition.value !== "") {
+          cond[condition.type] = condition.value;
         }
       }
       if (Object.keys(cond).length > 0) {
@@ -128,30 +120,20 @@ function apiToFormCriteria(criteria: Filter | undefined): {
     const filters: FieldFilter[] = [];
     for (const [field, cond] of Object.entries(filter)) {
       const f: FieldFilter = { field, conditions: [] };
-      if (cond.prefix) {
-        f.conditions.push({ type: "prefix", value: cond.prefix });
-      }
-      if (cond.suffix) {
-        f.conditions.push({ type: "suffix", value: cond.suffix });
-      }
-      if (cond.exists !== undefined) {
-        f.conditions.push({ type: "exists", value: String(cond.exists) });
-      }
-      if (cond.numeric) {
-        f.conditions.push({
-          type: "numeric",
-          numericOp: cond.numeric[0] as ">" | "<" | ">=" | "<=" | "=",
-          value: String(cond.numeric[1]),
-        });
-      }
-      if (cond["anything-but"] !== undefined) {
-        f.conditions.push({
-          type: "anything-but",
-          value:
-            typeof cond["anything-but"] === "string"
-              ? cond["anything-but"]
-              : JSON.stringify(cond["anything-but"]),
-        });
+      for (const op of conditionOptions) {
+        const type = op.value;
+        const value = cond[type];
+        if (value === undefined) continue;
+        if (type === "exists") {
+          f.conditions.push({ type, value: String(value) });
+        } else if (type === "in" || type === "not_in") {
+          f.conditions.push({
+            type,
+            value: Array.isArray(value) ? JSON.stringify(value) : String(value),
+          });
+        } else {
+          f.conditions.push({ type, value: String(value) });
+        }
       }
       filters.push(f);
     }
@@ -279,46 +261,6 @@ function FilterEditor({
                             </Select>
                           )}
                         />
-                      ) : condition.type === "numeric" ? (
-                        <>
-                          <Controller
-                            name={
-                              `sinks.${destIndex}.filter.${imageType}.${fieldIndex}.conditions.${conditionIndex}.numericOp` as const
-                            }
-                            control={control}
-                            render={({ field }) => (
-                              <Select
-                                value={field.value || ">"}
-                                onValueChange={field.onChange}
-                              >
-                                <SelectTrigger className="h-7 text-xs w-[70px]">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {numericOperators.map((op) => (
-                                    <SelectItem key={op.value} value={op.value}>
-                                      {op.label}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            )}
-                          />
-                          <Controller
-                            name={
-                              `sinks.${destIndex}.filter.${imageType}.${fieldIndex}.conditions.${conditionIndex}.value` as const
-                            }
-                            control={control}
-                            render={({ field }) => (
-                              <Input
-                                {...field}
-                                type="number"
-                                placeholder="0"
-                                className="h-7 text-xs w-[100px]"
-                              />
-                            )}
-                          />
-                        </>
                       ) : (
                         <Controller
                           name={
@@ -364,8 +306,6 @@ function FilterEditor({
                             const newCondition = {
                               type: opt.value,
                               value: opt.value === "exists" ? "true" : "",
-                              numericOp:
-                                opt.value === "numeric" ? ">" : undefined,
                             };
                             conditionsProps.onChange([
                               ...conditions,

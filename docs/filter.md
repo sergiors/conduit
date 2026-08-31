@@ -28,7 +28,7 @@ change event. Nothing here is translated to a MongoDB query.
 {
   "filter": {
     "new_image": {
-      "status": { "equals": "active" }
+      "status": { "eq": "active" }
     }
   }
 }
@@ -42,27 +42,35 @@ There are 12 operators. Each is a key inside a field's condition object.
 
 | Operator                  | JSON example                                        | Value type | Semantics                                                                 |
 | ------------------------- | --------------------------------------------------- | ---------- | ------------------------------------------------------------------------- |
-| `equals`                  | `{ "equals": "active" }`                            | any        | Deep equality. Numbers compare numerically across int/float widths; strings are exact. |
-| `not_equals`              | `{ "not_equals": "deleted" }`                       | any        | Inverse of `equals`. Requires the field to exist.                         |
-| `greater_than`            | `{ "greater_than": 18 }`                            | number     | Value > operand. Both must be numeric.                                    |
-| `greater_than_or_equal`   | `{ "greater_than_or_equal": 18 }`                   | number     | Value >= operand. Both must be numeric.                                  |
-| `less_than`               | `{ "less_than": 65 }`                               | number     | Value < operand. Both must be numeric.                                   |
-| `less_than_or_equal`      | `{ "less_than_or_equal": 65 }`                      | number     | Value <= operand. Both must be numeric.                                  |
+| `eq`                      | `{ "eq": "active" }`                                | any        | Deep equality. Numbers compare numerically across int/float widths; strings are exact. |
+| `ne`                      | `{ "ne": "deleted" }`                               | any        | Inverse of `eq`. Requires the field to exist.                             |
+| `gt`                      | `{ "gt": 18 }`                                      | number     | Value > operand. Both must be numeric.                                    |
+| `gte`                     | `{ "gte": 18 }`                                     | number     | Value >= operand. Both must be numeric.                                  |
+| `lt`                      | `{ "lt": 65 }`                                      | number     | Value < operand. Both must be numeric.                                   |
+| `lte`                     | `{ "lte": 65 }`                                     | number     | Value <= operand. Both must be numeric.                                  |
 | `contains`                | `{ "contains": "gmail" }`                          | any        | String value → substring match. Slice value → any element deep-equals the operand. Other kinds → `false`. |
-| `begins_with`             | `{ "begins_with": "blocked_" }`                     | any        | Value string starts with the operand.                                    |
+| `starts_with`             | `{ "starts_with": "blocked_" }`                     | any        | Value string starts with the operand.                                    |
 | `ends_with`               | `{ "ends_with": ".pdf" }`                           | any        | Value string ends with the operand.                                      |
 | `exists`                  | `{ "exists": true }`                                | bool       | Field presence. Combines with value conditions (AND).                   |
 | `in`                      | `{ "in": ["us-east-1", "eu-west-1"] }`              | array      | Any element deep-equals the value. Requires the field to exist.          |
 | `not_in`                  | `{ "not_in": ["us-east-1", "eu-west-1"] }`           | array      | No element deep-equals the value. Requires the field to exist.          |
 
+### Operator names
+
+`eq` / `ne` / `gt` / `gte` / `lt` / `lte` intentionally follow the abbreviated
+conventions familiar from MongoDB (`eq` / `ne` / `gt` / `gte` / `lt` / `lte`)
+and DynamoDB (`EQ` / `NE` / `GT` / `GE` / `LT` / `LE`) — not to replicate those
+APIs but to reduce the learning curve with well-known names. `starts_with` /
+`ends_with` read as plain English. The goal is familiarity, not parity.
+
 ### Notes
 
-- **Value-dependent operators require the field to exist.** `not_equals`,
+- **Value-dependent operators require the field to exist.** `ne`,
   `in`, `not_in`, and the numeric comparisons evaluate to `false` when the
   field is missing — a missing field cannot satisfy a content predicate. Use
   `exists` to reason about presence explicitly.
-- **`equals` on numbers is numeric.** `int32(5)` equals `float64(5.0)` in DSL
-  terms. `equals` on strings is exact: the string `"5"` does **not** equal the
+- **`eq` on numbers is numeric.** `int32(5)` equals `float64(5.0)` in DSL
+  terms. `eq` on strings is exact: the string `"5"` does **not** equal the
   number `5`.
 - **`contains` on a string** is a substring match. **`contains` on a slice**
   (e.g. a `tags` array) matches when any element deep-equals the operand. For
@@ -77,7 +85,7 @@ Field names may use dot notation to reach nested objects:
 ```json
 {
   "new_image": {
-    "address.city": { "equals": "Berlin" }
+    "address.city": { "eq": "Berlin" }
   }
 }
 ```
@@ -92,38 +100,38 @@ present.
 
 ## Supported Value Types
 
-- **string** — for `equals`, `not_equals`, `contains`, `begins_with`,
+- **string** — for `eq`, `ne`, `contains`, `starts_with`,
   `ends_with`, `in`, `not_in`.
-- **number** (int / float) — for `equals`, `not_equals`, `in`, `not_in`, and
-  the numeric comparison operators (`greater_than`, etc.). JSON numbers arrive
+- **number** (int / float) — for `eq`, `ne`, `in`, `not_in`, and
+  the numeric comparison operators (`gt`, etc.). JSON numbers arrive
   as floats; ints and floats compare numerically.
-- **bool** — for `equals`, `not_equals`, `in`, `not_in`, and `exists`.
+- **bool** — for `eq`, `ne`, `in`, `not_in`, and `exists`.
 - **null** — handled via `exists: false`. A `null`/missing value is treated as
-  absent; there is no `equals: null` operator.
+  absent; there is no `eq: null` operator.
 
 ---
 
 ## Examples
 
-### `equals`
+### `eq`
 
 ```json
-{ "new_image": { "status": { "equals": "active" } } }
+{ "new_image": { "status": { "eq": "active" } } }
 ```
 
-### `not_equals`
+### `ne`
 
 ```json
-{ "old_image": { "status": { "not_equals": "deleted" } } }
+{ "old_image": { "status": { "ne": "deleted" } } }
 ```
 
-### `greater_than` / `greater_than_or_equal` / `less_than` / `less_than_or_equal`
+### `gt` / `gte` / `lt` / `lte`
 
 ```json
-{ "new_image": { "age": { "greater_than": 18 } } }
-{ "new_image": { "age": { "greater_than_or_equal": 18 } } }
-{ "new_image": { "age": { "less_than": 65 } } }
-{ "new_image": { "age": { "less_than_or_equal": 65 } } }
+{ "new_image": { "age": { "gt": 18 } } }
+{ "new_image": { "age": { "gte": 18 } } }
+{ "new_image": { "age": { "lt": 65 } } }
+{ "new_image": { "age": { "lte": 65 } } }
 ```
 
 ### `contains`
@@ -133,10 +141,10 @@ present.
 { "new_image": { "tags": { "contains": "go" } } }
 ```
 
-### `begins_with` / `ends_with`
+### `starts_with` / `ends_with`
 
 ```json
-{ "new_image": { "status": { "begins_with": "blocked_" } } }
+{ "new_image": { "status": { "starts_with": "blocked_" } } }
 { "new_image": { "file": { "ends_with": ".pdf" } } }
 ```
 
@@ -163,8 +171,8 @@ Multiple criteria within a field are ANDed, and multiple fields are ANDed:
 ```json
 {
   "new_image": {
-    "status": { "equals": "active", "begins_with": "act" },
-    "age": { "greater_than": 18 },
+    "status": { "eq": "active", "starts_with": "act" },
+    "age": { "gt": 18 },
     "region": { "in": ["us-east-1", "eu-west-1"] }
   }
 }
@@ -189,7 +197,7 @@ modeled by creating **multiple sinks** on the same destination:
 ```json
 {
   "filter": {
-    "new_image": { "status": { "equals": "ACTIVE" } }
+    "new_image": { "status": { "eq": "ACTIVE" } }
   }
 }
 ```
@@ -200,8 +208,8 @@ modeled by creating **multiple sinks** on the same destination:
 {
   "filter": {
     "new_image": {
-      "tenant": { "equals": "acme" },
-      "status": { "equals": "ACTIVE" }
+      "tenant": { "eq": "acme" },
+      "status": { "eq": "ACTIVE" }
     }
   }
 }
@@ -229,11 +237,11 @@ The rationale for this simplicity:
 {
   "filter": {
     "new_image": {
-      "tenant": { "equals": "acme" },
-      "status": { "equals": "ACTIVE" }
+      "tenant": { "eq": "acme" },
+      "status": { "eq": "ACTIVE" }
     },
     "old_image": {
-      "deleted": { "equals": false }
+      "deleted": { "eq": false }
     }
   }
 }
@@ -253,7 +261,7 @@ Filter only the new image:
 ```json
 {
   "filter": {
-    "new_image": { "status": { "equals": "active" } }
+    "new_image": { "status": { "eq": "active" } }
   }
 }
 ```
@@ -263,7 +271,7 @@ Filter only the old image:
 ```json
 {
   "filter": {
-    "old_image": { "status": { "equals": "pending" } }
+    "old_image": { "status": { "eq": "pending" } }
   }
 }
 ```
@@ -273,8 +281,8 @@ Filter both (both must match):
 ```json
 {
   "filter": {
-    "old_image": { "status": { "not_equals": "active" } },
-    "new_image": { "status": { "equals": "blocked" } }
+    "old_image": { "status": { "ne": "active" } },
+    "new_image": { "status": { "eq": "blocked" } }
   }
 }
 ```

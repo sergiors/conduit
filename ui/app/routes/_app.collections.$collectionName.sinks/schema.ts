@@ -3,9 +3,21 @@ import { z } from "zod";
 const VALID_EVENT_TYPES = ["INSERT", "MODIFY", "REMOVE"] as const;
 
 export const conditionSchema = z.object({
-  type: z.enum(["prefix", "suffix", "exists", "numeric", "anything-but"]),
+  type: z.enum([
+    "eq",
+    "ne",
+    "gt",
+    "gte",
+    "lt",
+    "lte",
+    "contains",
+    "starts_with",
+    "ends_with",
+    "exists",
+    "in",
+    "not_in",
+  ]),
   value: z.string().optional(),
-  numericOp: z.enum([">", "<", ">=", "<=", "="]).optional(),
 });
 
 export const fieldFilterSchema = z.object({
@@ -62,11 +74,18 @@ export const sinksFormSchema = z.object({
 export type SinksForm = z.infer<typeof sinksFormSchema>;
 
 export interface FilterCondition {
-  prefix?: string;
-  suffix?: string;
+  eq?: any;
+  ne?: any;
+  gt?: any;
+  gte?: any;
+  lt?: any;
+  lte?: any;
+  contains?: any;
+  starts_with?: any;
+  ends_with?: any;
   exists?: boolean;
-  numeric?: any[];
-  "anything-but"?: any;
+  in?: any[];
+  not_in?: any[];
 }
 
 export interface ImageFilter {
@@ -93,17 +112,16 @@ export type FieldFilter = z.infer<typeof fieldFilterSchema>;
 export type Condition = z.infer<typeof conditionSchema>;
 
 export const conditionOptions: { value: Condition["type"]; label: string }[] = [
-  { value: "prefix", label: "Prefix" },
-  { value: "suffix", label: "Suffix" },
+  { value: "eq", label: "Equals" },
+  { value: "ne", label: "Not Equals" },
+  { value: "gt", label: "Greater Than" },
+  { value: "gte", label: "Greater Than or Equal" },
+  { value: "lt", label: "Less Than" },
+  { value: "lte", label: "Less Than or Equal" },
+  { value: "contains", label: "Contains" },
+  { value: "starts_with", label: "Starts With" },
+  { value: "ends_with", label: "Ends With" },
   { value: "exists", label: "Exists" },
-  { value: "numeric", label: "Numeric" },
-  { value: "anything-but", label: "Anything But" },
-];
-
-export const numericOperators = [
-  { value: ">", label: ">" },
-  { value: "<", label: "<" },
-  { value: ">=", label: ">=" },
-  { value: "<=", label: "<=" },
-  { value: "=", label: "=" },
+  { value: "in", label: "In" },
+  { value: "not_in", label: "Not In" },
 ];

@@ -1,9 +1,16 @@
 export interface FilterCondition {
-  prefix?: string;
-  suffix?: string;
+  eq?: any;
+  ne?: any;
+  gt?: any;
+  gte?: any;
+  lt?: any;
+  lte?: any;
+  contains?: any;
+  starts_with?: any;
+  ends_with?: any;
   exists?: boolean;
-  numeric?: any[];
-  "anything-but"?: any;
+  in?: any[];
+  not_in?: any[];
 }
 
 export interface ImageFilter {

@@ -10,18 +10,18 @@ import (
 
 // FilterCondition is a single filter condition for image fields.
 type FilterCondition struct {
-	Exists             *bool `bson:"exists,omitempty"                json:"exists,omitempty"`
-	Equals             any   `bson:"equals,omitempty"                json:"equals,omitempty"`
-	NotEquals          any   `bson:"not_equals,omitempty"            json:"not_equals,omitempty"`
-	GreaterThan        any   `bson:"greater_than,omitempty"          json:"greater_than,omitempty"`
-	GreaterThanOrEqual any   `bson:"greater_than_or_equal,omitempty" json:"greater_than_or_equal,omitempty"`
-	LessThan           any   `bson:"less_than,omitempty"             json:"less_than,omitempty"`
-	LessThanOrEqual    any   `bson:"less_than_or_equal,omitempty"    json:"less_than_or_equal,omitempty"`
-	Contains           any   `bson:"contains,omitempty"              json:"contains,omitempty"`
-	BeginsWith         any   `bson:"begins_with,omitempty"           json:"begins_with,omitempty"`
-	EndsWith           any   `bson:"ends_with,omitempty"             json:"ends_with,omitempty"`
-	In                 []any `bson:"in,omitempty"                    json:"in,omitempty"`
-	NotIn              []any `bson:"not_in,omitempty"                json:"not_in,omitempty"`
+	Exists     *bool `bson:"exists,omitempty"     json:"exists,omitempty"`
+	Eq         any   `bson:"eq,omitempty"         json:"eq,omitempty"`
+	Ne         any   `bson:"ne,omitempty"         json:"ne,omitempty"`
+	Gt         any   `bson:"gt,omitempty"         json:"gt,omitempty"`
+	Gte        any   `bson:"gte,omitempty"        json:"gte,omitempty"`
+	Lt         any   `bson:"lt,omitempty"         json:"lt,omitempty"`
+	Lte        any   `bson:"lte,omitempty"        json:"lte,omitempty"`
+	Contains   any   `bson:"contains,omitempty"   json:"contains,omitempty"`
+	StartsWith any   `bson:"starts_with,omitempty" json:"starts_with,omitempty"`
+	EndsWith   any   `bson:"ends_with,omitempty"  json:"ends_with,omitempty"`
+	In         []any `bson:"in,omitempty"         json:"in,omitempty"`
+	NotIn      []any `bson:"not_in,omitempty"     json:"not_in,omitempty"`
 }
 
 // ImageFilter maps field names to a filter condition (AND across fields, AND within condition).
@@ -115,28 +115,28 @@ func matchCondition(val interface{}, exists bool, cond FilterCondition) bool {
 	}
 
 	// Every present operator must match (AND within field).
-	if cond.Equals != nil && !deepEqual(val, cond.Equals) {
+	if cond.Eq != nil && !deepEqual(val, cond.Eq) {
 		return false
 	}
-	if cond.NotEquals != nil && deepEqual(val, cond.NotEquals) {
+	if cond.Ne != nil && deepEqual(val, cond.Ne) {
 		return false
 	}
-	if cond.GreaterThan != nil && !matchNumericCompare(val, cond.GreaterThan, func(a, b float64) bool { return a > b }) {
+	if cond.Gt != nil && !matchNumericCompare(val, cond.Gt, func(a, b float64) bool { return a > b }) {
 		return false
 	}
-	if cond.GreaterThanOrEqual != nil && !matchNumericCompare(val, cond.GreaterThanOrEqual, func(a, b float64) bool { return a >= b }) {
+	if cond.Gte != nil && !matchNumericCompare(val, cond.Gte, func(a, b float64) bool { return a >= b }) {
 		return false
 	}
-	if cond.LessThan != nil && !matchNumericCompare(val, cond.LessThan, func(a, b float64) bool { return a < b }) {
+	if cond.Lt != nil && !matchNumericCompare(val, cond.Lt, func(a, b float64) bool { return a < b }) {
 		return false
 	}
-	if cond.LessThanOrEqual != nil && !matchNumericCompare(val, cond.LessThanOrEqual, func(a, b float64) bool { return a <= b }) {
+	if cond.Lte != nil && !matchNumericCompare(val, cond.Lte, func(a, b float64) bool { return a <= b }) {
 		return false
 	}
 	if cond.Contains != nil && !matchContains(val, cond.Contains) {
 		return false
 	}
-	if cond.BeginsWith != nil && !strings.HasPrefix(fmt.Sprint(val), fmt.Sprint(cond.BeginsWith)) {
+	if cond.StartsWith != nil && !strings.HasPrefix(fmt.Sprint(val), fmt.Sprint(cond.StartsWith)) {
 		return false
 	}
 	if cond.EndsWith != nil && !strings.HasSuffix(fmt.Sprint(val), fmt.Sprint(cond.EndsWith)) {
@@ -153,14 +153,14 @@ func matchCondition(val interface{}, exists bool, cond FilterCondition) bool {
 
 // noValueConditionsOnly returns true when no value-dependent conditions are set.
 func (cond FilterCondition) noValueConditionsOnly() bool {
-	return cond.Equals == nil &&
-		cond.NotEquals == nil &&
-		cond.GreaterThan == nil &&
-		cond.GreaterThanOrEqual == nil &&
-		cond.LessThan == nil &&
-		cond.LessThanOrEqual == nil &&
+	return cond.Eq == nil &&
+		cond.Ne == nil &&
+		cond.Gt == nil &&
+		cond.Gte == nil &&
+		cond.Lt == nil &&
+		cond.Lte == nil &&
 		cond.Contains == nil &&
-		cond.BeginsWith == nil &&
+		cond.StartsWith == nil &&
 		cond.EndsWith == nil &&
 		cond.In == nil &&
 		cond.NotIn == nil
