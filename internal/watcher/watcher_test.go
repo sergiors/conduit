@@ -14,6 +14,7 @@ import (
 	redisclient "github.com/sergiors/conduit/internal/redis"
 	"github.com/sergiors/conduit/internal/streams"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -321,15 +322,58 @@ func TestIsResumeTokenInvalid(t *testing.T) {
 		// Verified against a live MongoDB 8.x replica set:
 		//   9     -> FailedToParse: "resume token string was not a valid hex string"
 		//   50811 -> KeyString format error (structurally invalid token)
+		//   286   -> ChangeStreamHistoryLost: resume point predates the oplog
+		//            window (verified via the server error_codes.yml; a forged
+		//            ancient token reproduces the sibling 280/50811 live, and
+		//            286 is the NonResumableChangeStreamError the server raises
+		//            when the token's history has rolled off the oplog).
 		//
-		// Note: stale-but-structurally-valid tokens (e.g. after a collection
-		// drop) do NOT error at Watch() on MongoDB 8.x; the stream delivers a
-		// `drop` event then `invalidate`, handled as terminal conditions. So
-		// only parse failures of the token itself invalidate here.
-		for _, code := range []int32{9, 50811} {
+		// Note: the oplog-window-miss condition is ALSO seen live as code 280
+		// ChangeStreamFatalError with the message "cannot resume stream; the
+		// resume token was not found" — covered by the message-matching
+		// subtest below. Stale-but-structurally-valid tokens (e.g. after a
+		// collection drop) do NOT error at Watch() on MongoDB 8.x; the stream
+		// delivers a `drop` event then `invalidate`, handled as terminal
+		// conditions. So only token-fatal server codes (parse failures and
+		// history-lost) invalidate here.
+		for _, code := range []int32{9, 286, 50811} {
 			err := mongo.CommandError{Code: code, Message: "synthetic"}
 			assert.True(t, isResumeTokenInvalid(err), "code %d should invalidate", code)
 		}
+	})
+
+	t.Run("history-lost error wrapped or as message still detected", func(t *testing.T) {
+		// 286 is matched by its typed code, so it must survive wrapping.
+		cmdErr := mongo.CommandError{Code: 286, Message: "ChangeStreamHistoryLost: resume point no longer exists"}
+		assert.True(t, isResumeTokenInvalid(cmdErr), "typed 286 must invalidate")
+
+		wrapped := fmt.Errorf("start change stream: %w", cmdErr)
+		assert.True(t, isResumeTokenInvalid(wrapped), "wrapped 286 must invalidate")
+
+		// The missing-resume-point condition is delivered by MongoDB 8.2 as
+		// code 280 ChangeStreamFatalError with this message (verified live
+		// twice: structurally valid forged token whose clusterTime predates
+		// the oplog). The typed code 280 alone is a wrapper for several fatal
+		// stream conditions and must NOT blanket-match; the message substring
+		// is the discriminator.
+		twoEighty := mongo.CommandError{
+			Code:    280,
+			Name:    "ChangeStreamFatalError",
+			Message: `Executor error during aggregate command on namespace: test.coll :: caused by :: cannot resume stream; the resume token was not found. {_data: "8200000001000000012B042C0100296E"}`,
+		}
+		assert.True(t, isResumeTokenInvalid(twoEighty), "280 with missing-resume-token message must invalidate")
+
+		wrappedTwoEighty := fmt.Errorf("start change stream: %w", twoEighty)
+		assert.True(t, isResumeTokenInvalid(wrappedTwoEighty), "wrapped 280 missing-resume-token must invalidate")
+
+		// Other 280-wrapped fatal conditions (different message) must NOT
+		// invalidate — the code is not matched, only the message.
+		otherTwoEighty := mongo.CommandError{Code: 280, Name: "ChangeStreamFatalError", Message: "resume stream not allowed for a different reason"}
+		assert.False(t, isResumeTokenInvalid(otherTwoEighty), "280 with an unrelated message must not invalidate")
+
+		// A bare message without any typed code (lost through wrapping) still
+		// matches via the string fallback.
+		assert.True(t, isResumeTokenInvalid(errors.New("start change stream: cannot resume stream; the resume token was not found")))
 	})
 
 	t.Run("wrapped token-fatal errors are still detected", func(t *testing.T) {
@@ -957,4 +1001,162 @@ func TestWatcherStartPanicHandlerDoesNotCrash(t *testing.T) {
 		return nil
 	}))
 	assert.NoError(t, watcher.Stop(ctx))
+	// After Stop the goroutine has exited; the backstop must have cleared
+	// isRunning so IsRunning no longer lies about a dead watcher.
+	assert.Eventually(t, func() bool { return !watcher.IsRunning() }, 2*time.Second, 10*time.Millisecond)
+}
+
+// newLiveMongoClient connects to the local replica set used by the compose
+// stack. It skips the test if MongoDB is not reachable, so the recovery tests
+// degrade gracefully on machines without the stack running.
+func newLiveMongoClient(t *testing.T) *mongo.Client {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI("mongodb://localhost:27017/?directConnection=true"))
+	if err != nil {
+		t.Skipf("MongoDB not available: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Disconnect(context.Background()) })
+	return client
+}
+
+// TestSyncWithCollectionsRecreatesDeadWatcher verifies the manager's
+// reconciliation recovers a registered-but-dead watcher. Both lifecycle paths
+// that leave a dead watcher behind — the panic path and the terminal-exit path
+// (collection dropped / change stream invalidated) — now converge on
+// IsRunning()==false, which syncWithCollections must treat as "watcher absent"
+// and recreate. The test simulates each path by flipping the internal isRunning
+// flag on a live watcher, then asserting sync replaces it with a fresh running
+// instance.
+func TestSyncWithCollectionsRecreatesDeadWatcher(t *testing.T) {
+	client := newLiveMongoClient(t)
+	fr := newFakeRedis()
+
+	const db = "conduit_test_lifecycle"
+	settings := collections.NewSettings(client, db)
+
+	names := []string{"recovery_test", "recovery_test2"}
+	cleanup := func() {
+		bgCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		for _, name := range names {
+			if _, err := settings.Get(bgCtx, name); err == nil {
+				_ = settings.DisableDeletionProtection(bgCtx, name)
+				_ = settings.Delete(bgCtx, name)
+			}
+		}
+	}
+	cleanup() // remove leftovers from a previous run
+	t.Cleanup(cleanup)
+
+	// Create two stream-enabled collection configs.
+	for _, name := range names {
+		require.NoError(t, settings.Create(context.Background(), &collections.Collection{
+			CollectionName: name,
+			StreamEnabled:  true,
+		}))
+	}
+
+	manager := NewManager(client, db, settings, fr, nil, nil, DefaultConfig())
+	manager.runCtx, manager.runCancel = context.WithCancel(context.Background())
+	t.Cleanup(manager.runCancel)
+
+	// Start both watchers; each is alive (IsRunning true).
+	for _, name := range names {
+		require.NoError(t, manager.startWatcher(manager.runCtx, collections.Collection{CollectionName: name}))
+	}
+	first := manager.watchers[names[0]]
+	second := manager.watchers[names[1]]
+	require.True(t, first.IsRunning())
+	require.True(t, second.IsRunning())
+
+	// Simulate a dead watcher: the panic path (isRunning flipped false) and the
+	// terminal-exit path (isRunning false, watcher still registered). Both now
+	// converge on IsRunning()==false, which sync must treat as "absent".
+	first.isRunning.Store(false)
+	second.isRunning.Store(false)
+
+	manager.syncWithCollections(context.Background())
+
+	// Both watchers must have been recreated: fresh instances, running again.
+	recovered1 := manager.watchers[names[0]]
+	recovered2 := manager.watchers[names[1]]
+	require.NotNil(t, recovered1)
+	require.NotNil(t, recovered2)
+	assert.NotSame(t, first, recovered1, "%s watcher must be a fresh instance", names[0])
+	assert.NotSame(t, second, recovered2, "%s watcher must be a fresh instance", names[1])
+	assert.True(t, recovered1.IsRunning(), "recreated watcher must be running")
+	assert.True(t, recovered2.IsRunning(), "recreated watcher must be running")
+}
+
+// TestSyncWithCollectionsIdempotent verifies that running syncWithCollections
+// twice in a row on a healthy setup is a no-op: the watcher is not duplicated
+// (impossible by map construction) and, crucially, is not needlessly recreated —
+// the same pointer survives both syncs.
+func TestSyncWithCollectionsIdempotent(t *testing.T) {
+	client := newLiveMongoClient(t)
+	fr := newFakeRedis()
+
+	const db = "conduit_test_lifecycle"
+	settings := collections.NewSettings(client, db)
+
+	const name = "recovery_test"
+	cleanup := func() {
+		bgCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if _, err := settings.Get(bgCtx, name); err == nil {
+			_ = settings.DisableDeletionProtection(bgCtx, name)
+			_ = settings.Delete(bgCtx, name)
+		}
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+
+	require.NoError(t, settings.Create(context.Background(), &collections.Collection{
+		CollectionName: name,
+		StreamEnabled:  true,
+	}))
+
+	manager := NewManager(client, db, settings, fr, nil, nil, DefaultConfig())
+	manager.runCtx, manager.runCancel = context.WithCancel(context.Background())
+	t.Cleanup(manager.runCancel)
+
+	require.NoError(t, manager.startWatcher(manager.runCtx, collections.Collection{CollectionName: name}))
+	original := manager.watchers[name]
+
+	// Two healthy syncs must not duplicate or restart the watcher.
+	manager.syncWithCollections(context.Background())
+	manager.syncWithCollections(context.Background())
+
+	require.Len(t, manager.watchers, 1)
+	assert.Same(t, original, manager.watchers[name], "healthy watcher must not be recreated")
+	assert.True(t, manager.watchers[name].IsRunning())
+}
+
+// TestWatcherTerminalExitClearsIsRunning verifies the flag-no-longer-lies
+// contract for ALL exit paths: cancelling the watcher's own context (as Stop
+// would) makes the watch goroutine exit, and the Start backstop clears
+// isRunning WITHOUT Stop being called. This is the deterministic regression for
+// the terminal-exit path (drop/invalidate) that previously left IsRunning()
+// reporting true on a dead watcher.
+func TestWatcherTerminalExitClearsIsRunning(t *testing.T) {
+	client := newStartWatcherMongoClient(t)
+	watcher := NewWatcher(client, "conduit", "users", false, "", nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	require.NoError(t, watcher.Start(ctx, func(streams.StreamRecord) error { return nil }))
+	require.True(t, watcher.IsRunning())
+
+	// Cancel the watcher's own context directly (as Stop would) WITHOUT calling
+	// Stop. The goroutine exits on ctx.Done and the backstop must clear
+	// isRunning, so IsRunning no longer lies about a dead watcher.
+	watcher.cancel()
+
+	assert.Eventually(t, func() bool { return !watcher.IsRunning() }, 2*time.Second, 10*time.Millisecond)
 }

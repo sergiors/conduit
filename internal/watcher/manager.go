@@ -579,13 +579,35 @@ func (m *Manager) syncWithCollections(ctx context.Context) {
 	}
 	m.mu.RUnlock()
 
-	// Start watchers for new collections and register sinks
+	// Start watchers for new collections, recover dead watchers, and register
+	// sinks. The recovery is per-collection inside this loop: restarting one
+	// watcher never affects other collections. IsRunning() is read at decision
+	// time; a watcher could exit right after the check (TOCTOU), but the next
+	// sync cycle catches it — that is the designed recovery cadence
+	// (syncInterval, default 30s).
 	for collectionName, collection := range enabledSet {
 		existingWatcher, exists := currentWatchers[collectionName]
 		if !exists {
 			// New collection - start watcher (which also registers sinks)
 			if err := m.startWatcher(ctx, collection); err != nil {
 				log.Printf("Failed to start watcher for %s: %v", collectionName, err)
+			}
+		} else if !existingWatcher.IsRunning() {
+			// The watcher is registered but its watch goroutine has exited
+			// (panic, terminal drop/invalidate, or exhausted retry loop). It is
+			// dead: stop it to remove it from the registry and clear its sinks
+			// and retry registration, then start a fresh one. stopWatcher is
+			// safe on a dead watcher (Watcher.Stop returns promptly when the
+			// goroutine has already exited). A startWatcher failure here leaves
+			// the collection without a watcher (logged) to be retried next sync.
+			log.Printf("watcher for %s is not running; recreating", collectionName)
+			if err := m.stopWatcher(ctx, collectionName); err != nil {
+				log.Printf("Failed to stop dead watcher for %s: %v", collectionName, err)
+			}
+			if err := m.startWatcher(ctx, collection); err != nil {
+				log.Printf("Failed to recreate watcher for %s: %v", collectionName, err)
+			} else {
+				log.Printf("recreated watcher for %s", collectionName)
 			}
 		} else {
 			// Existing collection - check if oldImage config changed

@@ -29,11 +29,27 @@ var (
 // isResumeTokenInvalid reports whether an error from the change stream means
 // MongoDB explicitly rejected the resume token as no longer usable.
 //
-// Only server-side parse failures of the token itself justify deleting the
-// stored token (verified against MongoDB 8.x):
-//   - code 9 "FailedToParse": token is not valid hex ("resume token string
-//     was not a valid hex string").
-//   - code 50811 "KeyString format error": token is structurally invalid.
+// Two categories justify deleting the stored token (verified against MongoDB
+// 8.x):
+//   - The token itself is unusable:
+//     - code 9 "FailedToParse": token is not valid hex ("resume token string
+//       was not a valid hex string").
+//     - code 50811 "KeyString format error": token is structurally invalid.
+//   - The resume point predates the oplog window:
+//     - code 286 "ChangeStreamHistoryLost": the history the token points to
+//       is gone (e.g. the worker was down longer than the oplog preserves
+//       history). The token is not malformed, but keeping it would stall the
+//       watcher forever on a doomed resume, so it is invalidated and the
+//       stream restarts from the current position. The events between the old
+//       token and the oplog window start are unrecoverable either way, so this
+//       trades unrecoverable history for forward progress.
+//     - "cannot resume stream; the resume token was not found" (message match
+//       only): MongoDB 8.2 wraps this condition in code 280
+//       "ChangeStreamFatalError" at Watch/aggregate time — verified live by
+//       resuming with a structurally valid forged token whose clusterTime
+//       predates the oplog (twice reproduced). Code 280 is a wrapper for
+//       several fatal stream conditions and is NOT matched by itself; the
+//       message substring is specific to the missing-resume-point failure.
 //
 // A stale-but-structurally-valid token (e.g. after a collection drop) is NOT
 // treated as invalid: MongoDB delivers a `drop` event followed by
@@ -53,15 +69,23 @@ func isResumeTokenInvalid(err error) bool {
 			return true
 		case 50811: // KeyString format error: token is structurally invalid
 			return true
+		case 286: // ChangeStreamHistoryLost: resume point predates the oplog window
+			return true
 		}
 	}
 
 	// String matching as a last resort for errors that may lose the typed
 	// error through wrapping. These messages only ever originate from the
-	// server rejecting the token itself.
+	// server rejecting the token itself. The missing-resume-point case is
+	// message-matched rather than code-matched because MongoDB 8.2 delivers it
+	// as code 280 (ChangeStreamFatalError, a wrapper for multiple fatal
+	// conditions) with the message below (verified live); matching the
+	// unambiguous substring avoids both the forever-stall this causes and
+	// false positives from other 280-wrapped conditions.
 	msg := err.Error()
 	return strings.Contains(msg, "resume token string was not a valid hex string") ||
-		strings.Contains(msg, "KeyString format error")
+		strings.Contains(msg, "KeyString format error") ||
+		strings.Contains(msg, "cannot resume stream; the resume token was not found")
 }
 
 // Watcher watches a single MongoDB collection for changes
@@ -117,6 +141,14 @@ func NewWatcher(
 // backoff, reopens the change stream from the last settled position so the
 // unsettled event is replayed. Returning nil guarantees the event will not be
 // re-delivered; returning an error guarantees it will be.
+//
+// Lifecycle contract for IsRunning: isRunning reflects whether the watch
+// goroutine is alive. It is set true when the goroutine is spawned and set
+// false unconditionally when the goroutine exits — whether by a recovered
+// panic, a terminal condition (collection dropped / change stream invalidated),
+// an exhausted retry loop, or a normal context cancellation. The manager's
+// reconciliation treats IsRunning()==false as "watcher absent" and recreates
+// it, so a watcher that exits for any reason is recovered on the next sync.
 func (w *Watcher) Start(ctx context.Context, handler func(streams.StreamRecord) error) error {
 	if w.isRunning.Load() {
 		return fmt.Errorf("watcher already running")
@@ -130,17 +162,22 @@ func (w *Watcher) Start(ctx context.Context, handler func(streams.StreamRecord) 
 		// Backstop: a panic anywhere in the watch loop (e.g. inside a handler
 		// that slips past per-event isolation) would otherwise crash the
 		// process. Protect catches it on this goroutine so the deferred
-		// wg.Done still runs and Stop's Wait cannot hang. A recovered panic
-		// marks the watcher not running so the manager's next sync reconciles
-		// its lifecycle.
+		// wg.Done still runs and Stop's Wait cannot hang.
+		//
+		// isRunning is cleared on EVERY goroutine exit, not only on a panic:
+		// watchLoop also returns on terminal conditions (drop/invalidate) and
+		// on context cancellation, and in all those cases the watcher is dead
+		// and must be reconciled by the manager. Clearing the flag here (rather
+		// than only in the panic branch) makes IsRunning truthful in every exit
+		// path, so the manager's sync recreates the watcher.
 		defer w.wg.Done()
-		rec, panicked := recoverpkg.Protect("watcher:"+w.collectionName, func() {
+		// The panic payload is already logged by Protect; the panic matters
+		// only in that it also exits the goroutine, and the unconditional
+		// isRunning clear below handles both panic and normal exits alike.
+		recoverpkg.Protect("watcher:"+w.collectionName, func() {
 			w.watchLoop(handler)
 		})
-		_ = rec
-		if panicked {
-			w.isRunning.Store(false)
-		}
+		w.isRunning.Store(false)
 	}()
 
 	log.Printf("Watcher started for collection: %s", w.collectionName)
@@ -195,15 +232,17 @@ func (w *Watcher) watchLoop(handler func(streams.StreamRecord) error) {
 				// stream was invalidated. Stop the watcher; the manager will
 				// reconcile the watcher lifecycle.
 				if errors.Is(err, errCollectionDropped) || errors.Is(err, errChangeStreamInvalidated) {
-					log.Printf("Stopping watcher for %s: %v", w.collectionName, err)
+					log.Printf("Watcher for %s exiting (terminal condition: %v); the manager's sync will recreate it if the collection is still enabled", w.collectionName, err)
 					return
 				}
 
 				w.recordError(err)
 
 				// Only invalidate when MongoDB itself rejects the resume
-				// token. Deleting it on generic errors would silently skip
-				// every event that occurred while the watcher was down.
+				// token: the token itself is unusable (9/50811) or the resume
+				// point is outside the oplog window (286). Deleting it on
+				// generic errors would silently skip every event that
+				// occurred while the watcher was down.
 				if isResumeTokenInvalid(err) {
 					log.Printf("Resume token for %s rejected by MongoDB, invalidating: %v", w.collectionName, err)
 					w.resumeToken = ""
