@@ -10,25 +10,45 @@ import (
 
 // FilterCondition is a single filter condition for image fields.
 type FilterCondition struct {
-	Prefix      *string `bson:"prefix,omitempty"       json:"prefix,omitempty"`
-	Suffix      *string `bson:"suffix,omitempty"       json:"suffix,omitempty"`
-	Exists      *bool   `bson:"exists,omitempty"       json:"exists,omitempty"`
-	Numeric     []any   `bson:"numeric,omitempty"      json:"numeric,omitempty"`
-	AnythingBut any     `bson:"anything-but,omitempty" json:"anything-but,omitempty"`
+	Exists             *bool `bson:"exists,omitempty"                json:"exists,omitempty"`
+	Equals             any   `bson:"equals,omitempty"                json:"equals,omitempty"`
+	NotEquals          any   `bson:"not_equals,omitempty"            json:"not_equals,omitempty"`
+	GreaterThan        any   `bson:"greater_than,omitempty"          json:"greater_than,omitempty"`
+	GreaterThanOrEqual any   `bson:"greater_than_or_equal,omitempty" json:"greater_than_or_equal,omitempty"`
+	LessThan           any   `bson:"less_than,omitempty"             json:"less_than,omitempty"`
+	LessThanOrEqual    any   `bson:"less_than_or_equal,omitempty"    json:"less_than_or_equal,omitempty"`
+	Contains           any   `bson:"contains,omitempty"              json:"contains,omitempty"`
+	BeginsWith         any   `bson:"begins_with,omitempty"           json:"begins_with,omitempty"`
+	EndsWith           any   `bson:"ends_with,omitempty"             json:"ends_with,omitempty"`
+	In                 []any `bson:"in,omitempty"                    json:"in,omitempty"`
+	NotIn              []any `bson:"not_in,omitempty"                json:"not_in,omitempty"`
 }
 
 // ImageFilter maps field names to a filter condition (AND across fields, AND within condition).
 type ImageFilter map[string]FilterCondition
 
-// FilterCriteria specifies optional filters for old_image and new_image.
-type FilterCriteria struct {
+// Filter is a declarative filter over an event's images, combined with AND.
+type Filter struct {
 	OldImage ImageFilter `bson:"old_image,omitempty" json:"old_image,omitempty"`
 	NewImage ImageFilter `bson:"new_image,omitempty" json:"new_image,omitempty"`
 }
 
-// MatchImage checks whether an image (old_image or new_image) matches the given filter.
-// Returns true if the filter is empty (no filter = pass everything).
-// All declared fields must match (AND), and all conditions within a field must match (AND).
+// Matches evaluates the filter against an event's two images.
+func (c *Filter) Matches(newImage, oldImage interface{}) bool {
+	if c == nil {
+		return true
+	}
+	if len(c.NewImage) > 0 && !MatchImage(newImage, c.NewImage) {
+		return false
+	}
+	if len(c.OldImage) > 0 && !MatchImage(oldImage, c.OldImage) {
+		return false
+	}
+	return true
+}
+
+// MatchImage checks whether a single image (old_image or new_image) matches
+// the given filter.
 func MatchImage(image interface{}, filter ImageFilter) bool {
 	if len(filter) == 0 {
 		return true
@@ -59,8 +79,28 @@ func toMap(image interface{}) (map[string]interface{}, bool) {
 }
 
 func matchField(img map[string]interface{}, field string, cond FilterCondition) bool {
-	val, exists := img[field]
+	val, exists := resolvePath(img, field)
 	return matchCondition(val, exists, cond)
+}
+
+// resolvePath reads a field value, supporting dotted nested paths such as "address.city".
+func resolvePath(img map[string]interface{}, path string) (interface{}, bool) {
+	if !strings.Contains(path, ".") {
+		val, ok := img[path]
+		return val, ok
+	}
+	var cur interface{} = img
+	for _, part := range strings.Split(path, ".") {
+		m, ok := toMap(cur)
+		if !ok {
+			return nil, false
+		}
+		cur, ok = m[part]
+		if !ok {
+			return nil, false
+		}
+	}
+	return cur, true
 }
 
 func matchCondition(val interface{}, exists bool, cond FilterCondition) bool {
@@ -73,16 +113,39 @@ func matchCondition(val interface{}, exists bool, cond FilterCondition) bool {
 		// Field doesn't exist — if Exists check passed (or wasn't set), no other condition can match
 		return cond.noValueConditionsOnly()
 	}
-	if cond.Prefix != nil && !strings.HasPrefix(fmt.Sprint(val), *cond.Prefix) {
+
+	// Every present operator must match (AND within field).
+	if cond.Equals != nil && !deepEqual(val, cond.Equals) {
 		return false
 	}
-	if cond.Suffix != nil && !strings.HasSuffix(fmt.Sprint(val), *cond.Suffix) {
+	if cond.NotEquals != nil && deepEqual(val, cond.NotEquals) {
 		return false
 	}
-	if cond.Numeric != nil && !matchNumeric(val, cond.Numeric) {
+	if cond.GreaterThan != nil && !matchNumericCompare(val, cond.GreaterThan, func(a, b float64) bool { return a > b }) {
 		return false
 	}
-	if cond.AnythingBut != nil && !matchAnythingBut(val, cond.AnythingBut) {
+	if cond.GreaterThanOrEqual != nil && !matchNumericCompare(val, cond.GreaterThanOrEqual, func(a, b float64) bool { return a >= b }) {
+		return false
+	}
+	if cond.LessThan != nil && !matchNumericCompare(val, cond.LessThan, func(a, b float64) bool { return a < b }) {
+		return false
+	}
+	if cond.LessThanOrEqual != nil && !matchNumericCompare(val, cond.LessThanOrEqual, func(a, b float64) bool { return a <= b }) {
+		return false
+	}
+	if cond.Contains != nil && !matchContains(val, cond.Contains) {
+		return false
+	}
+	if cond.BeginsWith != nil && !strings.HasPrefix(fmt.Sprint(val), fmt.Sprint(cond.BeginsWith)) {
+		return false
+	}
+	if cond.EndsWith != nil && !strings.HasSuffix(fmt.Sprint(val), fmt.Sprint(cond.EndsWith)) {
+		return false
+	}
+	if cond.In != nil && !matchIn(val, cond.In) {
+		return false
+	}
+	if cond.NotIn != nil && matchIn(val, cond.NotIn) {
 		return false
 	}
 	return true
@@ -90,48 +153,70 @@ func matchCondition(val interface{}, exists bool, cond FilterCondition) bool {
 
 // noValueConditionsOnly returns true when no value-dependent conditions are set.
 func (cond FilterCondition) noValueConditionsOnly() bool {
-	return cond.Prefix == nil && cond.Suffix == nil && cond.Numeric == nil && cond.AnythingBut == nil
+	return cond.Equals == nil &&
+		cond.NotEquals == nil &&
+		cond.GreaterThan == nil &&
+		cond.GreaterThanOrEqual == nil &&
+		cond.LessThan == nil &&
+		cond.LessThanOrEqual == nil &&
+		cond.Contains == nil &&
+		cond.BeginsWith == nil &&
+		cond.EndsWith == nil &&
+		cond.In == nil &&
+		cond.NotIn == nil
 }
 
-func matchNumeric(val interface{}, op []any) bool {
-	if len(op) < 2 {
-		return false
-	}
-	operator, ok := op[0].(string)
-	if !ok {
-		return false
-	}
+// matchNumericCompare applies a numeric comparison between val and operand.
+// Both must be numeric-convertible; otherwise it returns false.
+func matchNumericCompare(val, operand interface{}, cmp func(a, b float64) bool) bool {
 	a, aOK := toFloat64(val)
-	b, bOK := toFloat64(op[1])
+	b, bOK := toFloat64(operand)
 	if !aOK || !bOK {
 		return false
 	}
-	switch operator {
-	case ">":
-		return a > b
-	case "<":
-		return a < b
-	case ">=":
-		return a >= b
-	case "<=":
-		return a <= b
-	case "=":
-		return a == b
+	return cmp(a, b)
+}
+
+// deepEqual compares two values. Numbers are compared numerically across
+// int/float widths (via toFloat64); all other values use exact reflect.DeepEqual
+// semantics (so the string "5" does not equal the number 5).
+func deepEqual(a, b interface{}) bool {
+	af, aOK := toFloat64(a)
+	bf, bOK := toFloat64(b)
+	if aOK && bOK {
+		return af == bf
+	}
+	return reflect.DeepEqual(a, b)
+}
+
+// matchContains implements the contains operator:
+//   - string value → substring match (strings.Contains).
+//   - slice value at the field path → true when any element deep-equals the operand.
+//   - any other kind → false.
+func matchContains(val, operand interface{}) bool {
+	if s, ok := val.(string); ok {
+		sub, ok := operand.(string)
+		return ok && strings.Contains(s, sub)
+	}
+	rv := reflect.ValueOf(val)
+	if rv.Kind() == reflect.Slice {
+		for i := 0; i < rv.Len(); i++ {
+			if deepEqual(rv.Index(i).Interface(), operand) {
+				return true
+			}
+		}
 	}
 	return false
 }
 
-func matchAnythingBut(val interface{}, ref any) bool {
-	rv := reflect.ValueOf(ref)
-	if rv.Kind() == reflect.Slice {
-		for i := 0; i < rv.Len(); i++ {
-			if reflect.DeepEqual(val, rv.Index(i).Interface()) {
-				return false
-			}
+// matchIn reports whether any element of the operand array deep-equals val.
+func matchIn(val interface{}, operand []any) bool {
+	for _, item := range operand {
+		if deepEqual(val, item) {
+			return true
 		}
-		return true
 	}
-	return !reflect.DeepEqual(val, ref)
+	return false
 }
 
 func toFloat64(v interface{}) (float64, bool) {

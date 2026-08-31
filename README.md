@@ -134,7 +134,18 @@ curl -H "Authorization: Bearer $API_KEY" http://localhost:8080/api/collections
 
 ## Supported Sink Types
 
-Each sink type owns its own configuration, which lives in a `spec` object in the sink payload. The shared sink model only carries common metadata (`type`, `event_types`, `filter_criteria`).
+Each sink type owns its own configuration, which lives in a `spec` object in the sink payload. The shared sink model only carries common metadata (`type`, `event_types`, `filter`).
+
+### Filter Criteria Semantics
+
+`filter` is declarative: a sink **without** a `filter` receives **every event**; with a `filter`, an event is delivered only when **every declared criterion matches**.
+
+- A filter block you don't declare is ignored.
+- A declared filter block (e.g. `old_image`) whose image is **absent** evaluates to `false` — so an `old_image` filter never matches `INSERT` events or collections streaming with `old_image=false`, and a `new_image` filter never matches `REMOVE` events. This is intentional: a content predicate needs content to match.
+- Sink filters are independent of the collection's current configuration. Sink creation does **not** reject an `old_image` filter on a collection currently streaming with `old_image=false` — if you later re-enable the stream with `old_image=true`, the existing sink simply starts matching. Until then, unmatched events are silently (by design) not delivered to that sink.
+- The filter is a **flat, AND-only** predicate: an event is delivered only when *every* declared criterion matches. Complex boolean expressions (OR, etc.) are expressed by creating **multiple sinks** on the same destination.
+
+The full operator reference is in [`docs/filter.md`](docs/filter.md).
 
 ### HTTP
 

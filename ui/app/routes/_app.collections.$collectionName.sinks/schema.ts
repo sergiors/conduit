@@ -13,7 +13,7 @@ export const fieldFilterSchema = z.object({
   conditions: z.array(conditionSchema),
 });
 
-export const filterCriteriaSchema = z.object({
+export const filterSchema = z.object({
   old_image: z.array(fieldFilterSchema),
   new_image: z.array(fieldFilterSchema),
 });
@@ -26,7 +26,7 @@ export const sinkSchema = z
     event_types: z
       .array(z.string())
       .min(1, "At least one event type is required"),
-    filter_criteria: filterCriteriaSchema.optional(),
+    filter: filterSchema.optional(),
     event_bus_name: z.string().optional(),
     source: z.string().optional(),
     index_name: z.string().optional(),
@@ -73,7 +73,7 @@ export interface ImageFilter {
   [field: string]: FilterCondition;
 }
 
-export interface FilterCriteria {
+export interface Filter {
   old_image?: ImageFilter;
   new_image?: ImageFilter;
 }
@@ -83,7 +83,7 @@ export interface SinkConfig {
   endpoint?: string;
   bearer_token?: string;
   event_types?: string[];
-  filter_criteria?: FilterCriteria;
+  filter?: Filter;
   event_bus_name?: string;
   source?: string;
   index_name?: string;

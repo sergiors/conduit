@@ -16,14 +16,14 @@ var ValidEventTypes = []string{"INSERT", "MODIFY", "REMOVE"}
 // The CollectionID references the _id of the owning collection in
 // config.collections and is not exposed to API clients.
 type Sink struct {
-	ID             string                 `bson:"_id,omitempty" json:"id,omitempty"`
-	CollectionID   string                 `bson:"collection_id" json:"-"`
-	Type           Type                   `bson:"type" json:"type"`
-	Spec           map[string]interface{} `bson:"spec" json:"spec"`
-	EventTypes     []string               `bson:"event_types,omitempty" json:"event_types"`
-	FilterCriteria FilterCriteria         `bson:"filter_criteria,omitempty" json:"filter_criteria,omitempty"`
-	CreatedAt      time.Time              `bson:"created_at" json:"created_at"`
-	UpdatedAt      time.Time              `bson:"updated_at" json:"updated_at"`
+	ID           string                 `bson:"_id,omitempty" json:"id,omitempty"`
+	CollectionID string                 `bson:"collection_id" json:"-"`
+	Type         Type                   `bson:"type" json:"type"`
+	Spec         map[string]interface{} `bson:"spec" json:"spec"`
+	EventTypes   []string               `bson:"event_types,omitempty" json:"event_types"`
+	Filter       Filter                 `bson:"filter,omitempty" json:"filter,omitempty"`
+	CreatedAt    time.Time              `bson:"created_at" json:"created_at"`
+	UpdatedAt    time.Time              `bson:"updated_at" json:"updated_at"`
 }
 
 // ValidateEventTypes validates that all event types are valid.
@@ -46,7 +46,10 @@ func (s *Sink) ValidateEventTypes() error {
 	return nil
 }
 
-// Validate checks the common sink configuration required by every sink type.
+// Validate checks the common sink configuration required by every sink type:
+// a type, a spec, and valid event types. The filter needs no validation: it
+// is a flat, AND-only predicate over image blocks, so invalid filter states
+// are unrepresentable at the type level.
 func (s *Sink) Validate() error {
 	if s.Type == "" {
 		return NewValidationError("sink type is required")

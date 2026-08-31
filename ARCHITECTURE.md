@@ -84,11 +84,23 @@ Because `old_image` affects how the MongoDB change stream is opened, stream conf
 
 ## Sink
 
-A _sink_ is a destination for CDC events. Each sink belongs to exactly one collection and can filter by event type (`INSERT`, `MODIFY`, `REMOVE`) and by content of the `new_image` / `old_image` using prefix, suffix, numeric, existence, and anything-but conditions.
+A _sink_ is a destination for CDC events. Each sink belongs to exactly one collection and can filter by event type (`INSERT`, `MODIFY`, `REMOVE`) and by content of the `new_image` / `old_image` using the filter DSL: `equals`, `not_equals`, `greater_than`, `greater_than_or_equal`, `less_than`, `less_than_or_equal`, `contains`, `begins_with`, `ends_with`, `exists`, `in`, and `not_in`. See [`docs/filter.md`](docs/filter.md) for the full DSL reference.
 
-The shared `Sink` model carries only common metadata: `type`, an opaque `spec` payload, `event_types`, and `filter_criteria`. Type-specific settings (endpoint, region, host, etc.) live inside `spec` and are owned by the individual sink implementation. This keeps the shared model stable as new sink types are added.
+The shared `Sink` model carries only common metadata: `type`, an opaque `spec` payload, `event_types`, and `filter`. Type-specific settings (endpoint, region, host, etc.) live inside `spec` and are owned by the individual sink implementation. This keeps the shared model stable as new sink types are added.
 
 Sinks are persisted separately from collections in `config.sinks` so that a collection can have many sinks without bloating the collection document. The worker loads sinks when it starts or refreshes a watcher.
+
+### Filter Semantics
+
+`filter` is purely **declarative** — a set of conditions an event must satisfy to be delivered to that sink. Evaluation (`internal/collections.Filter`, applied in `dispatch.RuntimeSink.Send`; full reference in [`docs/filter.md`](docs/filter.md)):
+
+- **No filter block declared** (`old_image` or `new_image` absent from `filter`): that image is not inspected at all — the block is ignored.
+- **Empty filter block declared** (`"new_image": {}`): matches every event that has that image.
+- **Every declared criterion must match** (AND across fields and within a field's conditions). An event is delivered only if *all* declared criteria match.
+- **A declared filter block whose corresponding image is absent evaluates to `false`.** A `REMOVE` event has no `new_image`; an image the collection does not record (`old_image=false`) is always absent. This is the intended semantics: "match on the content of `old_image`" logically requires an `old_image` to exist — an absent image cannot satisfy a content predicate, the same way EventBridge patterns do not match missing fields.
+- **Flat, AND-only predicates.** Filters are flat AND-only predicates per image block: every declared criterion must match. Recursive logical groups (`and` / `or`) were implemented and subsequently **removed**; boolean composition is intentionally delegated to multiple sinks — a design choice of simplicity over expression power.
+
+Sink filters are **declarative and intentionally decoupled from the collection's current configuration**: creation does not reject an `old_image` filter when the collection's stream currently has `old_image=false`, nor `new_image` criteria that cannot match `REMOVE` events. Configuration is immutable per stream cycle, but it *can* change over the sink's lifetime (disable stream → re-enable with `old_image=true`), and a sink that already encodes its pre-image requirements is then correct without modification. Coupling sink definitions to the collection's current mode would turn a transient configuration state into a permanent restriction and break that forward compatibility. The consequence is deliberate: when the corresponding image is absent, every declared criterion fails and the event is silently not delivered — if an image is essential to the filter, also subscribe to the event types that carry it (`event_types`, plus `{"old_image": {"exists": true}}`-style predicates where appropriate) and/or enable `old_image` on the collection.
 
 ## Dispatcher
 
@@ -556,7 +568,7 @@ Stored in MongoDB as `config.sinks`.
 | `type`            | string                | Sink type: `http`, `eventbridge`, `meilisearch`.                        |
 | `spec`            | object                | Opaque, type-specific spec. Interpreted by the sink package.          |
 | `event_types`     | []string              | Subset of `INSERT`, `MODIFY`, `REMOVE`. Empty means all.                |
-| `filter_criteria` | object                | Per-image filters (`old_image`, `new_image`).                           |
+| `filter`          | object                | Per-image filters (`old_image`, `new_image`).                           |
 | `created_at`      | timestamp             | Creation time.                                                          |
 | `updated_at`      | timestamp             | Last mutation time.                                                     |
 

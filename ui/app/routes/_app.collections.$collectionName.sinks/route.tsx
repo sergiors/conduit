@@ -32,7 +32,7 @@ import {
   type Condition,
   type SinksForm,
   type FieldFilter,
-  type FilterCriteria,
+  type Filter,
 } from "./schema";
 export { clientAction } from "./action.client";
 export { clientLoader } from "./loader.client";
@@ -67,9 +67,9 @@ export default function Route({ params, loaderData }: Route.ComponentProps) {
 
 function formToAPICriteria(
   form: ReturnType<typeof apiToFormCriteria> | undefined,
-): FilterCriteria {
+): Filter {
   if (!form) return {};
-  const criteria: FilterCriteria = {};
+  const criteria: Filter = {};
   for (const image of ["old_image", "new_image"] as const) {
     const filters = form[image];
     if (!filters?.length) continue;
@@ -113,7 +113,7 @@ function formToAPICriteria(
   return criteria;
 }
 
-function apiToFormCriteria(criteria: FilterCriteria | undefined): {
+function apiToFormCriteria(criteria: Filter | undefined): {
   old_image: FieldFilter[];
   new_image: FieldFilter[];
 } {
@@ -162,20 +162,20 @@ function apiToFormCriteria(criteria: FilterCriteria | undefined): {
 
 // --- Filter Criteria Editor ---
 
-interface FilterCriteriaEditorProps {
+interface FilterEditorProps {
   imageType: "old_image" | "new_image";
   destIndex: number;
   control: ReturnType<typeof useForm<SinksForm>>["control"];
 }
 
-function FilterCriteriaEditor({
+function FilterEditor({
   imageType,
   destIndex,
   control,
-}: FilterCriteriaEditorProps) {
+}: FilterEditorProps) {
   const { fields, append, remove } = useFieldArray({
     control,
-    name: `sinks.${destIndex}.filter_criteria.${imageType}` as const,
+    name: `sinks.${destIndex}.filter.${imageType}` as const,
   });
 
   const addField = () => {
@@ -208,7 +208,7 @@ function FilterCriteriaEditor({
           <div className="flex items-center gap-2">
             <Controller
               name={
-                `sinks.${destIndex}.filter_criteria.${imageType}.${fieldIndex}.field` as const
+                `sinks.${destIndex}.filter.${imageType}.${fieldIndex}.field` as const
               }
               control={control}
               render={({ field: fieldProps }) => (
@@ -232,7 +232,7 @@ function FilterCriteriaEditor({
 
           <Controller
             name={
-              `sinks.${destIndex}.filter_criteria.${imageType}.${fieldIndex}.conditions` as const
+              `sinks.${destIndex}.filter.${imageType}.${fieldIndex}.conditions` as const
             }
             control={control}
             render={({ field: conditionsProps }) => {
@@ -261,7 +261,7 @@ function FilterCriteriaEditor({
                       {condition.type === "exists" ? (
                         <Controller
                           name={
-                            `sinks.${destIndex}.filter_criteria.${imageType}.${fieldIndex}.conditions.${conditionIndex}.value` as const
+                            `sinks.${destIndex}.filter.${imageType}.${fieldIndex}.conditions.${conditionIndex}.value` as const
                           }
                           control={control}
                           render={({ field }) => (
@@ -283,7 +283,7 @@ function FilterCriteriaEditor({
                         <>
                           <Controller
                             name={
-                              `sinks.${destIndex}.filter_criteria.${imageType}.${fieldIndex}.conditions.${conditionIndex}.numericOp` as const
+                              `sinks.${destIndex}.filter.${imageType}.${fieldIndex}.conditions.${conditionIndex}.numericOp` as const
                             }
                             control={control}
                             render={({ field }) => (
@@ -306,7 +306,7 @@ function FilterCriteriaEditor({
                           />
                           <Controller
                             name={
-                              `sinks.${destIndex}.filter_criteria.${imageType}.${fieldIndex}.conditions.${conditionIndex}.value` as const
+                              `sinks.${destIndex}.filter.${imageType}.${fieldIndex}.conditions.${conditionIndex}.value` as const
                             }
                             control={control}
                             render={({ field }) => (
@@ -322,7 +322,7 @@ function FilterCriteriaEditor({
                       ) : (
                         <Controller
                           name={
-                            `sinks.${destIndex}.filter_criteria.${imageType}.${fieldIndex}.conditions.${conditionIndex}.value` as const
+                            `sinks.${destIndex}.filter.${imageType}.${fieldIndex}.conditions.${conditionIndex}.value` as const
                           }
                           control={control}
                           render={({ field }) => (
@@ -418,7 +418,7 @@ function SinksForm({
             endpoint: d.endpoint ?? "",
             bearer_token: d.bearer_token ?? "",
             event_types: d.event_types ?? [],
-            filter_criteria: apiToFormCriteria(d.filter_criteria),
+            filter: apiToFormCriteria(d.filter),
             event_bus_name: d.event_bus_name ?? "",
             source: d.source ?? "",
             index_name: d.index_name ?? "",
@@ -429,7 +429,7 @@ function SinksForm({
               endpoint: "",
               bearer_token: "",
               event_types: [],
-              filter_criteria: { old_image: [], new_image: [] },
+              filter: { old_image: [], new_image: [] },
             },
           ],
     },
@@ -446,7 +446,7 @@ function SinksForm({
           endpoint: "",
           bearer_token: "",
           event_types: [],
-          filter_criteria: { old_image: [], new_image: [] },
+          filter: { old_image: [], new_image: [] },
         },
       ]);
       addedInitialRef.current = true;
@@ -461,7 +461,7 @@ function SinksForm({
       endpoint: dest.endpoint,
       bearer_token: dest.bearer_token,
       event_types: dest.event_types,
-      filter_criteria: formToAPICriteria(dest.filter_criteria),
+      filter: formToAPICriteria(dest.filter),
       event_bus_name: dest.event_bus_name,
       source: dest.source,
       index_name: dest.index_name,
@@ -498,7 +498,7 @@ function SinksForm({
         endpoint: "",
         bearer_token: "",
         event_types: [],
-        filter_criteria: { old_image: [], new_image: [] },
+        filter: { old_image: [], new_image: [] },
         event_bus_name: "",
         source: "",
         index_name: "",
@@ -694,13 +694,13 @@ function SinksForm({
                 <div className="space-y-2">
                   <div className="text-sm font-medium">Filter Criteria</div>
 
-                  <FilterCriteriaEditor
+                  <FilterEditor
                     imageType="old_image"
                     destIndex={index}
                     control={control}
                   />
 
-                  <FilterCriteriaEditor
+                  <FilterEditor
                     imageType="new_image"
                     destIndex={index}
                     control={control}

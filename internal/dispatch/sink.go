@@ -10,7 +10,7 @@ import (
 
 // RuntimeSink is the active, in-memory representation of a persisted sink.
 // It glues the persisted configuration to a concrete Transport and is
-// responsible for common sink behavior: event type filtering, filter criteria
+// responsible for common sink behavior: event type filtering, filter
 // evaluation, and stable identity. Transports receive only events that
 // should actually be delivered.
 type RuntimeSink struct {
@@ -50,9 +50,8 @@ func (rs *RuntimeSink) Send(ctx context.Context, record streams.StreamRecord) er
 	if !rs.eventTypeAllowed(record.RecordType) {
 		return nil
 	}
-	newMatch := collections.MatchImage(record.NewImage, rs.FilterCriteria.NewImage)
-	oldMatch := collections.MatchImage(record.OldImage, rs.FilterCriteria.OldImage)
-	if !newMatch || !oldMatch {
+	match := rs.Filter.Matches(record.NewImage, record.OldImage)
+	if !match {
 		return nil
 	}
 	return rs.Transport.Send(ctx, record)

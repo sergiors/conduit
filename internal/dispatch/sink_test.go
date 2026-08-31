@@ -44,15 +44,15 @@ func TestRuntimeSinkEventTypeFiltering(t *testing.T) {
 	})
 }
 
-func TestRuntimeSinkFilterCriteria(t *testing.T) {
+func TestRuntimeSinkFilter(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("record matching filter is delivered", func(t *testing.T) {
 		transport := &MockTransport{}
 		sink := NewRuntimeSink(collections.Sink{
-			FilterCriteria: collections.FilterCriteria{
+			Filter: collections.Filter{
 				NewImage: collections.ImageFilter{
-					"status": collections.FilterCondition{Prefix: strPtr("active")},
+					"status": collections.FilterCondition{BeginsWith: "active"},
 				},
 			},
 		}, transport)
@@ -68,9 +68,9 @@ func TestRuntimeSinkFilterCriteria(t *testing.T) {
 	t.Run("record not matching filter is skipped", func(t *testing.T) {
 		transport := &MockTransport{}
 		sink := NewRuntimeSink(collections.Sink{
-			FilterCriteria: collections.FilterCriteria{
+			Filter: collections.Filter{
 				NewImage: collections.ImageFilter{
-					"status": collections.FilterCondition{Prefix: strPtr("active")},
+					"status": collections.FilterCondition{BeginsWith: "active"},
 				},
 			},
 		}, transport)
@@ -78,6 +78,71 @@ func TestRuntimeSinkFilterCriteria(t *testing.T) {
 		err := sink.Send(ctx, streams.StreamRecord{
 			RecordType: streams.InsertRecord,
 			NewImage:   bson.M{"status": "inactive_user"},
+		})
+		assert.NoError(t, err)
+		assert.False(t, transport.sent)
+	})
+}
+
+func TestRuntimeSinkFilterFlat(t *testing.T) {
+	ctx := context.Background()
+	// A single flat AND-only filter: new_image.tenant acme AND new_image.status
+	// ACTIVE AND old_image.deleted false. Delivered only when every declared
+	// predicate matches.
+	sink := NewRuntimeSink(collections.Sink{
+		Filter: collections.Filter{
+			NewImage: collections.ImageFilter{
+				"tenant": collections.FilterCondition{Equals: "acme"},
+				"status": collections.FilterCondition{Equals: "ACTIVE"},
+			},
+			OldImage: collections.ImageFilter{
+				"deleted": collections.FilterCondition{Equals: false},
+			},
+		},
+	}, &MockTransport{})
+
+	t.Run("all declared predicates match is delivered", func(t *testing.T) {
+		transport := &MockTransport{}
+		sink.Transport = transport
+		err := sink.Send(ctx, streams.StreamRecord{
+			RecordType: streams.ModifyRecord,
+			NewImage:   bson.M{"tenant": "acme", "status": "ACTIVE"},
+			OldImage:   bson.M{"deleted": false},
+		})
+		assert.NoError(t, err)
+		assert.True(t, transport.sent)
+	})
+
+	t.Run("new_image.status PENDING is skipped", func(t *testing.T) {
+		transport := &MockTransport{}
+		sink.Transport = transport
+		err := sink.Send(ctx, streams.StreamRecord{
+			RecordType: streams.ModifyRecord,
+			NewImage:   bson.M{"tenant": "acme", "status": "PENDING"},
+			OldImage:   bson.M{"deleted": false},
+		})
+		assert.NoError(t, err)
+		assert.False(t, transport.sent)
+	})
+
+	t.Run("INSERT with declared old_image block is skipped", func(t *testing.T) {
+		transport := &MockTransport{}
+		sink.Transport = transport
+		err := sink.Send(ctx, streams.StreamRecord{
+			RecordType: streams.InsertRecord,
+			NewImage:   bson.M{"tenant": "acme", "status": "ACTIVE"},
+		})
+		assert.NoError(t, err)
+		assert.False(t, transport.sent)
+	})
+
+	t.Run("new_image.tenant mismatch is skipped", func(t *testing.T) {
+		transport := &MockTransport{}
+		sink.Transport = transport
+		err := sink.Send(ctx, streams.StreamRecord{
+			RecordType: streams.ModifyRecord,
+			NewImage:   bson.M{"tenant": "other", "status": "ACTIVE"},
+			OldImage:   bson.M{"deleted": false},
 		})
 		assert.NoError(t, err)
 		assert.False(t, transport.sent)
@@ -93,5 +158,3 @@ func TestRuntimeSinkKey(t *testing.T) {
 
 	assert.Equal(t, "507f1f77bcf86cd799439011", sink.Key())
 }
-
-func strPtr(s string) *string { return &s }

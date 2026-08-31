@@ -3,7 +3,7 @@
 // Components:
 //   - Dispatcher: Central event router with per-collection runtime-sink registration
 //   - RuntimeSink: Glue between a persisted sink and a concrete Transport; owns
-//     event-type filtering, filter-criteria evaluation and sink identity
+//     event-type filtering, filter evaluation and sink identity
 //   - Transport: Runtime interface for delivering stream events; knows only how
 //     to deliver, not when or to which identity
 //   - TransportBuilder: Factory function for creating transports from their

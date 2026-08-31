@@ -10,7 +10,7 @@ export interface ImageFilter {
   [field: string]: FilterCondition;
 }
 
-export interface FilterCriteria {
+export interface Filter {
   old_image?: ImageFilter;
   new_image?: ImageFilter;
 }
@@ -20,7 +20,7 @@ export interface SinkConfig {
   endpoint?: string;
   bearer_token?: string;
   event_types?: string[];
-  filter_criteria?: FilterCriteria;
+  filter?: Filter;
   event_bus_name?: string;
   source?: string;
   index_name?: string;
