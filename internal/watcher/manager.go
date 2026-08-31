@@ -3,6 +3,7 @@ package watcher
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"sync"
@@ -23,7 +24,7 @@ type Manager struct {
 	mongoClient        *mongo.Client
 	database           string
 	collectionSettings *collections.Settings
-	redisClient        *redisclient.Client
+	redisClient        RedisClient
 	dispatcher         Dispatcher
 	retryProcessor     *retry.Processor
 	watchers           map[string]*Watcher
@@ -39,6 +40,35 @@ type Manager struct {
 	wg        sync.WaitGroup
 	stopped   bool
 	startMu   sync.Mutex
+}
+
+// ErrEventUnsettled is returned by handleEvent when a change event was neither
+// dispatched to the sinks nor persisted into the retry queue. In that state the
+// event is lost if the watcher acknowledges it, so the caller must NOT advance
+// the resume token: the change stream must replay the event on the next
+// session.
+//
+// Settlement contract (Manager <-> Watcher):
+//   - handleEvent returns nil only when the event is settled, i.e. either it
+//     was dispatched to all sinks, or it was successfully enqueued for retry.
+//   - handleEvent returns a non-nil error (wrapping ErrEventUnsettled when the
+//     root cause is a persistence failure) only when the event is NOT settled.
+//
+// The watcher may therefore advance the resume token if and only if the handler
+// it invoked returned nil.
+var ErrEventUnsettled = errors.New("event neither dispatched nor persisted; do not acknowledge")
+
+// RedisClient is the subset of the Redis client used by the watcher and the
+// manager. It is an interface (rather than the concrete *redis.Client) so tests
+// can inject a fake; the production *redis.Client satisfies it.
+type RedisClient interface {
+	GetResumeToken(ctx context.Context, collectionName string) (string, error)
+	SetResumeToken(ctx context.Context, collectionName, token string) error
+	DeleteResumeToken(ctx context.Context, collectionName string) error
+	IsProcessed(ctx context.Context, id string) (bool, error)
+	MarkProcessed(ctx context.Context, id string, ttl time.Duration) error
+	EnqueueRetry(ctx context.Context, event redisclient.RetryEvent) error
+	SubscribeConfigChanges(ctx context.Context) (*redis.PubSub, error)
 }
 
 // Dispatcher interface for decoupling
@@ -64,7 +94,7 @@ func NewManager(
 	mongoClient *mongo.Client,
 	database string,
 	collectionSettings *collections.Settings,
-	redisClient *redisclient.Client,
+	redisClient RedisClient,
 	dispatcher Dispatcher,
 	retryProcessor *retry.Processor,
 	cfg Config,
@@ -315,7 +345,13 @@ func (m *Manager) restartWatcher(ctx context.Context, collection collections.Col
 	return m.startWatcher(ctx, collection)
 }
 
-// handleEvent processes an event with idempotency and retry logic
+// handleEvent processes an event with idempotency and retry logic.
+//
+// Settlement contract: it returns nil only when the event is settled (either
+// dispatched to all sinks, or successfully enqueued for retry). Any non-nil
+// error (which wraps ErrEventUnsettled when the event could not be persisted)
+// means the event is NOT settled, so the watcher must not advance the resume
+// token and the change stream must replay the event on the next session.
 func (m *Manager) handleEvent(ctx context.Context, collectionName string, record streams.StreamRecord) error {
 	// The event ID is derived deterministically from the MongoDB change event
 	// (resume token / clusterTime + documentKey) by the watcher, so the same
@@ -332,6 +368,8 @@ func (m *Manager) handleEvent(ctx context.Context, collectionName string, record
 		// Continue processing - better duplicate than lost
 	}
 	if processed {
+		// The event was dispatched (and marked processed) in a previous
+		// attempt, so it is settled: acknowledge it.
 		log.Printf("Event %s already processed (idempotent skip)", eventID)
 		return nil
 	}
@@ -339,8 +377,12 @@ func (m *Manager) handleEvent(ctx context.Context, collectionName string, record
 	// Dispatch to sinks
 	if err := m.dispatcher.Dispatch(ctx, collectionName, record); err != nil {
 		log.Printf("Dispatch failed for %s: %v", eventID, err)
-		// Queue for retry
-		return m.queueRetry(ctx, collectionName, record, eventID)
+		// The event has NOT been delivered. It is settled only if the retry
+		// enqueue persists it; if the enqueue fails the event is unsettled.
+		if enqErr := m.queueRetry(ctx, collectionName, record, eventID); enqErr != nil {
+			return fmt.Errorf("%w: dispatch %v; enqueue retry: %w", ErrEventUnsettled, err, enqErr)
+		}
+		return nil
 	}
 
 	// Mark as processed
@@ -358,7 +400,13 @@ func (m *Manager) handleEvent(ctx context.Context, collectionName string, record
 	return nil
 }
 
-// queueRetry adds failed event to retry queue with exponential backoff
+// queueRetry adds a failed event to the retry queue with exponential backoff.
+//
+// Settlement contract: it returns nil only when the event was durably enqueued
+// (persisted for a later retry attempt), in which case the event is settled and
+// the caller may acknowledge it. Any non-nil error means the event is NOT
+// persisted anywhere and must be replayed: the caller must not advance the
+// resume token.
 func (m *Manager) queueRetry(ctx context.Context, collectionName string, record streams.StreamRecord, eventID string) error {
 	retryID := fmt.Sprintf("%s:%s", collectionName, eventID)
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -179,16 +180,36 @@ func (c *Client) DequeueRetry(ctx context.Context, collectionName string, limit 
 		return nil, fmt.Errorf("dequeue retry: %w", err)
 	}
 
+	events, _ := parseRetryMembers(members)
+	return events, nil
+}
+
+// parseRetryMembers unmarshals raw sorted-set members into RetryEvents,
+// skipping (and logging) any member that fails to unmarshal. A single corrupt
+// or legacy member must not permanently block the queue for the collection, so
+// corrupt members are dropped and the valid ones returned. The returned int is
+// the number of members skipped. Only marshalling errors are transport
+// errors; parse failures here are data problems and are never fatal to the
+// batch.
+//
+// Note: a member that IS valid JSON but semantically wrong (e.g. missing
+// CollectionName) is deliberately NOT filtered here. Such events are returned
+// to the caller, which re-parses the record and removes members it cannot
+// re-dispatch (see retry.Processor.processRetryEvent's parse-failure branch),
+// so data problems are handled in one place.
+func parseRetryMembers(members []string) ([]RetryEvent, int) {
 	events := make([]RetryEvent, 0, len(members))
+	skipped := 0
 	for _, member := range members {
 		var event RetryEvent
 		if err := json.Unmarshal([]byte(member), &event); err != nil {
-			return nil, fmt.Errorf("unmarshal retry event: %w", err)
+			log.Printf("skipping unparseable retry event member: %v", err)
+			skipped++
+			continue
 		}
 		events = append(events, event)
 	}
-
-	return events, nil
+	return events, skipped
 }
 
 // RemoveRetryEvent removes a processed event from the retry queue

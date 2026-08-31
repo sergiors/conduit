@@ -13,9 +13,21 @@ import (
 	"github.com/sergiors/conduit/internal/streams"
 )
 
+// Store is the queue-storage facade the Processor needs. The concrete
+// *redis.Client satisfies it implicitly; tests inject a fake to exercise the
+// failure paths.
+type Store interface {
+	DequeueRetry(ctx context.Context, collectionName string, limit int64) ([]redis.RetryEvent, error)
+	EnqueueRetry(ctx context.Context, event redis.RetryEvent) error
+	RemoveRetryEvent(ctx context.Context, collectionName string, event redis.RetryEvent) error
+	SendToDLQ(ctx context.Context, collectionName string, event interface{}) error
+	GetRetryQueueLength(ctx context.Context, collectionName string) (int64, error)
+	GetDLQLength(ctx context.Context, collectionName string) (int64, error)
+}
+
 // Processor handles retry queue processing with exponential backoff
 type Processor struct {
-	redisClient *redis.Client
+	store       Store
 	dispatcher  *dispatch.Dispatcher
 	interval    time.Duration
 	maxRetries  int
@@ -52,12 +64,12 @@ func DefaultConfig() Config {
 
 // NewProcessor creates a new retry processor
 func NewProcessor(
-	redisClient *redis.Client,
+	store Store,
 	dispatcher *dispatch.Dispatcher,
 	cfg Config,
 ) *Processor {
 	return &Processor{
-		redisClient: redisClient,
+		store:       store,
 		dispatcher:  dispatcher,
 		interval:    cfg.Interval,
 		maxRetries:  cfg.MaxRetries,
@@ -189,7 +201,7 @@ func (p *Processor) ProcessCollectionQueue(ctx context.Context, collectionName s
 
 func (p *Processor) processCollectionQueue(ctx context.Context, collectionName string) {
 	// Get events ready for retry
-	events, err := p.redisClient.DequeueRetry(ctx, collectionName, 10)
+	events, err := p.store.DequeueRetry(ctx, collectionName, 10)
 	if err != nil {
 		log.Printf("Failed to dequeue retry events for %s: %v", collectionName, err)
 		return
@@ -211,16 +223,26 @@ func (p *Processor) processRetryEvent(ctx context.Context, collectionName string
 	// Check if max retries exceeded
 	if event.RetryCount >= event.MaxRetries {
 		log.Printf("Event exceeded max retries (%d), sending to DLQ: %s", event.MaxRetries, collectionName)
-		if p.redisClient != nil {
-			if err := p.redisClient.SendToDLQ(bkctx, collectionName, event.EventData); err != nil {
-				log.Printf("Failed to send to DLQ: %v", err)
-			}
-			// Remove from retry queue after sending to DLQ
-			if err := p.redisClient.RemoveRetryEvent(bkctx, collectionName, event); err != nil {
-				log.Printf("Failed to remove event from retry queue: %v", err)
-			}
-		} else {
-			log.Printf("DLQ not available (nil redis client), event lost: %s", collectionName)
+		if p.store == nil {
+			log.Printf("DLQ not available (nil store), event retained in queue: %s", collectionName)
+			return
+		}
+		// Enqueue-first style ordering: only remove the event after a
+		// successful DLQ push. If SendToDLQ fails, the event stays queued and
+		// is retried next tick; the max-retries branch will attempt the DLQ
+		// push again. This is safe because the DLQ push is at-least-once
+		// (a stale duplicate in the DLQ is acceptable; losing the event is not).
+		if err := p.store.SendToDLQ(bkctx, collectionName, event.EventData); err != nil {
+			log.Printf("Failed to send to DLQ: %v", err)
+			return
+		}
+		// Remove from retry queue only after a successful DLQ push. If the
+		// removal itself fails, a stale duplicate remains in the retry queue;
+		// that is intentional under at-least-once semantics, since the event
+		// is already durably present in the DLQ and a duplicate is preferable
+		// to a loss.
+		if err := p.store.RemoveRetryEvent(bkctx, collectionName, event); err != nil {
+			log.Printf("Failed to remove event from retry queue: %v", err)
 		}
 		return
 	}
@@ -230,8 +252,8 @@ func (p *Processor) processRetryEvent(ctx context.Context, collectionName string
 	if err != nil {
 		log.Printf("Failed to parse stream record from retry queue: %v", err)
 		// Remove invalid event from queue
-		if p.redisClient != nil {
-			if err := p.redisClient.RemoveRetryEvent(bkctx, collectionName, event); err != nil {
+		if p.store != nil {
+			if err := p.store.RemoveRetryEvent(bkctx, collectionName, event); err != nil {
 				log.Printf("Failed to remove invalid event from retry queue: %v", err)
 			}
 		}
@@ -241,24 +263,34 @@ func (p *Processor) processRetryEvent(ctx context.Context, collectionName string
 	if err := p.dispatcher.Dispatch(ctx, collectionName, *record); err != nil {
 		log.Printf("Retry %d/%d failed for %s: %v", event.RetryCount+1, event.MaxRetries, collectionName, err)
 
-		// Re-queue with exponential backoff - remove old, add new
-		if p.redisClient != nil {
-			if err := p.redisClient.RemoveRetryEvent(bkctx, collectionName, event); err != nil {
-				log.Printf("Failed to remove old retry event: %v", err)
-			}
-			event.RetryCount++
-			event.NextRetryAt = p.calculateNextRetry(event.RetryCount)
-			if err := p.redisClient.EnqueueRetry(bkctx, event); err != nil {
-				log.Printf("Failed to re-queue retry event: %v", err)
-			}
+		if p.store == nil {
+			return
+		}
+
+		// Re-queue with exponential backoff. Enqueue the UPDATED event first
+		// (RetryCount+1, new NextRetryAt); only after a successful enqueue do we
+		// remove the old member. If enqueueing the updated event fails, the old
+		// member is left in place and retried next tick -- doing it the other way
+		// around (remove first) would lose the event if the enqueue failed. If
+		// the enqueue succeeds but the remove fails, a stale duplicate remains;
+		// a duplicate is acceptable under at-least-once, but a loss is not.
+		original := event
+		event.RetryCount++
+		event.NextRetryAt = p.calculateNextRetry(event.RetryCount)
+		if err := p.store.EnqueueRetry(bkctx, event); err != nil {
+			log.Printf("Failed to re-queue retry event: %v", err)
+			return
+		}
+		if err := p.store.RemoveRetryEvent(bkctx, collectionName, original); err != nil {
+			log.Printf("Failed to remove old retry event: %v", err)
 		}
 		return
 	}
 
 	// Success - event processed, remove from retry queue
 	log.Printf("Retry succeeded for %s after %d attempts", collectionName, event.RetryCount+1)
-	if p.redisClient != nil {
-		if err := p.redisClient.RemoveRetryEvent(bkctx, collectionName, event); err != nil {
+	if p.store != nil {
+		if err := p.store.RemoveRetryEvent(bkctx, collectionName, event); err != nil {
 			log.Printf("Failed to remove event from retry queue: %v", err)
 		}
 	}
@@ -279,16 +311,16 @@ func (p *Processor) calculateNextRetry(retryCount int) time.Time {
 
 // GetRetryQueueLength returns the total retry queue length for a collection
 func (p *Processor) GetRetryQueueLength(ctx context.Context, collectionName string) (int64, error) {
-	if p.redisClient == nil {
+	if p.store == nil {
 		return 0, nil
 	}
-	return p.redisClient.GetRetryQueueLength(ctx, collectionName)
+	return p.store.GetRetryQueueLength(ctx, collectionName)
 }
 
 // GetDLQLength returns the DLQ length for a collection
 func (p *Processor) GetDLQLength(ctx context.Context, collectionName string) (int64, error) {
-	if p.redisClient == nil {
+	if p.store == nil {
 		return 0, nil
 	}
-	return p.redisClient.GetDLQLength(ctx, collectionName)
+	return p.store.GetDLQLength(ctx, collectionName)
 }

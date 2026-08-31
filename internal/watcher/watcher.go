@@ -13,7 +13,6 @@ import (
 	"time"
 
 	recoverpkg "github.com/sergiors/conduit/internal/recover"
-	"github.com/sergiors/conduit/internal/redis"
 	"github.com/sergiors/conduit/internal/streams"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -72,7 +71,7 @@ type Watcher struct {
 	collectionName string
 	oldImage       bool
 	resumeToken    string
-	redisClient    *redis.Client
+	redisClient    RedisClient
 
 	// Runtime state
 	ctx       context.Context
@@ -92,7 +91,7 @@ func NewWatcher(
 	collectionName string,
 	oldImage bool,
 	resumeToken string,
-	redisClient *redis.Client,
+	redisClient RedisClient,
 ) *Watcher {
 	return &Watcher{
 		mongoClient:    mongoClient,
@@ -107,7 +106,17 @@ func NewWatcher(
 	}
 }
 
-// Start begins watching for changes
+// Start begins watching for changes.
+//
+// Settlement contract for handler: it is invoked once per change event and
+// must return nil only when the event is settled — either successfully
+// dispatched to the sinks or durably persisted into the retry queue. When it
+// returns a non-nil error (e.g. the event was neither delivered nor queued,
+// or a downstream panic was converted to an error), the watcher treats the
+// event as unsettled: it does NOT advance the resume token and, after a 5s
+// backoff, reopens the change stream from the last settled position so the
+// unsettled event is replayed. Returning nil guarantees the event will not be
+// re-delivered; returning an error guarantees it will be.
 func (w *Watcher) Start(ctx context.Context, handler func(streams.StreamRecord) error) error {
 	if w.isRunning.Load() {
 		return fmt.Errorf("watcher already running")
@@ -278,36 +287,13 @@ func (w *Watcher) watchOnce(handler func(streams.StreamRecord) error) error {
 			continue
 		}
 
-		// Call handler
-		if err := w.invokeHandler(handler, record); err != nil {
-			w.recordError(fmt.Errorf("handle event: %w", err))
-			// Don't return here - let retry logic handle it
+		// Process the event. processEvent advances the resume token only when
+		// the event is settled; otherwise it leaves the token untouched and
+		// returns an error so watchLoop backs off and reopens the stream from
+		// the last settled position, replaying the unsettled event.
+		if err := w.processEvent(handler, record, cursor.ResumeToken()); err != nil {
+			return err
 		}
-
-		// Advance the resume token only after the event was handed off
-		// successfully. The in-memory token advances first so an in-memory
-		// restart never replays the event; the Redis copy is updated
-		// best-effort so a process restart resumes from here too.
-		//
-		// The Redis write uses a detached bounded context so a shutdown that
-		// cancels w.ctx mid-event cannot drop an already-earned token advance.
-		if cursor.ResumeToken() != nil {
-			tokenData, err := bson.Marshal(cursor.ResumeToken())
-			if err == nil {
-				w.resumeToken = string(tokenData)
-				bkctx, bkCancel := context.WithTimeout(context.WithoutCancel(w.ctx), 5*time.Second)
-				err := w.redisClient.SetResumeToken(bkctx, w.collectionName, w.resumeToken)
-				bkCancel()
-				if err != nil {
-					log.Printf("Failed to save resume token: %v", err)
-				}
-			}
-		}
-
-		// Update stats
-		w.mu.Lock()
-		w.stats.EventsProcessed++
-		w.mu.Unlock()
 	}
 
 	if err := cursor.Err(); err != nil {
@@ -320,18 +306,67 @@ func (w *Watcher) watchOnce(handler func(streams.StreamRecord) error) error {
 	return nil
 }
 
+// processEvent runs a single change event through the handler and, if and only
+// if the event is settled, advances the resume token.
+//
+// Settlement contract: the handler returns nil only when the event is settled
+// — either delivered to the sinks or durably queued for retry (see Start's doc
+// comment and ErrEventUnsettled). When the handler returns an error, the event
+// is unsettled: the in-memory resumeToken and the Redis copy are left
+// untouched, and processEvent returns an error so watchOnce exits and watchLoop
+// backs off 5s then reopens the stream from the last settled position,
+// replaying this event on the next session.
+//
+// The resumed position passed in (the cursor's current resume token) is
+// persisted best-effort with a detached bounded context so a shutdown that
+// cancels w.ctx mid-event cannot drop an already-earned token advance.
+func (w *Watcher) processEvent(handler func(streams.StreamRecord) error, record streams.StreamRecord, token bson.Raw) error {
+	// Call handler. Any returned error means the event was neither delivered
+	// nor persisted (a dispatch-then-enqueue failure surfacing as
+	// ErrEventUnsettled, a handler-internal redis failure, or a panic
+	// converted to an error by invokeHandler). In that case the resume token
+	// must NOT advance so the change stream replays the event.
+	if err := w.invokeHandler(handler, record); err != nil {
+		w.recordError(fmt.Errorf("handle event (event %s in %s not settled): %w", record.EventID, w.collectionName, err))
+		return fmt.Errorf("handle event: %w", err)
+	}
+
+	// Event is settled. Advance the resume token: the in-memory token first so
+	// an in-memory restart never replays the event; the Redis copy is updated
+	// best-effort so a process restart resumes from here too.
+	if token != nil {
+		tokenData, err := bson.Marshal(token)
+		if err == nil {
+			w.resumeToken = string(tokenData)
+			bkctx, bkCancel := context.WithTimeout(context.WithoutCancel(w.ctx), 5*time.Second)
+			err := w.redisClient.SetResumeToken(bkctx, w.collectionName, w.resumeToken)
+			bkCancel()
+			if err != nil {
+				log.Printf("Failed to save resume token: %v", err)
+			}
+		}
+	}
+
+	// Update stats: EventsProcessed counts settled events only, so it reflects
+	// events that were delivered or durably queued for retry.
+	w.mu.Lock()
+	w.stats.EventsProcessed++
+	w.mu.Unlock()
+
+	return nil
+}
+
 // invokeHandler calls the event handler, converting a panic inside it into a
 // returned error. A panicking handler (e.g. a nil field deref or a marshal
 // panic deep in the dispatch path) must not kill the watch loop; the event is
-// skipped and left undelivered, and the error flows through the normal
-// recordError path. The resume-token semantics are unchanged: the token still
-// advances after the handler call regardless of the returned error, exactly as
-// before, because the retry queue covers the failure.
+// left undelivered, so it is unsettled and the resume token must not advance.
+// Per the settlement contract in Start/doc.go, any returned error here —
+// including panic-converted ones — means the event is unsettled.
 func (w *Watcher) invokeHandler(handler func(streams.StreamRecord) error, record streams.StreamRecord) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("handler panic: %v", r)
-			log.Printf("Watcher %s: handler panic (event skipped, event remains undelivered): %v\n%s", w.collectionName, r, debug.Stack())
+			log.Printf("Watcher %s: handler panic (event unsettled, event remains undelivered): %v\n%s", w.collectionName, r, debug.Stack())
 		}
 	}()
 	return handler(record)

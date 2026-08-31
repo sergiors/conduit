@@ -2,6 +2,7 @@ package retry
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/sergiors/conduit/internal/redis"
 	"github.com/sergiors/conduit/internal/streams"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"
 )
 
@@ -213,4 +215,259 @@ type successTransport struct{}
 func (s *successTransport) Close() error { return nil }
 func (s *successTransport) Send(ctx context.Context, record streams.StreamRecord) error {
 	return nil
+}
+
+// failingTransport is a mock transport that always fails dispatch.
+type failingTransport struct{}
+
+func (s *failingTransport) Close() error { return nil }
+func (s *failingTransport) Send(ctx context.Context, record streams.StreamRecord) error {
+	return assert.AnError
+}
+
+// retryEventKey returns a canonical string for a retry event (its queue member
+// JSON), used to detect whether a member was removed.
+func retryEventKey(event redis.RetryEvent) string {
+	data, _ := json.Marshal(event)
+	return string(data)
+}
+
+// fakeStore is a map-backed Store used to exercise the retry processor's
+// failure and ordering semantics without a live Redis.
+type fakeStore struct {
+	queue map[string][]redis.RetryEvent
+
+	failEnqueue   bool
+	failRemove    bool
+	failSendToDLQ bool
+
+	enqueueCalls int
+	removeCalls  int
+	dlqCalls     int
+	dlqByCol     map[string][][]byte
+}
+
+func newFakeStore() *fakeStore {
+	return &fakeStore{
+		queue:    make(map[string][]redis.RetryEvent),
+		dlqByCol: make(map[string][][]byte),
+	}
+}
+
+func (f *fakeStore) DequeueRetry(ctx context.Context, collectionName string, limit int64) ([]redis.RetryEvent, error) {
+	events := f.queue[collectionName]
+	out := make([]redis.RetryEvent, 0, len(events))
+	for _, e := range events {
+		if e.NextRetryAt.UnixNano() <= time.Now().UnixNano() {
+			out = append(out, e)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeStore) EnqueueRetry(ctx context.Context, event redis.RetryEvent) error {
+	f.enqueueCalls++
+	if f.failEnqueue {
+		return assert.AnError
+	}
+	f.queue[event.CollectionName] = append(f.queue[event.CollectionName], event)
+	return nil
+}
+
+func (f *fakeStore) RemoveRetryEvent(ctx context.Context, collectionName string, event redis.RetryEvent) error {
+	f.removeCalls++
+	if f.failRemove {
+		return assert.AnError
+	}
+	key := retryEventKey(event)
+	q := f.queue[collectionName]
+	for i, e := range q {
+		if retryEventKey(e) == key {
+			f.queue[collectionName] = append(q[:i], q[i+1:]...)
+			return nil
+		}
+	}
+	return nil
+}
+
+func (f *fakeStore) SendToDLQ(ctx context.Context, collectionName string, event interface{}) error {
+	f.dlqCalls++
+	if f.failSendToDLQ {
+		return assert.AnError
+	}
+	data, _ := json.Marshal(event)
+	f.dlqByCol[collectionName] = append(f.dlqByCol[collectionName], data)
+	return nil
+}
+
+func (f *fakeStore) GetRetryQueueLength(ctx context.Context, collectionName string) (int64, error) {
+	return int64(len(f.queue[collectionName])), nil
+}
+
+func (f *fakeStore) GetDLQLength(ctx context.Context, collectionName string) (int64, error) {
+	return int64(len(f.dlqByCol[collectionName])), nil
+}
+
+func (f *fakeStore) queuedMembers(collectionName string) []string {
+	var members []string
+	for _, e := range f.queue[collectionName] {
+		members = append(members, retryEventKey(e))
+	}
+	return members
+}
+
+func TestProcessRetryEventDispatchFailure(t *testing.T) {
+	newDispatcher := func() *dispatch.Dispatcher {
+		d := dispatch.NewDispatcher()
+		d.Register("users", dispatch.NewRuntimeSink(collections.Sink{}, &failingTransport{}))
+		return d
+	}
+
+	makeEvent := func(retryCount, maxRetries int, next time.Time) redis.RetryEvent {
+		eventData, err := bson.MarshalExtJSON(streams.StreamRecord{
+			TableName:  "users",
+			RecordType: streams.InsertRecord,
+			NewImage:   bson.M{"_id": "123"},
+		}, false, false)
+		require.NoError(t, err)
+		return redis.RetryEvent{
+			ID:             "users-123",
+			CollectionName: "users",
+			EventData:      eventData,
+			RetryCount:     retryCount,
+			MaxRetries:     maxRetries,
+			NextRetryAt:    next,
+		}
+	}
+
+	ctx := context.Background()
+	collectionName := "users"
+
+	t.Run("dispatch fails and enqueue(updated) fails: old event retained, no removal", func(t *testing.T) {
+		store := newFakeStore()
+		store.failEnqueue = true
+		original := makeEvent(0, 5, time.Now().Add(-time.Second))
+		store.queue["users"] = []redis.RetryEvent{original}
+
+		p := NewProcessor(store, newDispatcher(), DefaultConfig())
+		p.processRetryEvent(ctx, collectionName, original)
+
+		// Old event must still be present, unmodified.
+		require.Len(t, store.queue["users"], 1)
+		assert.Equal(t, 0, store.queue["users"][0].RetryCount, "retry count must not advance when enqueue fails")
+		// Enqueue was attempted, but removal must NOT have been called.
+		assert.Equal(t, 1, store.enqueueCalls)
+		assert.Equal(t, 0, store.removeCalls)
+	})
+
+	t.Run("dispatch fails and enqueue(updated) succeeds: one member with incremented count", func(t *testing.T) {
+		store := newFakeStore()
+		original := makeEvent(0, 5, time.Now().Add(-time.Second))
+		store.queue["users"] = []redis.RetryEvent{original}
+
+		p := NewProcessor(store, newDispatcher(), DefaultConfig())
+		p.processRetryEvent(ctx, collectionName, original)
+
+		// Exactly one member remains, with RetryCount incremented and a new
+		// NextRetryAt.
+		require.Len(t, store.queue["users"], 1)
+		assert.Equal(t, 1, store.queue["users"][0].RetryCount)
+		assert.True(t, store.queue["users"][0].NextRetryAt.After(original.NextRetryAt),
+			"NextRetryAt should be bumped for the next attempt")
+		assert.Equal(t, 1, store.enqueueCalls)
+		assert.Equal(t, 1, store.removeCalls)
+	})
+
+	t.Run("dispatch fails, enqueue succeeds, remove(old) fails: updated event present, stale duplicate tolerated", func(t *testing.T) {
+		store := newFakeStore()
+		store.failRemove = true
+		original := makeEvent(0, 5, time.Now().Add(-time.Second))
+		store.queue["users"] = []redis.RetryEvent{original}
+
+		p := NewProcessor(store, newDispatcher(), DefaultConfig())
+		p.processRetryEvent(ctx, collectionName, original)
+
+		// The updated event must be enqueued (nothing lost); remove(old) failing
+		// means the stale original is also still present -- a duplicate, which is
+		// acceptable under at-least-once.
+		require.Len(t, store.queue["users"], 2, "updated event enqueued plus stale original")
+		var updated *redis.RetryEvent
+		for i := range store.queue["users"] {
+			if store.queue["users"][i].RetryCount == 1 {
+				updated = &store.queue["users"][i]
+				break
+			}
+		}
+		require.NotNil(t, updated, "updated event (RetryCount=1) must be present")
+		assert.True(t, updated.NextRetryAt.After(original.NextRetryAt), "NextRetryAt should be bumped")
+		assert.Equal(t, 1, store.enqueueCalls)
+		assert.Equal(t, 1, store.removeCalls, "remove was attempted and failed")
+	})
+
+	t.Run("dispatch succeeds: event removed, no enqueue", func(t *testing.T) {
+		store := newFakeStore()
+		original := makeEvent(0, 5, time.Now().Add(-time.Second))
+
+		dispatcher := dispatch.NewDispatcher()
+		dispatcher.Register("users", dispatch.NewRuntimeSink(collections.Sink{}, &successTransport{}))
+
+		p := NewProcessor(store, dispatcher, DefaultConfig())
+		p.processRetryEvent(ctx, collectionName, original)
+
+		// Success: the event is settled/delivered so it must be removed from
+		// the retry queue, and no re-queue/enqueue happens.
+		assert.Equal(t, 0, store.enqueueCalls)
+		assert.Equal(t, 1, store.removeCalls)
+	})
+}
+
+func TestProcessRetryEventMaxRetries(t *testing.T) {
+	newDispatcher := func() *dispatch.Dispatcher {
+		d := dispatch.NewDispatcher()
+		d.Register("users", dispatch.NewRuntimeSink(collections.Sink{}, &successTransport{}))
+		return d
+	}
+
+	makeEvent := func(retryCount, maxRetries int) redis.RetryEvent {
+		return redis.RetryEvent{
+			ID:             "users-123",
+			CollectionName: "users",
+			EventData:      []byte(`{"tableName":"users"}`),
+			RetryCount:     retryCount,
+			MaxRetries:     maxRetries,
+			NextRetryAt:    time.Now().Add(-time.Second),
+		}
+	}
+
+	ctx := context.Background()
+	collectionName := "users"
+
+	t.Run("max retries and SendToDLQ fails: event retained, not removed", func(t *testing.T) {
+		store := newFakeStore()
+		store.failSendToDLQ = true
+		event := makeEvent(5, 5)
+		store.queue["users"] = []redis.RetryEvent{event}
+
+		p := NewProcessor(store, newDispatcher(), DefaultConfig())
+		p.processRetryEvent(ctx, collectionName, event)
+
+		// DLQ was attempted, but the event must NOT be removed.
+		assert.Equal(t, 1, store.dlqCalls)
+		assert.Equal(t, 0, store.removeCalls)
+		require.Len(t, store.queue["users"], 1, "event must stay queued when DLQ push fails")
+	})
+
+	t.Run("max retries and SendToDLQ succeeds: event removed, DLQ payload recorded", func(t *testing.T) {
+		store := newFakeStore()
+		event := makeEvent(5, 5)
+		store.queue["users"] = []redis.RetryEvent{event}
+
+		p := NewProcessor(store, newDispatcher(), DefaultConfig())
+		p.processRetryEvent(ctx, collectionName, event)
+
+		assert.Equal(t, 1, store.dlqCalls)
+		assert.Equal(t, 1, store.removeCalls)
+		assert.Len(t, store.queue["users"], 0, "event removed after successful DLQ push")
+		require.Len(t, store.dlqByCol["users"], 1, "DLQ payload must be recorded")
+	})
 }

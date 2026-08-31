@@ -5,10 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/redis/go-redis/v9"
 	"github.com/sergiors/conduit/internal/collections"
+	redisclient "github.com/sergiors/conduit/internal/redis"
 	"github.com/sergiors/conduit/internal/streams"
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/bson"
@@ -577,6 +580,245 @@ func TestInvokeHandlerPanicIsolation(t *testing.T) {
 		}, record)
 
 		assert.NoError(t, err)
+	})
+}
+
+// fakeRedis is an in-memory RedisClient fake recording resume-token and
+// retry-enqueue activity so settlement tests can assert what the watcher and
+// manager persisted.
+type fakeRedis struct {
+	mu            sync.Mutex
+	resumeTokens  map[string]string
+	resumeCalls   int
+	processed     map[string]bool
+	markCalls     int
+	enqueueCalls  int
+	enqueueResult error
+	subscribeErr  error
+}
+
+func newFakeRedis() *fakeRedis {
+	return &fakeRedis{
+		resumeTokens: make(map[string]string),
+		processed:    make(map[string]bool),
+	}
+}
+
+func (f *fakeRedis) GetResumeToken(ctx context.Context, collectionName string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.resumeTokens[collectionName], nil
+}
+
+func (f *fakeRedis) SetResumeToken(ctx context.Context, collectionName, token string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.resumeCalls++
+	f.resumeTokens[collectionName] = token
+	return nil
+}
+
+func (f *fakeRedis) DeleteResumeToken(ctx context.Context, collectionName string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.resumeTokens, collectionName)
+	return nil
+}
+
+func (f *fakeRedis) IsProcessed(ctx context.Context, id string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.processed[id], nil
+}
+
+func (f *fakeRedis) MarkProcessed(ctx context.Context, id string, ttl time.Duration) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.markCalls++
+	f.processed[id] = true
+	return nil
+}
+
+func (f *fakeRedis) EnqueueRetry(ctx context.Context, event redisclient.RetryEvent) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.enqueueCalls++
+	return f.enqueueResult
+}
+
+func (f *fakeRedis) SubscribeConfigChanges(ctx context.Context) (*redis.PubSub, error) {
+	return nil, f.subscribeErr
+}
+
+func (f *fakeRedis) resumeToken(collectionName string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.resumeTokens[collectionName]
+}
+
+// newProcessEventWatcher returns a watcher ready to run processEvent directly:
+// Start normally sets w.ctx, so set it here to exercise the detached-context
+// token persistence without spawning the watch goroutine.
+func newProcessEventWatcher(redisClient RedisClient) *Watcher {
+	watcher := NewWatcher(nil, "conduit", "users", false, "", redisClient)
+	watcher.ctx = context.Background()
+	return watcher
+}
+
+// processEvent calls the watcher's settlement path directly with a synthetic
+// resume token, mirroring what watchOnce does per change event.
+func TestProcessEventSettlement(t *testing.T) {
+	// A real resume token is a bson.Raw document shaped like
+	// {"_data": "<hex>"}; marshalling a bson.M yields a raw byte slice.
+	tokenDoc, err := bson.Marshal(bson.M{"_data": "826A91ADB6000000022B042C0100296E"})
+	assert.NoError(t, err)
+	var token bson.Raw = tokenDoc
+
+	t.Run("handler returns nil advances the token and persists it", func(t *testing.T) {
+		fr := newFakeRedis()
+		watcher := newProcessEventWatcher(fr)
+		record := streams.StreamRecord{TableName: "users", EventID: "users:abc"}
+
+		err := watcher.processEvent(func(streams.StreamRecord) error { return nil }, record, token)
+
+		assert.NoError(t, err)
+		assert.NotEqual(t, "", watcher.resumeToken, "in-memory token must advance")
+		assert.Equal(t, 1, fr.resumeCalls, "SetResumeToken must be attempted")
+		assert.Equal(t, watcher.resumeToken, fr.resumeToken("users"))
+		assert.Equal(t, int64(1), watcher.GetStats().EventsProcessed)
+	})
+
+	t.Run("handler returns an error does not advance the token", func(t *testing.T) {
+		fr := newFakeRedis()
+		watcher := newProcessEventWatcher(fr)
+		record := streams.StreamRecord{TableName: "users", EventID: "users:abc"}
+
+		sentinel := errors.New("dispatch failed and enqueue failed")
+		err := watcher.processEvent(func(streams.StreamRecord) error { return sentinel }, record, token)
+
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, sentinel)
+		assert.Equal(t, "", watcher.resumeToken, "in-memory token must NOT advance")
+		assert.Equal(t, 0, fr.resumeCalls, "SetResumeToken must NOT be called")
+		assert.Equal(t, "", fr.resumeToken("users"))
+		assert.Equal(t, int64(0), watcher.GetStats().EventsProcessed)
+	})
+
+	t.Run("handler panic is converted to an error and does not advance the token", func(t *testing.T) {
+		fr := newFakeRedis()
+		watcher := newProcessEventWatcher(fr)
+		record := streams.StreamRecord{TableName: "users", EventID: "users:abc"}
+
+		err := watcher.processEvent(func(streams.StreamRecord) error {
+			var m map[string]int
+			m["key"] = 1 // nil map write panics
+			return nil
+		}, record, token)
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "handler panic")
+		assert.Equal(t, "", watcher.resumeToken, "in-memory token must NOT advance")
+		assert.Equal(t, 0, fr.resumeCalls, "SetResumeToken must NOT be called")
+	})
+
+	t.Run("after an unsettled event the next settled event advances the token", func(t *testing.T) {
+		fr := newFakeRedis()
+		watcher := newProcessEventWatcher(fr)
+
+		record := streams.StreamRecord{TableName: "users", EventID: "users:abc"}
+
+		// First event is unsettled.
+		unsettled := errors.New("dispatch failed and enqueue failed")
+		err := watcher.processEvent(func(streams.StreamRecord) error { return unsettled }, record, token)
+		assert.Error(t, err)
+		assert.Equal(t, "", watcher.resumeToken)
+
+		// The watch loop would reopen the stream from the (unchanged) last
+		// settled token — the same event is re-parsed and now succeeds.
+		err = watcher.processEvent(func(streams.StreamRecord) error { return nil }, record, token)
+		assert.NoError(t, err)
+		assert.NotEqual(t, "", watcher.resumeToken, "token must advance once the event is settled")
+		assert.Equal(t, 1, fr.resumeCalls)
+		assert.Equal(t, int64(1), watcher.GetStats().EventsProcessed)
+	})
+
+	t.Run("nil resume token still counts a settled event", func(t *testing.T) {
+		fr := newFakeRedis()
+		watcher := newProcessEventWatcher(fr)
+		record := streams.StreamRecord{TableName: "users", EventID: "users:abc"}
+
+		err := watcher.processEvent(func(streams.StreamRecord) error { return nil }, record, nil)
+
+		assert.NoError(t, err)
+		assert.Equal(t, int64(1), watcher.GetStats().EventsProcessed)
+		assert.Equal(t, 0, fr.resumeCalls)
+	})
+}
+
+// fakeDispatcher records dispatch calls and returns a configurable error.
+type fakeDispatcher struct {
+	dispatchErr error
+	calls       int
+}
+
+func (d *fakeDispatcher) Dispatch(ctx context.Context, collectioName string, record streams.StreamRecord) error {
+	d.calls++
+	return d.dispatchErr
+}
+
+// TestHandleEventSettlement verifies the manager-level settlement contract:
+// dispatch failure + enqueue success settles the event (nil), while dispatch
+// failure + enqueue failure returns the ErrEventUnsettled signal.
+func TestHandleEventSettlement(t *testing.T) {
+	record := streams.StreamRecord{TableName: "users", EventID: "users:abc"}
+
+	t.Run("dispatch succeeds returns nil", func(t *testing.T) {
+		fr := newFakeRedis()
+		manager := NewManager(nil, "conduit", nil, fr, &fakeDispatcher{}, nil, DefaultConfig())
+
+		err := manager.handleEvent(context.Background(), "users", record)
+
+		assert.NoError(t, err)
+		assert.Equal(t, 1, fr.markCalls, "successful dispatch marks the event processed")
+		assert.Equal(t, 0, fr.enqueueCalls)
+	})
+
+	t.Run("dispatch fails but enqueue succeeds returns nil", func(t *testing.T) {
+		fr := newFakeRedis()
+		dispatchErr := errors.New("sink down")
+		manager := NewManager(nil, "conduit", nil, fr, &fakeDispatcher{dispatchErr: dispatchErr}, nil, DefaultConfig())
+
+		err := manager.handleEvent(context.Background(), "users", record)
+
+		assert.NoError(t, err, "event durably queued for retry is settled")
+		assert.Equal(t, 1, fr.enqueueCalls)
+		assert.Equal(t, 0, fr.markCalls, "a queued event is not yet delivered, so not marked processed")
+	})
+
+	t.Run("dispatch fails and enqueue fails returns ErrEventUnsettled", func(t *testing.T) {
+		fr := newFakeRedis()
+		fr.enqueueResult = errors.New("redis down")
+		dispatchErr := errors.New("sink down")
+		manager := NewManager(nil, "conduit", nil, fr, &fakeDispatcher{dispatchErr: dispatchErr}, nil, DefaultConfig())
+
+		err := manager.handleEvent(context.Background(), "users", record)
+
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, ErrEventUnsettled)
+		assert.Equal(t, 1, fr.enqueueCalls)
+		assert.Equal(t, 0, fr.markCalls)
+	})
+
+	t.Run("idempotency-skip returns nil (settled in a previous attempt)", func(t *testing.T) {
+		fr := newFakeRedis()
+		fr.processed[record.EventID] = true
+		manager := NewManager(nil, "conduit", nil, fr, &fakeDispatcher{}, nil, DefaultConfig())
+
+		err := manager.handleEvent(context.Background(), "users", record)
+
+		assert.NoError(t, err, "idempotent skip is settled: the event was dispatched in a previous attempt")
+		assert.Equal(t, 0, fr.markCalls)
+		assert.Equal(t, 0, fr.enqueueCalls)
 	})
 }
 

@@ -35,6 +35,16 @@ func (d *Dispatcher) Register(collection string, sink *RuntimeSink) {
 }
 
 // Dispatch sends a stream record to all runtime sinks for a collection.
+//
+// Settlement contract: a nil return means the event was delivered to every
+// sink for the collection (sinks that filter the event out also return nil,
+// which counts as settled — nothing was supposed to be delivered). Therefore
+// every Transport.Send implementation MUST return an error whenever the event
+// was not durably accepted by the downstream system (e.g. any non-2xx HTTP
+// response); returning nil for a silently dropped event would break the
+// pipeline's at-least-once guarantee by making the event appear settled.
+// If any sink fails, the last error is returned so the caller knows the
+// delivery was incomplete.
 func (d *Dispatcher) Dispatch(ctx context.Context, collection string, record streams.StreamRecord) error {
 	d.mu.RLock()
 	sinks, ok := d.sinks[collection]

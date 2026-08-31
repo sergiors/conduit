@@ -2,6 +2,7 @@ package redis
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -61,6 +62,52 @@ func TestRetryEvent(t *testing.T) {
 		}
 
 		assert.True(t, event.RetryCount >= event.MaxRetries)
+	})
+}
+
+func TestParseRetryMembers(t *testing.T) {
+	t.Run("valid members are parsed", func(t *testing.T) {
+		valid, _ := json.Marshal(RetryEvent{
+			ID:             "users-1",
+			CollectionName: "users",
+			EventData:      []byte(`{"id":"1"}`),
+			RetryCount:     2,
+			MaxRetries:     5,
+			NextRetryAt:    time.Now(),
+		})
+
+		events, skipped := parseRetryMembers([]string{string(valid)})
+		assert.Equal(t, 0, skipped)
+		require.Len(t, events, 1)
+		assert.Equal(t, "users", events[0].CollectionName)
+		assert.Equal(t, 2, events[0].RetryCount)
+	})
+
+	t.Run("corrupt member is skipped, valid members still returned", func(t *testing.T) {
+		valid, _ := json.Marshal(RetryEvent{
+			ID:             "users-1",
+			CollectionName: "users",
+			EventData:      []byte(`{"id":"1"}`),
+			RetryCount:     1,
+			MaxRetries:     5,
+			NextRetryAt:    time.Now(),
+		})
+
+		corrupt := "this is not json{{{"
+		members := []string{corrupt, string(valid), corrupt}
+
+		events, skipped := parseRetryMembers(members)
+		assert.Equal(t, 2, skipped)
+		require.Len(t, events, 1)
+		assert.Equal(t, "users-1", events[0].ID)
+		assert.Equal(t, "users", events[0].CollectionName)
+	})
+
+	t.Run("all corrupt members yields empty result with no error", func(t *testing.T) {
+		members := []string{"not-json", "still-not-json"}
+		events, skipped := parseRetryMembers(members)
+		assert.Equal(t, 2, skipped)
+		assert.Empty(t, events)
 	})
 }
 
