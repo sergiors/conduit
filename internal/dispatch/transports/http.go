@@ -17,7 +17,7 @@ import (
 // HTTPSpec holds the type-specific configuration for an HTTP transport.
 type HTTPSpec struct {
 	Endpoint    string `bson:"endpoint" json:"endpoint"`
-	BearerToken string `bson:"bearer_token,omitempty" json:"bearer_token,omitempty"`
+	BearerToken string `bson:"bearerToken,omitempty" json:"bearerToken,omitempty"`
 }
 
 // HTTPTransport delivers stream records to an HTTP endpoint via POST.

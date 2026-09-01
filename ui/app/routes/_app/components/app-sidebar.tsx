@@ -52,16 +52,16 @@ export function AppSidebar({ collections = [], ...props }: AppSidebarProps) {
               ) : (
                 collections.map((collection) => (
                   <SidebarMenuItem
-                    key={collection._id || collection.collection_name}
+                    key={collection._id || collection.collectionName}
                   >
                     <SidebarMenuButton className="flex" asChild>
                       <Link
-                        to={`/documents/${collection.collection_name}`}
+                        to={`/documents/${collection.collectionName}`}
                         className="flex items-center gap-2 flex-1 overflow-hidden"
                       >
                         <DatabaseIcon className="h-4 w-4 shrink-0" />
                         <span className="truncate">
-                          {collection.collection_name}
+                          {collection.collectionName}
                         </span>
                       </Link>
                     </SidebarMenuButton>

@@ -23,7 +23,7 @@ func TestNewEventBridgeValidation(t *testing.T) {
 		spec    EventBridgeSpec
 		wantNil bool
 	}{
-		{name: "missing event_bus_name", spec: EventBridgeSpec{Source: "conduit"}, wantNil: true},
+		{name: "missing eventBusName", spec: EventBridgeSpec{Source: "conduit"}, wantNil: true},
 		{name: "empty spec", spec: EventBridgeSpec{}, wantNil: true},
 	}
 

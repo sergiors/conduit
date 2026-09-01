@@ -89,7 +89,7 @@ func TestManagerCreateIndex(t *testing.T) {
 	manager, _, ctx := newTestManager(t)
 
 	err := manager.CreateIndex(ctx)
-	require.NoError(t, err, "should create unique index on collection_name")
+	require.NoError(t, err, "should create unique index on collectionName")
 }
 
 func TestManagerCRUD(t *testing.T) {
@@ -237,9 +237,9 @@ func TestTableBSONTags(t *testing.T) {
 		err = bson.Unmarshal(data, &decoded)
 		require.NoError(t, err)
 
-		assert.Equal(t, "test", decoded["collection_name"])
-		assert.Equal(t, true, decoded["stream_enabled"])
-		assert.Equal(t, true, decoded["old_image"])
-		assert.Equal(t, "expiresAt", decoded["ttl_attribute"])
+		assert.Equal(t, "test", decoded["collectionName"])
+		assert.Equal(t, true, decoded["streamEnabled"])
+		assert.Equal(t, true, decoded["oldImage"])
+		assert.Equal(t, "expiresAt", decoded["ttlAttribute"])
 	})
 }

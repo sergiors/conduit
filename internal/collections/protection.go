@@ -25,10 +25,10 @@ func (m *Manager) EnableDeletionProtection(ctx context.Context, name string) err
 
 	_, err = m.collection.UpdateOne(
 		ctx,
-		bson.M{"collection_name": name},
+		bson.M{"collectionName": name},
 		bson.M{"$set": bson.M{
-			"deletion_protection": true,
-			"updated_at":          time.Now(),
+			"deletionProtection": true,
+			"updatedAt":          time.Now(),
 		}},
 	)
 	return err
@@ -43,10 +43,10 @@ func (m *Manager) DisableDeletionProtection(ctx context.Context, name string) er
 
 	_, err := m.collection.UpdateOne(
 		ctx,
-		bson.M{"collection_name": name},
+		bson.M{"collectionName": name},
 		bson.M{"$set": bson.M{
-			"deletion_protection": false,
-			"updated_at":          time.Now(),
+			"deletionProtection": false,
+			"updatedAt":          time.Now(),
 		}},
 	)
 	return err

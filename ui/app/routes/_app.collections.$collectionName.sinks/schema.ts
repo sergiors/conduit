@@ -11,11 +11,11 @@ export const conditionSchema = z.object({
     "lt",
     "lte",
     "contains",
-    "starts_with",
-    "ends_with",
+    "startsWith",
+    "endsWith",
     "exists",
     "in",
-    "not_in",
+    "notIn",
   ]),
   value: z.string().optional(),
 });
@@ -26,27 +26,27 @@ export const fieldFilterSchema = z.object({
 });
 
 export const filterSchema = z.object({
-  old_image: z.array(fieldFilterSchema),
-  new_image: z.array(fieldFilterSchema),
+  oldImage: z.array(fieldFilterSchema),
+  newImage: z.array(fieldFilterSchema),
 });
 
 export const sinkSchema = z
   .object({
     type: z.enum(["http", "eventbridge", "meilisearch"]),
     endpoint: z.string().optional(),
-    bearer_token: z.string().optional(),
-    event_types: z
+    bearerToken: z.string().optional(),
+    eventTypes: z
       .array(z.string())
       .min(1, "At least one event type is required"),
     filter: filterSchema.optional(),
-    event_bus_name: z.string().optional(),
+    eventBusName: z.string().optional(),
     source: z.string().optional(),
-    index_name: z.string().optional(),
+    indexName: z.string().optional(),
   })
   .refine(
     (data) => {
       if (!data.endpoint) return false;
-      if (data.type === "eventbridge" && !data.event_bus_name) return false;
+      if (data.type === "eventbridge" && !data.eventBusName) return false;
       return true;
     },
     {
@@ -56,14 +56,14 @@ export const sinkSchema = z
   )
   .refine(
     (data) => {
-      const invalidTypes = data.event_types.filter(
+      const invalidTypes = data.eventTypes.filter(
         (t) => !VALID_EVENT_TYPES.includes(t as any),
       );
       return invalidTypes.length === 0;
     },
     {
       message: `Event types must be one of: ${VALID_EVENT_TYPES.join(", ")}`,
-      path: ["event_types"],
+      path: ["eventTypes"],
     },
   );
 
@@ -81,11 +81,11 @@ export interface FilterCondition {
   lt?: any;
   lte?: any;
   contains?: any;
-  starts_with?: any;
-  ends_with?: any;
+  startsWith?: any;
+  endsWith?: any;
   exists?: boolean;
   in?: any[];
-  not_in?: any[];
+  notIn?: any[];
 }
 
 export interface ImageFilter {
@@ -93,19 +93,19 @@ export interface ImageFilter {
 }
 
 export interface Filter {
-  old_image?: ImageFilter;
-  new_image?: ImageFilter;
+  oldImage?: ImageFilter;
+  newImage?: ImageFilter;
 }
 
 export interface SinkConfig {
   type: string;
   endpoint?: string;
-  bearer_token?: string;
-  event_types?: string[];
+  bearerToken?: string;
+  eventTypes?: string[];
   filter?: Filter;
-  event_bus_name?: string;
+  eventBusName?: string;
   source?: string;
-  index_name?: string;
+  indexName?: string;
 }
 
 export type FieldFilter = z.infer<typeof fieldFilterSchema>;
@@ -119,9 +119,9 @@ export const conditionOptions: { value: Condition["type"]; label: string }[] = [
   { value: "lt", label: "Less Than" },
   { value: "lte", label: "Less Than or Equal" },
   { value: "contains", label: "Contains" },
-  { value: "starts_with", label: "Starts With" },
-  { value: "ends_with", label: "Ends With" },
+  { value: "startsWith", label: "Starts With" },
+  { value: "endsWith", label: "Ends With" },
   { value: "exists", label: "Exists" },
   { value: "in", label: "In" },
-  { value: "not_in", label: "Not In" },
+  { value: "notIn", label: "Not In" },
 ];

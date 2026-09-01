@@ -3,8 +3,8 @@ import type { Route } from "./+types/route";
 /**
  * Streaming (CDC) toggle (mutation).
  *
- *   PUT {old_image: boolean} -> enable stream, configuring old_image
- *   DELETE                  -> disable stream (and old_image)
+ *   PUT {oldImage: boolean} -> enable stream, configuring oldImage
+ *   DELETE                  -> disable stream (and oldImage)
  *
  * Forwards the submitted method (and JSON body for PUT) to the backend at
  * /api/collections/:collectionName/stream. When invoked through a fetcher,

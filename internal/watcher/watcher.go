@@ -276,7 +276,7 @@ func (w *Watcher) watchLoop(handler func(streams.StreamRecord) error) {
 //   - resume token  : when set, resumeAfter anchors the stream exactly at the
 //     last settled event. This is the steady-state path and always wins.
 //   - first-start checkpoint : when NO token exists but a startAtOperationTime
-//     checkpoint was captured at stream enablement (collection.stream_started_at),
+//     checkpoint was captured at stream enablement (collection.streamStartedAt),
 //     SetStartAtOperationTime anchors the stream at enablement, so every event
 //     committed at/after enablement is streamed — closing the enable → first
 //     watcher-start window where a plain fresh stream would start at "now" and

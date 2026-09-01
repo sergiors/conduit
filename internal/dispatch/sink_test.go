@@ -86,8 +86,8 @@ func TestRuntimeSinkFilter(t *testing.T) {
 
 func TestRuntimeSinkFilterFlat(t *testing.T) {
 	ctx := context.Background()
-	// A single flat AND-only filter: new_image.tenant acme AND new_image.status
-	// ACTIVE AND old_image.deleted false. Delivered only when every declared
+	// A single flat AND-only filter: newImage.tenant acme AND newImage.status
+	// ACTIVE AND oldImage.deleted false. Delivered only when every declared
 	// predicate matches.
 	sink := NewRuntimeSink(collections.Sink{
 		Filter: collections.Filter{
@@ -113,7 +113,7 @@ func TestRuntimeSinkFilterFlat(t *testing.T) {
 		assert.True(t, transport.sent)
 	})
 
-	t.Run("new_image.status PENDING is skipped", func(t *testing.T) {
+	t.Run("newImage.status PENDING is skipped", func(t *testing.T) {
 		transport := &MockTransport{}
 		sink.Transport = transport
 		err := sink.Send(ctx, streams.StreamRecord{
@@ -125,7 +125,7 @@ func TestRuntimeSinkFilterFlat(t *testing.T) {
 		assert.False(t, transport.sent)
 	})
 
-	t.Run("INSERT with declared old_image block is skipped", func(t *testing.T) {
+	t.Run("INSERT with declared oldImage block is skipped", func(t *testing.T) {
 		transport := &MockTransport{}
 		sink.Transport = transport
 		err := sink.Send(ctx, streams.StreamRecord{
@@ -136,7 +136,7 @@ func TestRuntimeSinkFilterFlat(t *testing.T) {
 		assert.False(t, transport.sent)
 	})
 
-	t.Run("new_image.tenant mismatch is skipped", func(t *testing.T) {
+	t.Run("newImage.tenant mismatch is skipped", func(t *testing.T) {
 		transport := &MockTransport{}
 		sink.Transport = transport
 		err := sink.Send(ctx, streams.StreamRecord{

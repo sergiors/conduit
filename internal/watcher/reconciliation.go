@@ -96,7 +96,7 @@ func ReconcileSinks(current, desired []collections.Sink) *Reconciliation {
 }
 
 // mutableFieldsEqual reports whether two persisted sinks have the same
-// mutable fields (filter, event_types). Type and spec are immutable identity.
+// mutable fields (filter, eventTypes). Type and spec are immutable identity.
 func mutableFieldsEqual(a, b collections.Sink) bool {
 	return reflect.DeepEqual(a.Filter, b.Filter) &&
 		reflect.DeepEqual(a.EventTypes, b.EventTypes)

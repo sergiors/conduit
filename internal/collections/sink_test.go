@@ -187,10 +187,10 @@ func TestSinkBSONTags(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "sink1", decoded["_id"])
-	assert.Equal(t, "coll1", decoded["collection_id"])
+	assert.Equal(t, "coll1", decoded["collectionId"])
 	assert.Equal(t, string(SinkTypeHTTP), decoded["type"])
 	assert.Equal(t, map[string]interface{}{"endpoint": "http://localhost:3000/events"}, decoded["spec"])
-	assert.Equal(t, []interface{}{"INSERT"}, []interface{}(decoded["event_types"].(primitive.A)))
+	assert.Equal(t, []interface{}{"INSERT"}, []interface{}(decoded["eventTypes"].(primitive.A)))
 }
 
 func TestManagerSinkCRUD(t *testing.T) {
@@ -256,7 +256,7 @@ func TestManagerSinkCRUD(t *testing.T) {
 		require.NoError(t, manager.Delete(ctx, "sink_test_table"))
 
 		count, err := client.Database("conduit_test").Collection("config.sinks").
-			CountDocuments(ctx, bson.M{"collection_id": table.ID})
+			CountDocuments(ctx, bson.M{"collectionId": table.ID})
 		require.NoError(t, err)
 		assert.Equal(t, int64(0), count)
 	})
@@ -311,12 +311,12 @@ func TestManagerUpdateSinkMutableFields(t *testing.T) {
 		assert.Equal(t, newFilter, updated.Filter)
 		assert.Equal(t, []string{"INSERT", "MODIFY"}, updated.EventTypes)
 		assert.Equal(t, fpBefore, updated.Fingerprint, "fingerprint must not change: it covers type+spec only")
-		assert.True(t, updated.UpdatedAt.After(updatedAtBefore), "updated_at should advance")
+		assert.True(t, updated.UpdatedAt.After(updatedAtBefore), "updatedAt should advance")
 		assert.Equal(t, 1, rec.count(), "OnPublish should fire exactly once")
 	})
 
-	t.Run("update event_types to empty means all types", func(t *testing.T) {
-		// Non-nil empty slice sets event_types to all types.
+	t.Run("update eventTypes to empty means all types", func(t *testing.T) {
+		// Non-nil empty slice sets eventTypes to all types.
 		updated, err := manager.UpdateSink(ctx, name, created.ID, SinkUpdate{
 			EventTypes: []string{},
 		})

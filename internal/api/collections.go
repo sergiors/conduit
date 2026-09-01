@@ -26,9 +26,9 @@ func (s *Server) listCollections(c *gin.Context) {
 // CreateCollectionRequest is the minimal payload accepted when creating a
 // collection. Optional features are configured through dedicated endpoints.
 type CreateCollectionRequest struct {
-	CollectionName string `json:"collection_name"`
-	PartitionKey   string `json:"partition_key"`
-	SortKey        string `json:"sort_key"`
+	CollectionName string `json:"collectionName"`
+	PartitionKey   string `json:"partitionKey"`
+	SortKey        string `json:"sortKey"`
 }
 
 func (s *Server) createCollection(c *gin.Context) {

@@ -1280,7 +1280,7 @@ func TestHandleCollectionChangeDeletedStopsWatcher(t *testing.T) {
 	})
 
 	t.Run("stream-disabled collection still just stops its watcher", func(t *testing.T) {
-		// DisableStream keeps the config document (stream_enabled=false) but
+		// DisableStream keeps the config document (streamEnabled=false) but
 		// fires OnPublish; handleCollectionChange must stop the watcher without
 		// purging state (nothing observable in fakeRedis beyond no panic).
 		require.NoError(t, settings.DisableStream(context.Background(), "disabled_coll"))
@@ -1302,7 +1302,7 @@ func TestHandleCollectionChangeDeletedStopsWatcher(t *testing.T) {
 // reporting true on a dead watcher.
 // TestFirstStartCheckpointLiveStreamsPreStartEvents is the live end-to-end
 // verification for the first-start event window fix. It proves that a freshly
-// enabled collection whose checkpoint (stream_started_at) is BEFORE some
+// enabled collection whose checkpoint (streamStartedAt) is BEFORE some
 // writes will, when the watcher opens a stream anchored at that checkpoint with
 // NO resume token, deliver those pre-start writes (they are not skipped). This
 // is exactly the enable → watcher-start gap the fix closes.
@@ -1311,7 +1311,7 @@ func TestFirstStartCheckpointLiveStreamsPreStartEvents(t *testing.T) {
 	fr := newFakeRedis()
 
 	const db = "conduit_test_firststart"
-	// Use the collections manager to capture a real stream_started_at via
+	// Use the collections manager to capture a real streamStartedAt via
 	// EnableStream, then simulate the gap: write events BEFORE starting a
 	// watcher anchored at that checkpoint, and assert the watcher observes them.
 	settings := collections.NewManager(client, db)

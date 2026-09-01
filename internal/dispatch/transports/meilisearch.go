@@ -15,8 +15,8 @@ import (
 // MeilisearchSpec holds the type-specific configuration for a Meilisearch transport.
 type MeilisearchSpec struct {
 	Host      string `bson:"host" json:"host"`
-	APIKey    string `bson:"api_key,omitempty" json:"api_key,omitempty"`
-	IndexName string `bson:"index_name,omitempty" json:"index_name,omitempty"`
+	APIKey    string `bson:"apiKey,omitempty" json:"apiKey,omitempty"`
+	IndexName string `bson:"indexName,omitempty" json:"indexName,omitempty"`
 }
 
 // taskTimeout bounds how long we wait for a Meilisearch indexing/deletion task

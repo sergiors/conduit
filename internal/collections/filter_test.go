@@ -146,7 +146,7 @@ func TestFilterOnlyOldImage(t *testing.T) {
 	// REMOVE: oldImage matches → passes
 	assert.True(t, MatchImage(map[string]interface{}{"status": "deleted_old"}, criteria.OldImage))
 
-	// new_image filter is empty → always passes
+	// newImage filter is empty → always passes
 	assert.True(t, MatchImage(nil, criteria.NewImage))
 	assert.True(t, MatchImage(map[string]interface{}{"x": 1}, criteria.NewImage))
 }
@@ -156,7 +156,7 @@ func TestFilterOnlyNewImage(t *testing.T) {
 		NewImage: ImageFilter{"valor": FilterCondition{Gt: float64(100)}},
 	}
 
-	// old_image filter is empty → always passes
+	// oldImage filter is empty → always passes
 	assert.True(t, MatchImage(nil, criteria.OldImage))
 
 	// INSERT: newImage matches → passes
@@ -274,7 +274,7 @@ func TestMatchImageDSL_InNotIn(t *testing.T) {
 	assert.False(t, MatchImage(map[string]interface{}{"region": "eu-west-1"}, ImageFilter{"region": FilterCondition{In: []any{"us-west-2", "us-east-1"}}}))
 	assert.True(t, MatchImage(map[string]interface{}{"age": float64(30)}, ImageFilter{"age": FilterCondition{In: []any{float64(20), float64(30)}}}))
 
-	// not_in inverse
+	// notIn inverse
 	assert.True(t, MatchImage(map[string]interface{}{"region": "eu-west-1"}, ImageFilter{"region": FilterCondition{NotIn: []any{"us-west-2", "us-east-1"}}}))
 	assert.False(t, MatchImage(map[string]interface{}{"region": "us-east-1"}, ImageFilter{"region": FilterCondition{NotIn: []any{"us-west-2", "us-east-1"}}}))
 
@@ -284,7 +284,7 @@ func TestMatchImageDSL_InNotIn(t *testing.T) {
 }
 
 func TestMatchImageDSL_StartsEndsWith(t *testing.T) {
-	// starts_with / ends_with
+	// startsWith / endsWith
 	assert.True(t, MatchImage(map[string]interface{}{"status": "blocked_user"}, ImageFilter{"status": FilterCondition{StartsWith: "blocked_"}}))
 	assert.False(t, MatchImage(map[string]interface{}{"status": "active_user"}, ImageFilter{"status": FilterCondition{StartsWith: "blocked_"}}))
 	assert.True(t, MatchImage(map[string]interface{}{"file": "report.pdf"}, ImageFilter{"file": FilterCondition{EndsWith: ".pdf"}}))
@@ -379,8 +379,8 @@ func TestFilterMatchesFlatBackwardCompat(t *testing.T) {
 // --- Filter.Matches flat semantics (single AND across all declared blocks) ---
 
 func TestFilterMatchesFlatSemantics(t *testing.T) {
-	// The canonical flat example: new_image.tenant acme AND new_image.status
-	// ACTIVE AND old_image.deleted false. All three predicates are ANDed.
+	// The canonical flat example: newImage.tenant acme AND newImage.status
+	// ACTIVE AND oldImage.deleted false. All three predicates are ANDed.
 	criteria := Filter{
 		NewImage: ImageFilter{
 			"tenant": FilterCondition{Eq: "acme"},
@@ -397,25 +397,25 @@ func TestFilterMatchesFlatSemantics(t *testing.T) {
 		map[string]interface{}{"deleted": false},
 	))
 
-	// new_image.status PENDING -> NOT delivered.
+	// newImage.status PENDING -> NOT delivered.
 	assert.False(t, criteria.Matches(
 		map[string]interface{}{"tenant": "acme", "status": "PENDING"},
 		map[string]interface{}{"deleted": false},
 	))
 
-	// old_image.deleted true -> NOT delivered.
+	// oldImage.deleted true -> NOT delivered.
 	assert.False(t, criteria.Matches(
 		map[string]interface{}{"tenant": "acme", "status": "ACTIVE"},
 		map[string]interface{}{"deleted": true},
 	))
 
-	// INSERT (no old_image) with a declared old_image block -> NOT delivered.
+	// INSERT (no oldImage) with a declared oldImage block -> NOT delivered.
 	assert.False(t, criteria.Matches(
 		map[string]interface{}{"tenant": "acme", "status": "ACTIVE"},
 		nil,
 	))
 
-	// new_image.tenant differs -> NOT delivered even when the rest matches.
+	// newImage.tenant differs -> NOT delivered even when the rest matches.
 	assert.False(t, criteria.Matches(
 		map[string]interface{}{"tenant": "other", "status": "ACTIVE"},
 		map[string]interface{}{"deleted": false},
@@ -425,8 +425,8 @@ func TestFilterMatchesFlatSemantics(t *testing.T) {
 // --- Filter.Matches absent-image behavior (flat, no or/and) ---
 
 func TestFilterMatchesDeclaredBlockAbsentImage(t *testing.T) {
-	// A declared old_image block never matches an INSERT (nil old image),
-	// even though the new_image block matches. There is no or group to
+	// A declared oldImage block never matches an INSERT (nil old image),
+	// even though the newImage block matches. There is no or group to
 	// compensate: all declared blocks are AND.
 	criteria := Filter{
 		OldImage: ImageFilter{"status": FilterCondition{Eq: "ACTIVE"}},

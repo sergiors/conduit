@@ -77,28 +77,28 @@ function GeneralCard({ collection }: { collection: CollectionConfig }) {
       </CardHeader>
       <CardContent className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <Field>
-          <FieldLabel htmlFor="collection_name">Collection Name</FieldLabel>
+          <FieldLabel htmlFor="collectionName">Collection Name</FieldLabel>
           <Input
-            id="collection_name"
-            value={collection.collection_name}
+            id="collectionName"
+            value={collection.collectionName}
             disabled
             readOnly
           />
         </Field>
         <Field>
-          <FieldLabel htmlFor="partition_key">Partition Key</FieldLabel>
+          <FieldLabel htmlFor="partitionKey">Partition Key</FieldLabel>
           <Input
-            id="partition_key"
-            value={collection.partition_key ?? ""}
+            id="partitionKey"
+            value={collection.partitionKey ?? ""}
             disabled
             readOnly
           />
         </Field>
         <Field>
-          <FieldLabel htmlFor="sort_key">Sort Key</FieldLabel>
+          <FieldLabel htmlFor="sortKey">Sort Key</FieldLabel>
           <Input
-            id="sort_key"
-            value={collection.sort_key ?? ""}
+            id="sortKey"
+            value={collection.sortKey ?? ""}
             disabled
             readOnly
           />
@@ -111,7 +111,7 @@ function GeneralCard({ collection }: { collection: CollectionConfig }) {
 function ProtectionCard({ collection }: { collection: CollectionConfig }) {
   const fetcher = useFetcher();
   const error = fetcherError(fetcher.data);
-  const enabled = collection.deletion_protection;
+  const enabled = collection.deletionProtection;
   const busy = fetcher.state !== "idle";
 
   const toggle = () => {
@@ -119,7 +119,7 @@ function ProtectionCard({ collection }: { collection: CollectionConfig }) {
       {},
       {
         method: enabled ? "delete" : "put",
-        action: `/collections/${collection.collection_name}/protection`,
+        action: `/collections/${collection.collectionName}/protection`,
       },
     );
   };
@@ -166,8 +166,8 @@ function ProtectionCard({ collection }: { collection: CollectionConfig }) {
 function TTLCard({ collection }: { collection: CollectionConfig }) {
   const fetcher = useFetcher();
   const error = fetcherError(fetcher.data);
-  const enabled = !!collection.ttl_attribute;
-  const attribute = collection.ttl_attribute ?? "";
+  const enabled = !!collection.ttlAttribute;
+  const attribute = collection.ttlAttribute ?? "";
   const busy = fetcher.state !== "idle";
   const [attr, setAttr] = useState(attribute);
 
@@ -178,7 +178,7 @@ function TTLCard({ collection }: { collection: CollectionConfig }) {
       { attribute: attr },
       {
         method: "put",
-        action: `/collections/${collection.collection_name}/ttl`,
+        action: `/collections/${collection.collectionName}/ttl`,
         encType: "application/json",
       },
     );
@@ -189,7 +189,7 @@ function TTLCard({ collection }: { collection: CollectionConfig }) {
       {},
       {
         method: "delete",
-        action: `/collections/${collection.collection_name}/ttl`,
+        action: `/collections/${collection.collectionName}/ttl`,
       },
     );
   };
@@ -261,17 +261,17 @@ function StreamCard({
 }) {
   const fetcher = useFetcher();
   const error = fetcherError(fetcher.data);
-  const enabled = collection.stream_enabled;
-  const oldImage = collection.old_image;
+  const enabled = collection.streamEnabled;
+  const oldImage = collection.oldImage;
   const busy = fetcher.state !== "idle";
   const [includeOld, setIncludeOld] = useState(oldImage);
 
   const submitStream = (oldImageValue: boolean) => {
     fetcher.submit(
-      { old_image: oldImageValue },
+      { oldImage: oldImageValue },
       {
         method: "put",
-        action: `/collections/${collection.collection_name}/stream`,
+        action: `/collections/${collection.collectionName}/stream`,
         encType: "application/json",
       },
     );
@@ -287,7 +287,7 @@ function StreamCard({
       {},
       {
         method: "delete",
-        action: `/collections/${collection.collection_name}/stream`,
+        action: `/collections/${collection.collectionName}/stream`,
       },
     );
   };

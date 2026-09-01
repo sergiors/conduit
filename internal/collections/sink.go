@@ -23,14 +23,14 @@ var ValidEventTypes = []string{"INSERT", "MODIFY", "REMOVE"}
 // config.collections and is not exposed to API clients.
 type Sink struct {
 	ID           string                 `bson:"_id,omitempty" json:"id,omitempty"`
-	CollectionID string                 `bson:"collection_id" json:"-"`
+	CollectionID string                 `bson:"collectionId" json:"-"`
 	Type         Type                   `bson:"type" json:"type"`
 	Spec         map[string]interface{} `bson:"spec" json:"spec"`
-	EventTypes   []string               `bson:"event_types,omitempty" json:"event_types"`
+	EventTypes   []string               `bson:"eventTypes,omitempty" json:"eventTypes"`
 	Filter       Filter                 `bson:"filter,omitempty" json:"filter,omitempty"`
 	Fingerprint  string                 `bson:"fingerprint,omitempty" json:"fingerprint,omitempty"`
-	CreatedAt    time.Time              `bson:"created_at" json:"created_at"`
-	UpdatedAt    time.Time              `bson:"updated_at" json:"updated_at"`
+	CreatedAt    time.Time              `bson:"createdAt" json:"createdAt"`
+	UpdatedAt    time.Time              `bson:"updatedAt" json:"updatedAt"`
 }
 
 // ValidateEventTypes validates that all event types are valid.
@@ -111,7 +111,7 @@ func (m *Manager) GetSink(ctx context.Context, collectionName, sinkID string) (*
 	}
 
 	var sink Sink
-	err = m.sinks.FindOne(ctx, bson.M{"_id": objectID, "collection_id": collection.ID}).Decode(&sink)
+	err = m.sinks.FindOne(ctx, bson.M{"_id": objectID, "collectionId": collection.ID}).Decode(&sink)
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			return nil, ErrSinkNotFound
@@ -128,7 +128,7 @@ func (m *Manager) GetSinks(ctx context.Context, collectionName string) ([]Sink, 
 		return nil, err
 	}
 
-	cursor, err := m.sinks.Find(ctx, bson.M{"collection_id": collection.ID})
+	cursor, err := m.sinks.Find(ctx, bson.M{"collectionId": collection.ID})
 	if err != nil {
 		return nil, fmt.Errorf("find sinks: %w", err)
 	}
@@ -153,7 +153,7 @@ func (m *Manager) CreateSink(ctx context.Context, collectionName string, sink Si
 	}
 
 	if !collection.StreamEnabled {
-		return nil, NewValidationError("stream_enabled must be true to configure sinks")
+		return nil, NewValidationError("streamEnabled must be true to configure sinks")
 	}
 
 	if err := sink.Validate(); err != nil {
@@ -166,8 +166,8 @@ func (m *Manager) CreateSink(ctx context.Context, collectionName string, sink Si
 	}
 
 	// Reject an equivalent sink before inserting; the unique compound
-	// index (collection_id, fingerprint) covers concurrent creations.
-	existing := m.sinks.FindOne(ctx, bson.M{"collection_id": collection.ID, "fingerprint": fp})
+	// index (collectionId, fingerprint) covers concurrent creations.
+	existing := m.sinks.FindOne(ctx, bson.M{"collectionId": collection.ID, "fingerprint": fp})
 	if err := existing.Err(); err == nil {
 		return nil, ErrSinkAlreadyExists
 	} else if !errors.Is(err, mongo.ErrNoDocuments) {
@@ -209,7 +209,7 @@ func (m *Manager) DeleteSink(ctx context.Context, collectionName, sinkID string)
 		return ErrSinkNotFound
 	}
 
-	result, err := m.sinks.DeleteOne(ctx, bson.M{"_id": objectID, "collection_id": collection.ID})
+	result, err := m.sinks.DeleteOne(ctx, bson.M{"_id": objectID, "collectionId": collection.ID})
 	if err != nil {
 		return fmt.Errorf("delete sink: %w", err)
 	}
@@ -222,7 +222,7 @@ func (m *Manager) DeleteSink(ctx context.Context, collectionName, sinkID string)
 
 // deleteSinksByCollectionID removes all sinks for a collection.
 func (m *Manager) deleteSinksByCollectionID(ctx context.Context, collectionID string) error {
-	_, err := m.sinks.DeleteMany(ctx, bson.M{"collection_id": collectionID})
+	_, err := m.sinks.DeleteMany(ctx, bson.M{"collectionId": collectionID})
 	if err != nil {
 		return fmt.Errorf("delete sinks: %w", err)
 	}
@@ -234,7 +234,7 @@ func (m *Manager) deleteSinksByCollectionID(ctx context.Context, collectionID st
 // rejected with ErrSinkIdentityImmutable.
 type SinkUpdate struct {
 	Filter     *Filter                `json:"filter,omitempty"`
-	EventTypes []string               `json:"event_types,omitempty"`
+	EventTypes []string               `json:"eventTypes,omitempty"`
 	Type       *Type                  `json:"type,omitempty"`
 	Spec       map[string]interface{} `json:"spec,omitempty"`
 }
@@ -244,7 +244,7 @@ func specsEqual(a, b map[string]interface{}) bool {
 }
 
 // UpdateSink updates the mutable fields of an existing sink (filter,
-// event_types). type and spec are immutable — changing them returns
+// eventTypes). type and spec are immutable — changing them returns
 // ErrSinkIdentityImmutable (create a new sink instead).
 func (m *Manager) UpdateSink(ctx context.Context, collectionName, sinkID string, update SinkUpdate) (*Sink, error) {
 	current, err := m.GetSink(ctx, collectionName, sinkID)
@@ -279,11 +279,11 @@ func (m *Manager) UpdateSink(ctx context.Context, collectionName, sinkID string,
 
 	result, err := m.sinks.UpdateOne(
 		ctx,
-		bson.M{"_id": mustObjectID(sinkID), "collection_id": current.CollectionID},
+		bson.M{"_id": mustObjectID(sinkID), "collectionId": current.CollectionID},
 		bson.M{"$set": bson.M{
 			"filter":      updated.Filter,
-			"event_types": updated.EventTypes,
-			"updated_at":  updated.UpdatedAt,
+			"eventTypes": updated.EventTypes,
+			"updatedAt":  updated.UpdatedAt,
 		}},
 	)
 	if err != nil {

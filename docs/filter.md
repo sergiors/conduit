@@ -2,7 +2,7 @@
 
 `filter` is filter DSL for Conduit change events. It is **not** a
 MongoDB query language: field names are document field paths, and the operators
-below are evaluated by Conduit against the `new_image` / `old_image` of each
+below are evaluated by Conduit against the `newImage` / `oldImage` of each
 change event. Nothing here is translated to a MongoDB query.
 
 ---
@@ -16,18 +16,18 @@ change event. Nothing here is translated to a MongoDB query.
   it only restricts: an event is delivered only when the filter matches.
 - **AND across everything.** An event is delivered only when *every* declared
   criterion matches — across fields and within a single field's conditions.
-- **Images are evaluated independently.** `old_image` and `new_image` are
+- **Images are evaluated independently.** `oldImage` and `newImage` are
   filtered separately; a filter block you don't declare is ignored.
 - **An absent image makes a declared filter `false`.** A content predicate
-  requires content to match. So an `old_image` filter never matches `INSERT`
-  events (or collections streaming with `old_image=false`), and a `new_image`
+  requires content to match. So an `oldImage` filter never matches `INSERT`
+  events (or collections streaming with `oldImage=false`), and a `newImage`
   filter never matches `REMOVE` events. This is intentional and decoupled from
   the collection's current configuration.
 
 ```json
 {
   "filter": {
-    "new_image": {
+    "newImage": {
       "status": { "eq": "active" }
     }
   }
@@ -49,24 +49,24 @@ There are 12 operators. Each is a key inside a field's condition object.
 | `lt`                      | `{ "lt": 65 }`                                      | number     | Value < operand. Both must be numeric.                                   |
 | `lte`                     | `{ "lte": 65 }`                                     | number     | Value <= operand. Both must be numeric.                                  |
 | `contains`                | `{ "contains": "gmail" }`                          | any        | String value → substring match. Slice value → any element deep-equals the operand. Other kinds → `false`. |
-| `starts_with`             | `{ "starts_with": "blocked_" }`                     | any        | Value string starts with the operand.                                    |
-| `ends_with`               | `{ "ends_with": ".pdf" }`                           | any        | Value string ends with the operand.                                      |
+| `startsWith`             | `{ "startsWith": "blocked_" }`                     | any        | Value string starts with the operand.                                    |
+| `endsWith`               | `{ "endsWith": ".pdf" }`                           | any        | Value string ends with the operand.                                      |
 | `exists`                  | `{ "exists": true }`                                | bool       | Field presence. Combines with value conditions (AND).                   |
 | `in`                      | `{ "in": ["us-east-1", "eu-west-1"] }`              | array      | Any element deep-equals the value. Requires the field to exist.          |
-| `not_in`                  | `{ "not_in": ["us-east-1", "eu-west-1"] }`           | array      | No element deep-equals the value. Requires the field to exist.          |
+| `notIn`                  | `{ "notIn": ["us-east-1", "eu-west-1"] }`           | array      | No element deep-equals the value. Requires the field to exist.          |
 
 ### Operator names
 
 `eq` / `ne` / `gt` / `gte` / `lt` / `lte` intentionally follow the abbreviated
 conventions familiar from MongoDB (`eq` / `ne` / `gt` / `gte` / `lt` / `lte`)
 and DynamoDB (`EQ` / `NE` / `GT` / `GE` / `LT` / `LE`) — not to replicate those
-APIs but to reduce the learning curve with well-known names. `starts_with` /
-`ends_with` read as plain English. The goal is familiarity, not parity.
+APIs but to reduce the learning curve with well-known names. `startsWith` /
+`endsWith` read as plain English. The goal is familiarity, not parity.
 
 ### Notes
 
 - **Value-dependent operators require the field to exist.** `ne`,
-  `in`, `not_in`, and the numeric comparisons evaluate to `false` when the
+  `in`, `notIn`, and the numeric comparisons evaluate to `false` when the
   field is missing — a missing field cannot satisfy a content predicate. Use
   `exists` to reason about presence explicitly.
 - **`eq` on numbers is numeric.** `int32(5)` equals `float64(5.0)` in DSL
@@ -84,13 +84,13 @@ Field names may use dot notation to reach nested objects:
 
 ```json
 {
-  "new_image": {
+  "newImage": {
     "address.city": { "eq": "Berlin" }
   }
 }
 ```
 
-`address.city` reads `new_image["address"]["city"]` recursively through nested
+`address.city` reads `newImage["address"]["city"]` recursively through nested
 maps. A missing intermediate segment is treated as field-absent — the same
 semantics as a missing top-level field (so value-dependent operators fail, and
 `exists: false` matches). Top-level behavior is unchanged when no dots are
@@ -100,12 +100,12 @@ present.
 
 ## Supported Value Types
 
-- **string** — for `eq`, `ne`, `contains`, `starts_with`,
-  `ends_with`, `in`, `not_in`.
-- **number** (int / float) — for `eq`, `ne`, `in`, `not_in`, and
+- **string** — for `eq`, `ne`, `contains`, `startsWith`,
+  `endsWith`, `in`, `notIn`.
+- **number** (int / float) — for `eq`, `ne`, `in`, `notIn`, and
   the numeric comparison operators (`gt`, etc.). JSON numbers arrive
   as floats; ints and floats compare numerically.
-- **bool** — for `eq`, `ne`, `in`, `not_in`, and `exists`.
+- **bool** — for `eq`, `ne`, `in`, `notIn`, and `exists`.
 - **null** — handled via `exists: false`. A `null`/missing value is treated as
   absent; there is no `eq: null` operator.
 
@@ -116,50 +116,50 @@ present.
 ### `eq`
 
 ```json
-{ "new_image": { "status": { "eq": "active" } } }
+{ "newImage": { "status": { "eq": "active" } } }
 ```
 
 ### `ne`
 
 ```json
-{ "old_image": { "status": { "ne": "deleted" } } }
+{ "oldImage": { "status": { "ne": "deleted" } } }
 ```
 
 ### `gt` / `gte` / `lt` / `lte`
 
 ```json
-{ "new_image": { "age": { "gt": 18 } } }
-{ "new_image": { "age": { "gte": 18 } } }
-{ "new_image": { "age": { "lt": 65 } } }
-{ "new_image": { "age": { "lte": 65 } } }
+{ "newImage": { "age": { "gt": 18 } } }
+{ "newImage": { "age": { "gte": 18 } } }
+{ "newImage": { "age": { "lt": 65 } } }
+{ "newImage": { "age": { "lte": 65 } } }
 ```
 
 ### `contains`
 
 ```json
-{ "new_image": { "email": { "contains": "gmail" } } }
-{ "new_image": { "tags": { "contains": "go" } } }
+{ "newImage": { "email": { "contains": "gmail" } } }
+{ "newImage": { "tags": { "contains": "go" } } }
 ```
 
-### `starts_with` / `ends_with`
+### `startsWith` / `endsWith`
 
 ```json
-{ "new_image": { "status": { "starts_with": "blocked_" } } }
-{ "new_image": { "file": { "ends_with": ".pdf" } } }
+{ "newImage": { "status": { "startsWith": "blocked_" } } }
+{ "newImage": { "file": { "endsWith": ".pdf" } } }
 ```
 
 ### `exists`
 
 ```json
-{ "new_image": { "email": { "exists": true } } }
-{ "old_image": { "email": { "exists": false } } }
+{ "newImage": { "email": { "exists": true } } }
+{ "oldImage": { "email": { "exists": false } } }
 ```
 
-### `in` / `not_in`
+### `in` / `notIn`
 
 ```json
-{ "new_image": { "region": { "in": ["us-east-1", "eu-west-1"] } } }
-{ "new_image": { "region": { "not_in": ["us-east-1", "eu-west-1"] } } }
+{ "newImage": { "region": { "in": ["us-east-1", "eu-west-1"] } } }
+{ "newImage": { "region": { "notIn": ["us-east-1", "eu-west-1"] } } }
 ```
 
 ---
@@ -170,8 +170,8 @@ Multiple criteria within a field are ANDed, and multiple fields are ANDed:
 
 ```json
 {
-  "new_image": {
-    "status": { "eq": "active", "starts_with": "act" },
+  "newImage": {
+    "status": { "eq": "active", "startsWith": "act" },
     "age": { "gt": 18 },
     "region": { "in": ["us-east-1", "eu-west-1"] }
   }
@@ -197,7 +197,7 @@ modeled by creating **multiple sinks** on the same destination:
 ```json
 {
   "filter": {
-    "new_image": { "status": { "eq": "ACTIVE" } }
+    "newImage": { "status": { "eq": "ACTIVE" } }
   }
 }
 ```
@@ -207,7 +207,7 @@ modeled by creating **multiple sinks** on the same destination:
 ```json
 {
   "filter": {
-    "new_image": {
+    "newImage": {
       "tenant": { "eq": "acme" },
       "status": { "eq": "ACTIVE" }
     }
@@ -236,11 +236,11 @@ The rationale for this simplicity:
 ```json
 {
   "filter": {
-    "new_image": {
+    "newImage": {
       "tenant": { "eq": "acme" },
       "status": { "eq": "ACTIVE" }
     },
-    "old_image": {
+    "oldImage": {
       "deleted": { "eq": false }
     }
   }
@@ -249,19 +249,19 @@ The rationale for this simplicity:
 
 An event is delivered only when the new image's `tenant` is `acme` **and** its
 `status` is `ACTIVE` **and** the old image's `deleted` is `false`. A declared
-block whose image is absent (e.g. `old_image` on an `INSERT`) evaluates to
+block whose image is absent (e.g. `oldImage` on an `INSERT`) evaluates to
 `false`, so this filter never matches an `INSERT`.
 
 ---
 
-## Using `new_image` Only / `old_image` Only / Both
+## Using `newImage` Only / `oldImage` Only / Both
 
 Filter only the new image:
 
 ```json
 {
   "filter": {
-    "new_image": { "status": { "eq": "active" } }
+    "newImage": { "status": { "eq": "active" } }
   }
 }
 ```
@@ -271,7 +271,7 @@ Filter only the old image:
 ```json
 {
   "filter": {
-    "old_image": { "status": { "eq": "pending" } }
+    "oldImage": { "status": { "eq": "pending" } }
   }
 }
 ```
@@ -281,8 +281,8 @@ Filter both (both must match):
 ```json
 {
   "filter": {
-    "old_image": { "status": { "ne": "active" } },
-    "new_image": { "status": { "eq": "blocked" } }
+    "oldImage": { "status": { "ne": "active" } },
+    "newImage": { "status": { "eq": "blocked" } }
   }
 }
 ```
@@ -291,11 +291,11 @@ Filter both (both must match):
 
 ## Absent-Image Behavior
 
-- A **`REMOVE`** event has no `new_image`; a `new_image` filter never matches it.
-- An **`old_image`** filter never matches `INSERT` events, or collections
-  streaming with `old_image=false` (no pre-image is recorded).
+- A **`REMOVE`** event has no `newImage`; a `newImage` filter never matches it.
+- An **`oldImage`** filter never matches `INSERT` events, or collections
+  streaming with `oldImage=false` (no pre-image is recorded).
 - This is **decoupled from the collection's current configuration**: sink
-  creation does not reject an `old_image` filter on a collection currently
-  streaming with `old_image=false`. If the stream is later re-enabled with
-  `old_image=true`, the existing sink simply starts matching. Until then,
+  creation does not reject an `oldImage` filter on a collection currently
+  streaming with `oldImage=false`. If the stream is later re-enabled with
+  `oldImage=true`, the existing sink simply starts matching. Until then,
   unmatched events are silently (by design) not delivered to that sink.

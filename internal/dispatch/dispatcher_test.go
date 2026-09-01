@@ -234,13 +234,13 @@ func TestDispatcherUpdateKeepsTransport(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, 1, transport.sent, "event matching new filter/event type should be delivered")
 
-	// An event type excluded by the new event_types is not delivered.
+	// An event type excluded by the new eventTypes is not delivered.
 	err = d.Dispatch(ctx, "table1", streams.StreamRecord{
 		RecordType: streams.InsertRecord,
 		NewImage:   bson.M{"status": "active"},
 	})
 	assert.NoError(t, err)
-	assert.Equal(t, 1, transport.sent, "INSERT is excluded by new event_types")
+	assert.Equal(t, 1, transport.sent, "INSERT is excluded by new eventTypes")
 
 	// An event matching the new event type but not the new filter is not delivered.
 	err = d.Dispatch(ctx, "table1", streams.StreamRecord{

@@ -6,11 +6,11 @@ export interface FilterCondition {
   lt?: any;
   lte?: any;
   contains?: any;
-  starts_with?: any;
-  ends_with?: any;
+  startsWith?: any;
+  endsWith?: any;
   exists?: boolean;
   in?: any[];
-  not_in?: any[];
+  notIn?: any[];
 }
 
 export interface ImageFilter {
@@ -18,33 +18,33 @@ export interface ImageFilter {
 }
 
 export interface Filter {
-  old_image?: ImageFilter;
-  new_image?: ImageFilter;
+  oldImage?: ImageFilter;
+  newImage?: ImageFilter;
 }
 
 export interface SinkConfig {
   type: string;
   endpoint?: string;
-  bearer_token?: string;
-  event_types?: string[];
+  bearerToken?: string;
+  eventTypes?: string[];
   filter?: Filter;
-  event_bus_name?: string;
+  eventBusName?: string;
   source?: string;
-  index_name?: string;
+  indexName?: string;
 }
 
 export interface CollectionConfig {
   _id?: string;
-  collection_name: string;
-  partition_key?: string;
-  sort_key?: string;
-  stream_enabled: boolean;
-  old_image: boolean;
-  ttl_attribute?: string;
+  collectionName: string;
+  partitionKey?: string;
+  sortKey?: string;
+  streamEnabled: boolean;
+  oldImage: boolean;
+  ttlAttribute?: string;
   sinks: SinkConfig[];
-  deletion_protection: boolean;
-  created_at?: string;
-  updated_at?: string;
+  deletionProtection: boolean;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export async function clientLoader() {

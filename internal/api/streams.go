@@ -11,13 +11,13 @@ func (s *Server) createStream(c *gin.Context) {
 	name := c.Param("name")
 
 	var body struct {
-		OldImage *bool `json:"old_image"`
+		OldImage *bool `json:"oldImage"`
 	}
 	if !bindJSON(c, &body) {
 		return
 	}
 	if body.OldImage == nil {
-		writeError(c, newBadRequest("old_image is required"))
+		writeError(c, newBadRequest("oldImage is required"))
 		return
 	}
 

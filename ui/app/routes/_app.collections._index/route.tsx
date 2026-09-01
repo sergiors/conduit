@@ -54,16 +54,16 @@ export default function Route() {
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const handleDelete = async () => {
-    if (!deletingCollection?.collection_name) return;
+    if (!deletingCollection?.collectionName) return;
 
     setIsSubmitting(true);
     setDeleteError(null);
     try {
-      const name = deletingCollection.collection_name;
+      const name = deletingCollection.collectionName;
 
       // If the collection is protected, disable protection first via the
       // dedicated endpoint. The dialog already confirmed this intent.
-      if (deletingCollection.deletion_protection) {
+      if (deletingCollection.deletionProtection) {
         const disableRes = await fetch(`/api/collections/${name}/protection`, {
           method: "DELETE",
         });
@@ -132,25 +132,25 @@ export default function Route() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {deletingCollection?.deletion_protection
+              {deletingCollection?.deletionProtection
                 ? "Disable Protection & Delete Collection"
                 : "Delete Collection"}
             </AlertDialogTitle>
             <AlertDialogDescription>
               Are you sure you want to delete the collection{" "}
               <span className="font-medium text-foreground">
-                {deletingCollection?.collection_name}
+                {deletingCollection?.collectionName}
               </span>
               ? This action cannot be undone.
             </AlertDialogDescription>
-            {deletingCollection?.deletion_protection && (
+            {deletingCollection?.deletionProtection && (
               <AlertDialogDescription className="text-amber-600 dark:text-amber-500">
                 This collection has deletion protection enabled. Deleting it
                 will disable protection first.
               </AlertDialogDescription>
             )}
           </AlertDialogHeader>
-          {deletingCollection?.deletion_protection && (
+          {deletingCollection?.deletionProtection && (
             <label className="flex items-start gap-2 text-sm cursor-pointer">
               <Checkbox
                 checked={confirmDelete}
@@ -169,12 +169,12 @@ export default function Route() {
               onClick={handleDelete}
               disabled={
                 isSubmitting ||
-                (!!deletingCollection?.deletion_protection && !confirmDelete)
+                (!!deletingCollection?.deletionProtection && !confirmDelete)
               }
             >
               {isSubmitting
                 ? "Deleting..."
-                : deletingCollection?.deletion_protection
+                : deletingCollection?.deletionProtection
                   ? "Disable protection & delete"
                   : "Delete"}
             </AlertDialogAction>
@@ -209,7 +209,7 @@ export default function Route() {
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {collections.map((collection: CollectionConfig) => (
             <Card
-              key={collection._id || collection.collection_name}
+              key={collection._id || collection.collectionName}
               className="relative"
             >
               <CardHeader>
@@ -217,7 +217,7 @@ export default function Route() {
                   <div className="flex items-center gap-2">
                     <DatabaseIcon className="h-5 w-5 text-muted-foreground" />
                     <CardTitle className="text-lg">
-                      {collection.collection_name}
+                      {collection.collectionName}
                     </CardTitle>
                   </div>
                   <DropdownMenu>
@@ -229,16 +229,16 @@ export default function Route() {
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                       <DropdownMenuItem asChild>
-                        <Link to={`/documents/${collection.collection_name}`}>
+                        <Link to={`/documents/${collection.collectionName}`}>
                           Documents
                         </Link>
                       </DropdownMenuItem>
                       <DropdownMenuItem
-                        disabled={!collection.stream_enabled}
+                        disabled={!collection.streamEnabled}
                         asChild
                       >
                         <Link
-                          to={`/collections/${collection.collection_name}/sinks`}
+                          to={`/collections/${collection.collectionName}/sinks`}
                         >
                           Sinks
                         </Link>
@@ -246,7 +246,7 @@ export default function Route() {
                       <DropdownMenuSeparator />
                       <DropdownMenuItem asChild>
                         <Link
-                          to={`/collections/${collection.collection_name}/settings`}
+                          to={`/collections/${collection.collectionName}/settings`}
                         >
                           Settings
                         </Link>
@@ -261,19 +261,19 @@ export default function Route() {
                   </DropdownMenu>
                 </div>
                 <CardDescription>
-                  {collection.partition_key && (
+                  {collection.partitionKey && (
                     <span className="mr-3">
                       PK:{" "}
                       <code className="text-xs bg-muted px-1 rounded">
-                        {collection.partition_key}
+                        {collection.partitionKey}
                       </code>
                     </span>
                   )}
-                  {collection.sort_key && (
+                  {collection.sortKey && (
                     <span>
                       SK:{" "}
                       <code className="text-xs bg-muted px-1 rounded">
-                        {collection.sort_key}
+                        {collection.sortKey}
                       </code>
                     </span>
                   )}
@@ -283,34 +283,34 @@ export default function Route() {
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <div className="flex items-center gap-2">
                     <div
-                      className={`h-2 w-2 rounded-full ${collection.stream_enabled ? "bg-green-500" : "bg-muted"}`}
+                      className={`h-2 w-2 rounded-full ${collection.streamEnabled ? "bg-green-500" : "bg-muted"}`}
                     />
                     <span className="text-muted-foreground">Stream</span>
                     <span className="font-medium">
-                      {collection.stream_enabled ? "On" : "Off"}
+                      {collection.streamEnabled ? "On" : "Off"}
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
                     <div
-                      className={`h-2 w-2 rounded-full ${collection.old_image ? "bg-blue-500" : "bg-muted"}`}
+                      className={`h-2 w-2 rounded-full ${collection.oldImage ? "bg-blue-500" : "bg-muted"}`}
                     />
                     <span className="text-muted-foreground">Old Image</span>
                     <span className="font-medium">
-                      {collection.old_image ? "Yes" : "No"}
+                      {collection.oldImage ? "Yes" : "No"}
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="text-muted-foreground">TTL</span>
                     <span className="font-medium">
-                      {collection.ttl_attribute || "-"}
+                      {collection.ttlAttribute || "-"}
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="text-muted-foreground">Protection</span>
                     <span
-                      className={`font-medium ${collection.deletion_protection ? "text-amber-600" : "text-green-600"}`}
+                      className={`font-medium ${collection.deletionProtection ? "text-amber-600" : "text-green-600"}`}
                     >
-                      {collection.deletion_protection ? "On" : "Off"}
+                      {collection.deletionProtection ? "On" : "Off"}
                     </span>
                   </div>
                 </div>

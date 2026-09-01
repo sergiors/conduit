@@ -9,7 +9,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-// EnableStream enables the CDC stream for a collection and configures old_image.
+// EnableStream enables the CDC stream for a collection and configures oldImage.
 //
 // When oldImage is true, the physical collection's changeStreamPreAndPostImages
 // capability is ensured first: without it MongoDB silently omits
@@ -23,8 +23,8 @@ func (m *Manager) EnableStream(ctx context.Context, name string, oldImage bool) 
 	// Atomic conditional update: only succeeds when the stream is not enabled
 	// yet, validating existence before any MongoDB-level side effect.
 	filter := bson.M{
-		"collection_name": name,
-		"stream_enabled":  bson.M{"$ne": true},
+		"collectionName": name,
+		"streamEnabled":  bson.M{"$ne": true},
 	}
 
 	// First-start checkpoint: derives from the API host clock, assuming
@@ -34,10 +34,10 @@ func (m *Manager) EnableStream(ctx context.Context, name string, oldImage bool) 
 
 	update := bson.M{
 		"$set": bson.M{
-			"stream_enabled":    true,
-			"old_image":         oldImage,
-			"stream_started_at": checkpoint,
-			"updated_at":        time.Now(),
+			"streamEnabled":    true,
+			"oldImage":         oldImage,
+			"streamStartedAt": checkpoint,
+			"updatedAt":        time.Now(),
 		},
 	}
 
@@ -72,14 +72,14 @@ func (m *Manager) EnableStream(ctx context.Context, name string, oldImage bool) 
 func (m *Manager) rollbackStream(ctx context.Context, name string) error {
 	_, err := m.collection.UpdateOne(
 		ctx,
-		bson.M{"collection_name": name},
+		bson.M{"collectionName": name},
 		bson.M{"$set": bson.M{
-			"stream_enabled": false,
-			"old_image":      false,
-			"updated_at":     time.Now(),
+			"streamEnabled": false,
+			"oldImage":      false,
+			"updatedAt":     time.Now(),
 		},
 			"$unset": bson.M{
-				"stream_started_at": "",
+				"streamStartedAt": "",
 			}},
 	)
 	if err != nil {
@@ -88,7 +88,7 @@ func (m *Manager) rollbackStream(ctx context.Context, name string) error {
 	return nil
 }
 
-// DisableStream disables the CDC stream and clears old_image — and unsets the
+// DisableStream disables the CDC stream and clears oldImage — and unsets the
 // first-start checkpoint, so a re-enable captures a fresh one. The physical
 // collection keeps its changeStreamPreAndPostImages capability (it can only be
 // granted, never revoked through Conduit). Idempotent; fires OnPublish
@@ -99,14 +99,14 @@ func (m *Manager) DisableStream(ctx context.Context, name string) error {
 	}
 	_, err := m.collection.UpdateOne(
 		ctx,
-		bson.M{"collection_name": name},
+		bson.M{"collectionName": name},
 		bson.M{"$set": bson.M{
-			"stream_enabled": false,
-			"old_image":      false,
-			"updated_at":     time.Now(),
+			"streamEnabled": false,
+			"oldImage":      false,
+			"updatedAt":     time.Now(),
 		},
 			"$unset": bson.M{
-				"stream_started_at": "",
+				"streamStartedAt": "",
 			}},
 	)
 	if err != nil {
@@ -119,7 +119,7 @@ func (m *Manager) DisableStream(ctx context.Context, name string) error {
 
 // ListStreamEnabled returns collections with streams enabled
 func (m *Manager) ListStreamEnabled(ctx context.Context) ([]Collection, error) {
-	cursor, err := m.collection.Find(ctx, bson.M{"stream_enabled": true})
+	cursor, err := m.collection.Find(ctx, bson.M{"streamEnabled": true})
 	if err != nil {
 		return nil, err
 	}
@@ -136,7 +136,7 @@ func (m *Manager) ListStreamEnabled(ctx context.Context) ([]Collection, error) {
 // capability on the physical collection via collMod, so MongoDB can serve
 // fullDocumentBeforeChange to the watcher. Idempotent. MongoDB versions before
 // 6.0 reject the command; the error aborts EnableStream — enabling a stream
-// with old_image on a deployment that cannot produce pre-images would silently
+// with oldImage on a deployment that cannot produce pre-images would silently
 // breach the event contract.
 func (m *Manager) ensureChangeStreamPreAndPostImages(ctx context.Context, name string) error {
 	cmd := bson.D{

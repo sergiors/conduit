@@ -16,7 +16,7 @@ func TestBindStrictJSON(t *testing.T) {
 	t.Run("accepts known fields", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
-		c.Request = httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"collection_name":"users","partition_key":"id","sort_key":"sk"}`))
+		c.Request = httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"collectionName":"users","partitionKey":"id","sortKey":"sk"}`))
 
 		var req CreateCollectionRequest
 		assert.True(t, bindStrictJSON(c, &req))
@@ -28,7 +28,7 @@ func TestBindStrictJSON(t *testing.T) {
 	t.Run("rejects unknown fields", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
-		c.Request = httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"collection_name":"users","stream_enabled":true}`))
+		c.Request = httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"collectionName":"users","streamEnabled":true}`))
 
 		var req CreateCollectionRequest
 		assert.False(t, bindStrictJSON(c, &req))

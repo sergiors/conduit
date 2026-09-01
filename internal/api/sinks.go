@@ -52,7 +52,7 @@ func (s *Server) deleteSink(c *gin.Context) {
 }
 
 // updateSink applies a partial (PATCH) update to a sink's mutable fields —
-// filter and event_types. type and spec are immutable: attempting to
+// filter and eventTypes. type and spec are immutable: attempting to
 // change them returns 400 sink_identity_immutable (create a new sink instead).
 func (s *Server) updateSink(c *gin.Context) {
 	ctx := c.Request.Context()

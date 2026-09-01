@@ -35,15 +35,15 @@ export default function NewCollectionRoute() {
   } = useForm<FormData>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      collection_name: "",
-      composite_keys: false,
-      partition_key: "",
-      sort_key: "",
-      deletion_protection: true,
+      collectionName: "",
+      compositeKeys: false,
+      partitionKey: "",
+      sortKey: "",
+      deletionProtection: true,
     } as FormData,
   });
 
-  const compositeKeys = watch("composite_keys");
+  const compositeKeys = watch("compositeKeys");
 
   const onSubmit = async (data: FormData) => {
     await submit(data, {
@@ -79,7 +79,7 @@ export default function NewCollectionRoute() {
 
             <FieldGroup>
               <Controller
-                name="collection_name"
+                name="collectionName"
                 control={control}
                 render={({ field, fieldState }) => (
                   <Field data-invalid={fieldState.invalid}>
@@ -92,14 +92,14 @@ export default function NewCollectionRoute() {
                       aria-invalid={fieldState.invalid}
                       placeholder="e.g., users, orders"
                     />
-                    <FieldError errors={[errors.collection_name]} />
+                    <FieldError errors={[errors.collectionName]} />
                   </Field>
                 )}
               />
 
               <Field orientation="horizontal" className="items-start">
                 <Controller
-                  name="composite_keys"
+                  name="compositeKeys"
                   control={control}
                   render={({ field }) => (
                     <FieldLabel className="has-data-checked:bg-transparent">
@@ -116,7 +116,7 @@ export default function NewCollectionRoute() {
               {compositeKeys && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 border rounded-4xl p-6">
                   <Controller
-                    name="partition_key"
+                    name="partitionKey"
                     control={control}
                     render={({ field, fieldState }) => (
                       <Field data-invalid={fieldState.invalid}>
@@ -129,13 +129,13 @@ export default function NewCollectionRoute() {
                           aria-invalid={fieldState.invalid}
                           placeholder="e.g., pk, id, userId"
                         />
-                        <FieldError errors={[errors.partition_key]} />
+                        <FieldError errors={[errors.partitionKey]} />
                       </Field>
                     )}
                   />
 
                   <Controller
-                    name="sort_key"
+                    name="sortKey"
                     control={control}
                     render={({ field, fieldState }) => (
                       <Field data-invalid={fieldState.invalid}>
@@ -146,7 +146,7 @@ export default function NewCollectionRoute() {
                           aria-invalid={fieldState.invalid}
                           placeholder="e.g., sk, sort, createdAt"
                         />
-                        <FieldError errors={[errors.sort_key]} />
+                        <FieldError errors={[errors.sortKey]} />
                       </Field>
                     )}
                   />

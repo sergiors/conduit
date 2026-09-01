@@ -18,7 +18,7 @@ import (
 
 // EventBridgeSpec holds the type-specific configuration for an EventBridge transport.
 type EventBridgeSpec struct {
-	EventBusName string `bson:"event_bus_name" json:"event_bus_name"`
+	EventBusName string `bson:"eventBusName" json:"eventBusName"`
 	Source       string `bson:"source,omitempty" json:"source,omitempty"`
 }
 
@@ -55,7 +55,7 @@ type EventBridgeTransport struct {
 // NewEventBridge builds an EventBridge transport from its spec.
 func NewEventBridge(ctx context.Context, spec EventBridgeSpec) dispatch.Transport {
 	if spec.EventBusName == "" {
-		log.Printf("EventBridge transport requires an event_bus_name")
+		log.Printf("EventBridge transport requires an eventBusName")
 		return nil
 	}
 

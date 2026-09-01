@@ -18,10 +18,10 @@ type FilterCondition struct {
 	Lt         any   `bson:"lt,omitempty"         json:"lt,omitempty"`
 	Lte        any   `bson:"lte,omitempty"        json:"lte,omitempty"`
 	Contains   any   `bson:"contains,omitempty"   json:"contains,omitempty"`
-	StartsWith any   `bson:"starts_with,omitempty" json:"starts_with,omitempty"`
-	EndsWith   any   `bson:"ends_with,omitempty"  json:"ends_with,omitempty"`
+	StartsWith any   `bson:"startsWith,omitempty" json:"startsWith,omitempty"`
+	EndsWith   any   `bson:"endsWith,omitempty"  json:"endsWith,omitempty"`
 	In         []any `bson:"in,omitempty"         json:"in,omitempty"`
-	NotIn      []any `bson:"not_in,omitempty"     json:"not_in,omitempty"`
+	NotIn      []any `bson:"notIn,omitempty"     json:"notIn,omitempty"`
 }
 
 // ImageFilter maps field names to a filter condition (AND across fields, AND within condition).
@@ -29,8 +29,8 @@ type ImageFilter map[string]FilterCondition
 
 // Filter is a declarative filter over an event's images, combined with AND.
 type Filter struct {
-	OldImage ImageFilter `bson:"old_image,omitempty" json:"old_image,omitempty"`
-	NewImage ImageFilter `bson:"new_image,omitempty" json:"new_image,omitempty"`
+	OldImage ImageFilter `bson:"oldImage,omitempty" json:"oldImage,omitempty"`
+	NewImage ImageFilter `bson:"newImage,omitempty" json:"newImage,omitempty"`
 }
 
 // Matches evaluates the filter against an event's two images.
@@ -47,7 +47,7 @@ func (c *Filter) Matches(newImage, oldImage interface{}) bool {
 	return true
 }
 
-// MatchImage checks whether a single image (old_image or new_image) matches
+// MatchImage checks whether a single image (oldImage or newImage) matches
 // the given filter.
 func MatchImage(image interface{}, filter ImageFilter) bool {
 	if len(filter) == 0 {

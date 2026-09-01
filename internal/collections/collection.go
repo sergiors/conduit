@@ -15,16 +15,16 @@ import (
 
 type Collection struct {
 	ID                 string               `bson:"_id,omitempty" json:"_id,omitempty"`
-	CollectionName     string               `bson:"collection_name,omitempty" json:"collection_name,omitempty"`
-	PartitionKey       string               `bson:"partition_key,omitempty" json:"partition_key,omitempty"`
-	SortKey            string               `bson:"sort_key,omitempty" json:"sort_key,omitempty"`
-	StreamEnabled      bool                 `bson:"stream_enabled" json:"stream_enabled"`
-	OldImage           bool                 `bson:"old_image" json:"old_image"`
-	StreamStartedAt    *primitive.Timestamp `bson:"stream_started_at,omitempty" json:"stream_started_at,omitempty"`
-	TTLAttribute       string               `bson:"ttl_attribute,omitempty" json:"ttl_attribute,omitempty"`
-	DeletionProtection bool                 `bson:"deletion_protection" json:"deletion_protection"`
-	CreatedAt          time.Time            `bson:"created_at" json:"created_at"`
-	UpdatedAt          time.Time            `bson:"updated_at" json:"updated_at"`
+	CollectionName     string               `bson:"collectionName,omitempty" json:"collectionName,omitempty"`
+	PartitionKey       string               `bson:"partitionKey,omitempty" json:"partitionKey,omitempty"`
+	SortKey            string               `bson:"sortKey,omitempty" json:"sortKey,omitempty"`
+	StreamEnabled      bool                 `bson:"streamEnabled" json:"streamEnabled"`
+	OldImage           bool                 `bson:"oldImage" json:"oldImage"`
+	StreamStartedAt    *primitive.Timestamp `bson:"streamStartedAt,omitempty" json:"streamStartedAt,omitempty"`
+	TTLAttribute       string               `bson:"ttlAttribute,omitempty" json:"ttlAttribute,omitempty"`
+	DeletionProtection bool                 `bson:"deletionProtection" json:"deletionProtection"`
+	CreatedAt          time.Time            `bson:"createdAt" json:"createdAt"`
+	UpdatedAt          time.Time            `bson:"updatedAt" json:"updatedAt"`
 }
 
 // Manager owns the lifecycle and configuration of CDC-monitored collections
@@ -100,7 +100,7 @@ func (m *Manager) purgeState(ctx context.Context, name string) {
 // CreateIndex creates the indexes required by the manager.
 func (m *Manager) CreateIndex(ctx context.Context) error {
 	collectionIndex := mongo.IndexModel{
-		Keys:    bson.D{{Key: "collection_name", Value: 1}},
+		Keys:    bson.D{{Key: "collectionName", Value: 1}},
 		Options: options.Index().SetUnique(true),
 	}
 	if _, err := m.collection.Indexes().CreateOne(ctx, collectionIndex); err != nil {
@@ -108,7 +108,7 @@ func (m *Manager) CreateIndex(ctx context.Context) error {
 	}
 
 	sinkIndex := mongo.IndexModel{
-		Keys: bson.D{{Key: "collection_id", Value: 1}},
+		Keys: bson.D{{Key: "collectionId", Value: 1}},
 	}
 	if _, err := m.sinks.Indexes().CreateOne(ctx, sinkIndex); err != nil {
 		return err
@@ -118,7 +118,7 @@ func (m *Manager) CreateIndex(ctx context.Context) error {
 	// with the same fingerprint (functional identity) for the same collection
 	// cannot coexist. This makes the CreateSink pre-check race-safe.
 	sinkFingerprintIndex := mongo.IndexModel{
-		Keys:    bson.D{{Key: "collection_id", Value: 1}, {Key: "fingerprint", Value: 1}},
+		Keys:    bson.D{{Key: "collectionId", Value: 1}, {Key: "fingerprint", Value: 1}},
 		Options: options.Index().SetUnique(true),
 	}
 	_, err := m.sinks.Indexes().CreateOne(ctx, sinkFingerprintIndex)
@@ -146,7 +146,7 @@ func (m *Manager) createCollection(ctx context.Context, collection *Collection) 
 
 	// Create the collection with pre- and post-image support enabled. This is a
 	// permanent capability of every managed collection, enabled exactly once at
-	// creation. It is independent of the old_image runtime flag: MongoDB is
+	// creation. It is independent of the oldImage runtime flag: MongoDB is
 	// always capable of producing pre-images, and Conduit decides at runtime
 	// whether to request and forward them. EnableStream additionally ensures
 	// the capability for collections created outside this path.
@@ -213,11 +213,11 @@ func (m *Manager) Create(ctx context.Context, collection *Collection) error {
 	}
 
 	if collection.SortKey != "" && collection.PartitionKey == "" {
-		return NewValidationError("partition_key is required when sort_key is defined")
+		return NewValidationError("partitionKey is required when sortKey is defined")
 	}
 
 	if collection.PartitionKey != "" && collection.PartitionKey == collection.SortKey {
-		return NewValidationError("sort_key cannot be the same as primary_key")
+		return NewValidationError("sortKey cannot be the same as primaryKey")
 	}
 
 	// Deletion protection is mandatory on create.
@@ -247,7 +247,7 @@ func (m *Manager) Create(ctx context.Context, collection *Collection) error {
 // Get retrieves a collection by name
 func (m *Manager) Get(ctx context.Context, name string) (*Collection, error) {
 	var collection Collection
-	err := m.collection.FindOne(ctx, bson.M{"collection_name": name}).Decode(&collection)
+	err := m.collection.FindOne(ctx, bson.M{"collectionName": name}).Decode(&collection)
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			return nil, ErrCollectionNotFound
@@ -327,7 +327,7 @@ func (m *Manager) Delete(ctx context.Context, name string) error {
 	}
 
 	// Delete the configuration
-	_, err = m.collection.DeleteOne(ctx, bson.M{"collection_name": name})
+	_, err = m.collection.DeleteOne(ctx, bson.M{"collectionName": name})
 	if err != nil {
 		return err
 	}

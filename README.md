@@ -71,8 +71,8 @@ Resume tokens are updated only after successful processing, so events are never 
 
 Configuration is applied at runtime through the REST API. Workers detect changes automatically via Redis Pub/Sub and periodic polling.
 
-- **Collections** — the root resource. Define the MongoDB collection name, optional `partition_key`/`sort_key`, and deletion protection.
-- **Streams** — opt a collection into CDC and choose whether to include `old_image`.
+- **Collections** — the root resource. Define the MongoDB collection name, optional `partitionKey`/`sortKey`, and deletion protection.
+- **Streams** — opt a collection into CDC and choose whether to include `oldImage`.
 - **Sinks** — define where events go. Multiple sinks per collection, each with event-type and image filtering.
 - **TTL** — specify a document field for MongoDB TTL indexing.
 - **Deletion protection** — prevent accidental collection deletion.
@@ -90,7 +90,7 @@ Configuration is applied at runtime through the REST API. Workers detect changes
 
 ### Streams
 
-- `POST /api/collections/:name/stream` — enable streaming with `old_image`
+- `POST /api/collections/:name/stream` — enable streaming with `oldImage`
 - `DELETE /api/collections/:name/stream` — disable streaming
 
 When a stream is enabled, Conduit records a start checkpoint. The first watcher run opens its change stream from that checkpoint, so every event written after enablement is streamed — there is no gap between enabling the stream and the worker picking it up (previously the first stream started at "now" and silently skipped that window).
@@ -109,7 +109,7 @@ When a stream is enabled, Conduit records a start checkpoint. The first watcher 
 
 - `GET /api/collections/:name/sinks` — list sinks
 - `POST /api/collections/:name/sinks` — create a sink
-- `PATCH /api/collections/:name/sinks/:id` — update a sink's mutable fields (`filter`, `event_types`); `type`/`spec` are immutable and return `400 sink_identity_immutable`
+- `PATCH /api/collections/:name/sinks/:id` — update a sink's mutable fields (`filter`, `eventTypes`); `type`/`spec` are immutable and return `400 sink_identity_immutable`
 - `DELETE /api/collections/:name/sinks/:id` — delete a sink
 
 ### Documents
@@ -137,20 +137,20 @@ curl -H "Authorization: Bearer $API_KEY" http://localhost:8080/api/collections
 
 ## Supported Sink Types
 
-Each sink type owns its own configuration, which lives in a `spec` object in the sink payload. The shared sink model only carries common metadata (`type`, `event_types`, `filter`).
+Each sink type owns its own configuration, which lives in a `spec` object in the sink payload. The shared sink model only carries common metadata (`type`, `eventTypes`, `filter`).
 
 ### Filter Criteria Semantics
 
 `filter` is declarative: a sink **without** a `filter` receives **every event**; with a `filter`, an event is delivered only when **every declared criterion matches**.
 
 - A filter block you don't declare is ignored.
-- A declared filter block (e.g. `old_image`) whose image is **absent** evaluates to `false` — so an `old_image` filter never matches `INSERT` events or collections streaming with `old_image=false`, and a `new_image` filter never matches `REMOVE` events. This is intentional: a content predicate needs content to match.
-- Sink filters are independent of the collection's current configuration. Sink creation does **not** reject an `old_image` filter on a collection currently streaming with `old_image=false` — if you later re-enable the stream with `old_image=true`, the existing sink simply starts matching. Until then, unmatched events are silently (by design) not delivered to that sink.
+- A declared filter block (e.g. `oldImage`) whose image is **absent** evaluates to `false` — so an `oldImage` filter never matches `INSERT` events or collections streaming with `oldImage=false`, and a `newImage` filter never matches `REMOVE` events. This is intentional: a content predicate needs content to match.
+- Sink filters are independent of the collection's current configuration. Sink creation does **not** reject an `oldImage` filter on a collection currently streaming with `oldImage=false` — if you later re-enable the stream with `oldImage=true`, the existing sink simply starts matching. Until then, unmatched events are silently (by design) not delivered to that sink.
 - The filter is a **flat, AND-only** predicate: an event is delivered only when *every* declared criterion matches. Complex boolean expressions (OR, etc.) are expressed by creating **multiple sinks** on the same destination.
 
 The full operator reference is in [`docs/filter.md`](docs/filter.md).
 
-`filter` and `event_types` changes apply **live**: a PATCH is picked up on the next config refresh and swapped atomically into the running sink without recreating its transport or interrupting delivery. Changing `type`/`spec` (where events go) is immutable and requires creating a new sink.
+`filter` and `eventTypes` changes apply **live**: a PATCH is picked up on the next config refresh and swapped atomically into the running sink without recreating its transport or interrupting delivery. Changing `type`/`spec` (where events go) is immutable and requires creating a new sink.
 
 ### HTTP
 
@@ -161,7 +161,7 @@ Sends `StreamRecord` JSON documents to a webhook endpoint via `POST`. Supports a
   "type": "http",
   "spec": {
     "endpoint": "https://example.com/webhook",
-    "bearer_token": "secret"
+    "bearerToken": "secret"
   }
 }
 ```
@@ -170,14 +170,14 @@ Sends `StreamRecord` JSON documents to a webhook endpoint via `POST`. Supports a
 
 Fully implemented sink that publishes `StreamRecord` documents to an AWS
 EventBridge event bus via `PutEvents`. The spec contains ONLY EventBridge
-routing config (`event_bus_name`, and an optional `source`) — AWS credentials
+routing config (`eventBusName`, and an optional `source`) — AWS credentials
 and the region are NEVER part of the sink spec.
 
 ```json
 {
   "type": "eventbridge",
   "spec": {
-    "event_bus_name": "default",
+    "eventBusName": "default",
     "source": "conduit"
   }
 }
@@ -209,7 +209,7 @@ first delivery.
 ### Meilisearch
 
 Delivers stream records to Meilisearch for full-text indexing. Documents are
-upserted into the configured `index_name` (keyed by the change event's
+upserted into the configured `indexName` (keyed by the change event's
 document id), and `REMOVE` events delete the document from the index.
 
 Durability: Meilisearch processes writes asynchronously — the enqueue call
@@ -223,8 +223,8 @@ timed-out delivery is retried by the pipeline's retry queue.
   "type": "meilisearch",
   "spec": {
     "host": "https://search.example.com",
-    "api_key": "secret",
-    "index_name": "users"
+    "apiKey": "secret",
+    "indexName": "users"
   }
 }
 ```

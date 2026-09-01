@@ -16,9 +16,9 @@
 //
 // Pre-image support is a permanent capability of every managed collection: the
 // physical MongoDB collection is created with changeStreamPreAndPostImages
-// enabled, and the capability is never disabled afterwards. The old_image flag
+// enabled, and the capability is never disabled afterwards. The oldImage flag
 // is a runtime behavior that tells the watcher whether to request and forward
-// pre-images; enabling a stream with old_image also ensures (idempotently) that
+// pre-images; enabling a stream with oldImage also ensures (idempotently) that
 // the physical collection has the capability, repairing collections created by
 // older Conduit versions or outside Conduit. MongoDB configuration and Conduit
 // configuration are therefore almost entirely independent.
@@ -26,15 +26,15 @@
 // Collection Schema:
 //
 //	{
-//	  "collection_name": "users",
-//	  "stream_enabled": true,
-//	  "old_image": true,
-//	  "stream_started_at": { "t": 1787932086, "i": 1 },
-//	  "ttl_attribute": "expiresAt",
-//	  "deletion_protection": true
+//	  "collectionName": "users",
+//	  "streamEnabled": true,
+//	  "oldImage": true,
+//	  "streamStartedAt": { "t": 1787932086, "i": 1 },
+//	  "ttlAttribute": "expiresAt",
+//	  "deletionProtection": true
 //	}
 //
-// stream_started_at is the first-start checkpoint captured by EnableStream (a
+// streamStartedAt is the first-start checkpoint captured by EnableStream (a
 // primitive.Timestamp from the API host clock with increment 1). The watcher
 // uses it as startAtOperationTime on its first run (when no resume token exists)
 // so events written between enablement and the watcher start are streamed rather

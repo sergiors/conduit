@@ -29,7 +29,7 @@ func TestManagerStream(t *testing.T) {
 	}
 	require.NoError(t, manager.Create(ctx, table))
 
-	t.Run("enable stream with old_image", func(t *testing.T) {
+	t.Run("enable stream with oldImage", func(t *testing.T) {
 		require.NoError(t, manager.EnableStream(ctx, "stream_test_table", true))
 		got, err := manager.Get(ctx, "stream_test_table")
 		require.NoError(t, err)
@@ -37,11 +37,11 @@ func TestManagerStream(t *testing.T) {
 		assert.True(t, got.OldImage)
 		// The first-start checkpoint must be captured at enablement and be a
 		// recent timestamp (within a minute of now).
-		require.NotNil(t, got.StreamStartedAt, "EnableStream must record stream_started_at")
+		require.NotNil(t, got.StreamStartedAt, "EnableStream must record streamStartedAt")
 		assert.InDelta(t, time.Now().Unix(), got.StreamStartedAt.T, 60, "checkpoint must be near the enablement time")
 	})
 
-	t.Run("re-enable stream with same old_image is immutable", func(t *testing.T) {
+	t.Run("re-enable stream with same oldImage is immutable", func(t *testing.T) {
 		err := manager.EnableStream(ctx, "stream_test_table", true)
 		assert.Error(t, err)
 		assert.True(t, errors.Is(err, ErrStreamAlreadyExists), "should match ErrStreamAlreadyExists")
@@ -50,12 +50,12 @@ func TestManagerStream(t *testing.T) {
 		assert.True(t, got.OldImage)
 	})
 
-	t.Run("change old_image after enabled is immutable", func(t *testing.T) {
+	t.Run("change oldImage after enabled is immutable", func(t *testing.T) {
 		err := manager.EnableStream(ctx, "stream_test_table", false)
 		assert.Error(t, err)
 		assert.True(t, errors.Is(err, ErrStreamAlreadyExists), "should match ErrStreamAlreadyExists")
 		got, _ := manager.Get(ctx, "stream_test_table")
-		assert.True(t, got.OldImage, "old_image should remain unchanged")
+		assert.True(t, got.OldImage, "oldImage should remain unchanged")
 	})
 
 	t.Run("disable stream resets both and allows redefinition", func(t *testing.T) {
@@ -64,7 +64,7 @@ func TestManagerStream(t *testing.T) {
 		assert.False(t, got.StreamEnabled)
 		assert.False(t, got.OldImage)
 		// Disabling must clear the first-start checkpoint.
-		assert.Nil(t, got.StreamStartedAt, "DisableStream must unset stream_started_at")
+		assert.Nil(t, got.StreamStartedAt, "DisableStream must unset streamStartedAt")
 
 		require.NoError(t, manager.EnableStream(ctx, "stream_test_table", false))
 		got, _ = manager.Get(ctx, "stream_test_table")
@@ -93,7 +93,7 @@ func TestManagerStream(t *testing.T) {
 }
 
 // TestEnableStreamEnsuresPreImageCapability is the regression test for the
-// end-to-end old_image contract: when a stream is enabled with old_image, the
+// end-to-end oldImage contract: when a stream is enabled with oldImage, the
 // physical MongoDB collection MUST have the changeStreamPreAndPostImages
 // capability. Without it, MongoDB accepts the change stream but silently omits
 // fullDocumentBeforeChange on update/replace/delete events — the pre-image is
@@ -127,7 +127,7 @@ func TestEnableStreamEnsuresPreImageCapability(t *testing.T) {
 	// Sanity check: the collection starts without the capability.
 	assert.False(t, hasPreImageCapability(ctx, t, client, name), "precondition: fresh collection has no pre-image capability")
 
-	// Enable the stream with old_image; EnableStream must repair the gap.
+	// Enable the stream with oldImage; EnableStream must repair the gap.
 	table := &Collection{CollectionName: name, StreamEnabled: false}
 	require.NoError(t, manager.Create(ctx, table))
 	require.NoError(t, manager.EnableStream(ctx, name, true))

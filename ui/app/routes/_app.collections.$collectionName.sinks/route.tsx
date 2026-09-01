@@ -69,7 +69,7 @@ function formToAPICriteria(
 ): Filter {
   if (!form) return {};
   const criteria: Filter = {};
-  for (const image of ["old_image", "new_image"] as const) {
+  for (const image of ["oldImage", "newImage"] as const) {
     const filters = form[image];
     if (!filters?.length) continue;
     const filter: Record<string, import("./schema").FilterCondition> = {};
@@ -81,7 +81,7 @@ function formToAPICriteria(
           cond.exists = condition.value === "true";
         } else if (
           condition.type === "in" ||
-          condition.type === "not_in"
+          condition.type === "notIn"
         ) {
           const raw = condition.value?.trim();
           if (raw) {
@@ -106,15 +106,15 @@ function formToAPICriteria(
 }
 
 function apiToFormCriteria(criteria: Filter | undefined): {
-  old_image: FieldFilter[];
-  new_image: FieldFilter[];
+  oldImage: FieldFilter[];
+  newImage: FieldFilter[];
 } {
-  const form: { old_image: FieldFilter[]; new_image: FieldFilter[] } = {
-    old_image: [],
-    new_image: [],
+  const form: { oldImage: FieldFilter[]; newImage: FieldFilter[] } = {
+    oldImage: [],
+    newImage: [],
   };
   if (!criteria) return form;
-  for (const image of ["old_image", "new_image"] as const) {
+  for (const image of ["oldImage", "newImage"] as const) {
     const filter = criteria[image];
     if (!filter) continue;
     const filters: FieldFilter[] = [];
@@ -126,7 +126,7 @@ function apiToFormCriteria(criteria: Filter | undefined): {
         if (value === undefined) continue;
         if (type === "exists") {
           f.conditions.push({ type, value: String(value) });
-        } else if (type === "in" || type === "not_in") {
+        } else if (type === "in" || type === "notIn") {
           f.conditions.push({
             type,
             value: Array.isArray(value) ? JSON.stringify(value) : String(value),
@@ -145,7 +145,7 @@ function apiToFormCriteria(criteria: Filter | undefined): {
 // --- Filter Criteria Editor ---
 
 interface FilterEditorProps {
-  imageType: "old_image" | "new_image";
+  imageType: "oldImage" | "newImage";
   destIndex: number;
   control: ReturnType<typeof useForm<SinksForm>>["control"];
 }
@@ -168,7 +168,7 @@ function FilterEditor({
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-          {imageType.replace("_", " ")}
+          {imageType === "oldImage" ? "old image" : "new image"}
         </span>
         <Button type="button" variant="outline" size="sm" onClick={addField}>
           <PlusIcon className="h-3.5 w-3.5 mr-1" />
@@ -356,20 +356,20 @@ function SinksForm({
         ? initialData.map((d) => ({
             type: d.type as "http" | "eventbridge" | "meilisearch",
             endpoint: d.endpoint ?? "",
-            bearer_token: d.bearer_token ?? "",
-            event_types: d.event_types ?? [],
+            bearerToken: d.bearerToken ?? "",
+            eventTypes: d.eventTypes ?? [],
             filter: apiToFormCriteria(d.filter),
-            event_bus_name: d.event_bus_name ?? "",
+            eventBusName: d.eventBusName ?? "",
             source: d.source ?? "",
-            index_name: d.index_name ?? "",
+            indexName: d.indexName ?? "",
           }))
         : [
             {
               type: "http" as const,
               endpoint: "",
-              bearer_token: "",
-              event_types: [],
-              filter: { old_image: [], new_image: [] },
+              bearerToken: "",
+              eventTypes: [],
+              filter: { oldImage: [], newImage: [] },
             },
           ],
     },
@@ -384,9 +384,9 @@ function SinksForm({
         {
           type: "http" as const,
           endpoint: "",
-          bearer_token: "",
-          event_types: [],
-          filter: { old_image: [], new_image: [] },
+          bearerToken: "",
+          eventTypes: [],
+          filter: { oldImage: [], newImage: [] },
         },
       ]);
       addedInitialRef.current = true;
@@ -399,12 +399,12 @@ function SinksForm({
     const payload = data.sinks.map((dest) => ({
       type: dest.type,
       endpoint: dest.endpoint,
-      bearer_token: dest.bearer_token,
-      event_types: dest.event_types,
+      bearerToken: dest.bearerToken,
+      eventTypes: dest.eventTypes,
       filter: formToAPICriteria(dest.filter),
-      event_bus_name: dest.event_bus_name,
+      eventBusName: dest.eventBusName,
       source: dest.source,
-      index_name: dest.index_name,
+      indexName: dest.indexName,
     }));
 
     try {
@@ -436,12 +436,12 @@ function SinksForm({
       {
         type: "http" as const,
         endpoint: "",
-        bearer_token: "",
-        event_types: [],
-        filter: { old_image: [], new_image: [] },
-        event_bus_name: "",
+        bearerToken: "",
+        eventTypes: [],
+        filter: { oldImage: [], newImage: [] },
+        eventBusName: "",
         source: "",
-        index_name: "",
+        indexName: "",
       },
     ]);
   };
@@ -518,7 +518,7 @@ function SinksForm({
                     <Field>
                       <FieldLabel>Bearer Token</FieldLabel>
                       <Controller
-                        name={`sinks.${index}.bearer_token` as const}
+                        name={`sinks.${index}.bearerToken` as const}
                         control={control}
                         render={({ field }) => (
                           <Input {...field} type="password" />
@@ -533,7 +533,7 @@ function SinksForm({
                     <Field>
                       <FieldLabel>Event Bus Name *</FieldLabel>
                       <Controller
-                        name={`sinks.${index}.event_bus_name` as const}
+                        name={`sinks.${index}.eventBusName` as const}
                         control={control}
                         render={({ field }) => (
                           <Input {...field} placeholder="my-event-bus" />
@@ -575,7 +575,7 @@ function SinksForm({
                       <Field>
                         <FieldLabel>API Key</FieldLabel>
                         <Controller
-                          name={`sinks.${index}.bearer_token` as const}
+                          name={`sinks.${index}.bearerToken` as const}
                           control={control}
                           render={({ field }) => (
                             <Input {...field} type="password" />
@@ -586,7 +586,7 @@ function SinksForm({
                     <Field>
                       <FieldLabel>Index Name</FieldLabel>
                       <Controller
-                        name={`sinks.${index}.index_name` as const}
+                        name={`sinks.${index}.indexName` as const}
                         control={control}
                         render={({ field }) => (
                           <Input
@@ -602,7 +602,7 @@ function SinksForm({
                 <Field>
                   <FieldLabel>Event Types *</FieldLabel>
                   <Controller
-                    name={`sinks.${index}.event_types` as const}
+                    name={`sinks.${index}.eventTypes` as const}
                     control={control}
                     render={({ field }) => (
                       <div className="flex flex-wrap gap-4">
@@ -627,7 +627,7 @@ function SinksForm({
                     )}
                   />
                   <FieldError
-                    errors={[errors.sinks?.[index]?.event_types]}
+                    errors={[errors.sinks?.[index]?.eventTypes]}
                   />
                 </Field>
 
@@ -635,13 +635,13 @@ function SinksForm({
                   <div className="text-sm font-medium">Filter Criteria</div>
 
                   <FilterEditor
-                    imageType="old_image"
+                    imageType="oldImage"
                     destIndex={index}
                     control={control}
                   />
 
                   <FilterEditor
-                    imageType="new_image"
+                    imageType="newImage"
                     destIndex={index}
                     control={control}
                   />

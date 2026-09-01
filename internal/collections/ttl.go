@@ -36,10 +36,10 @@ func (m *Manager) SetTTL(ctx context.Context, name, attribute string) error {
 
 	_, err = m.collection.UpdateOne(
 		ctx,
-		bson.M{"collection_name": name},
+		bson.M{"collectionName": name},
 		bson.M{"$set": bson.M{
-			"ttl_attribute": attribute,
-			"updated_at":    time.Now(),
+			"ttlAttribute": attribute,
+			"updatedAt":    time.Now(),
 		}},
 	)
 	if err != nil {
@@ -68,10 +68,10 @@ func (m *Manager) DisableTTL(ctx context.Context, name string) error {
 
 	_, err = m.collection.UpdateOne(
 		ctx,
-		bson.M{"collection_name": name},
+		bson.M{"collectionName": name},
 		bson.M{"$set": bson.M{
-			"ttl_attribute": "",
-			"updated_at":    time.Now(),
+			"ttlAttribute": "",
+			"updatedAt":    time.Now(),
 		}},
 	)
 	if err != nil {

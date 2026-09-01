@@ -23,6 +23,6 @@
 //
 // Stream Activation:
 //
-// Watchers are only created for collections with stream_enabled=true in config.collections.
+// Watchers are only created for collections with streamEnabled=true in config.collections.
 // The manager periodically syncs (every 30s by default) to detect changes.
 package watcher

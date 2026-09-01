@@ -65,7 +65,7 @@ Collections are stored in the MongoDB collection `config.collections`. Each docu
 
 Collections can operate in two modes:
 
-- **DynamoDB-compatible mode**: the operator defines a `partition_key` and an optional `sort_key`. Conduit creates a unique composite index on those fields and treats them as the logical primary key for CDC records.
+- **DynamoDB-compatible mode**: the operator defines a `partitionKey` and an optional `sortKey`. Conduit creates a unique composite index on those fields and treats them as the logical primary key for CDC records.
 - **MongoDB-native mode**: no key schema is defined. Documents are identified purely by MongoDB `_id`, and no DynamoDB-style key index is created.
 
 ## Collection Manager
@@ -78,17 +78,17 @@ A _document_ is a record inside a MongoDB collection. Conduit does not write doc
 
 ## Stream
 
-A _stream_ is the CDC subscription for a collection. Streams are opt-in. A collection has a stream only when `stream_enabled` is `true`. Enabling a stream also decides whether the worker requests the pre-image (`old_image`) of each change from MongoDB.
+A _stream_ is the CDC subscription for a collection. Streams are opt-in. A collection has a stream only when `streamEnabled` is `true`. Enabling a stream also decides whether the worker requests the pre-image (`oldImage`) of each change from MongoDB.
 
-Because `old_image` affects how the MongoDB change stream is opened, stream configuration is immutable once enabled. To change it, the operator must disable the stream and then re-enable it.
+Because `oldImage` affects how the MongoDB change stream is opened, stream configuration is immutable once enabled. To change it, the operator must disable the stream and then re-enable it.
 
-Enabling a stream captures a **first-start checkpoint**: a MongoDB cluster timestamp (taken from the API host clock with increment 1) persisted on the collection document as `stream_started_at`. The checkpoint's only job is to anchor the FIRST watcher run: with no resume token yet, the watcher opens its change stream with `startAtOperationTime == stream_started_at`, streaming every event from enablement instead of "now". This closes the enable → watcher-start window that otherwise silently dropped events written there. Once the first event is settled, normal per-event resume-token persistence takes over and the checkpoint is no longer consulted (a resume token always wins). The checkpoint is derived from the API host clock, so it relies on the operational assumption that the API host clock is reasonably aligned with the MongoDB cluster clock; small skew only shifts the replay anchor, never drops a token-covered event. `DisableStream` clears the checkpoint; re-enabling captures a fresh one.
+Enabling a stream captures a **first-start checkpoint**: a MongoDB cluster timestamp (taken from the API host clock with increment 1) persisted on the collection document as `streamStartedAt`. The checkpoint's only job is to anchor the FIRST watcher run: with no resume token yet, the watcher opens its change stream with `startAtOperationTime == streamStartedAt`, streaming every event from enablement instead of "now". This closes the enable → watcher-start window that otherwise silently dropped events written there. Once the first event is settled, normal per-event resume-token persistence takes over and the checkpoint is no longer consulted (a resume token always wins). The checkpoint is derived from the API host clock, so it relies on the operational assumption that the API host clock is reasonably aligned with the MongoDB cluster clock; small skew only shifts the replay anchor, never drops a token-covered event. `DisableStream` clears the checkpoint; re-enabling captures a fresh one.
 
 ## Sink
 
-A _sink_ is a destination for CDC events. Each sink belongs to exactly one collection and can filter by event type (`INSERT`, `MODIFY`, `REMOVE`) and by content of the `new_image` / `old_image` using the filter DSL: `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `contains`, `starts_with`, `ends_with`, `exists`, `in`, and `not_in`. See [`docs/filter.md`](docs/filter.md) for the full DSL reference.
+A _sink_ is a destination for CDC events. Each sink belongs to exactly one collection and can filter by event type (`INSERT`, `MODIFY`, `REMOVE`) and by content of the `newImage` / `oldImage` using the filter DSL: `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `contains`, `startsWith`, `endsWith`, `exists`, `in`, and `notIn`. See [`docs/filter.md`](docs/filter.md) for the full DSL reference.
 
-The shared `Sink` model carries only common metadata: `type`, an opaque `spec` payload, `event_types`, and `filter`. Type-specific settings (endpoint, region, host, etc.) live inside `spec` and are owned by the individual sink implementation. This keeps the shared model stable as new sink types are added.
+The shared `Sink` model carries only common metadata: `type`, an opaque `spec` payload, `eventTypes`, and `filter`. Type-specific settings (endpoint, region, host, etc.) live inside `spec` and are owned by the individual sink implementation. This keeps the shared model stable as new sink types are added.
 
 Sinks are persisted separately from collections in `config.sinks` so that a collection can have many sinks without bloating the collection document. The worker loads sinks when it starts or refreshes a watcher.
 
@@ -96,13 +96,13 @@ Sinks are persisted separately from collections in `config.sinks` so that a coll
 
 `filter` is purely **declarative** — a set of conditions an event must satisfy to be delivered to that sink. Evaluation (`internal/collections.Filter`, applied in `dispatch.RuntimeSink.Send`; full reference in [`docs/filter.md`](docs/filter.md)):
 
-- **No filter block declared** (`old_image` or `new_image` absent from `filter`): that image is not inspected at all — the block is ignored.
-- **Empty filter block declared** (`"new_image": {}`): matches every event that has that image.
+- **No filter block declared** (`oldImage` or `newImage` absent from `filter`): that image is not inspected at all — the block is ignored.
+- **Empty filter block declared** (`"newImage": {}`): matches every event that has that image.
 - **Every declared criterion must match** (AND across fields and within a field's conditions). An event is delivered only if _all_ declared criteria match.
-- **A declared filter block whose corresponding image is absent evaluates to `false`.** A `REMOVE` event has no `new_image`; an image the collection does not record (`old_image=false`) is always absent. This is the intended semantics: "match on the content of `old_image`" logically requires an `old_image` to exist — an absent image cannot satisfy a content predicate, the same way EventBridge patterns do not match missing fields.
+- **A declared filter block whose corresponding image is absent evaluates to `false`.** A `REMOVE` event has no `newImage`; an image the collection does not record (`oldImage=false`) is always absent. This is the intended semantics: "match on the content of `oldImage`" logically requires an `oldImage` to exist — an absent image cannot satisfy a content predicate, the same way EventBridge patterns do not match missing fields.
 - **Flat, AND-only predicates.** Filters are flat AND-only predicates per image block: every declared criterion must match. Recursive logical groups (`and` / `or`) were implemented and subsequently **removed**; boolean composition is intentionally delegated to multiple sinks — a design choice of simplicity over expression power.
 
-Sink filters are **declarative and intentionally decoupled from the collection's current configuration**: creation does not reject an `old_image` filter when the collection's stream currently has `old_image=false`, nor `new_image` criteria that cannot match `REMOVE` events. Configuration is immutable per stream cycle, but it _can_ change over the sink's lifetime (disable stream → re-enable with `old_image=true`), and a sink that already encodes its pre-image requirements is then correct without modification. Coupling sink definitions to the collection's current mode would turn a transient configuration state into a permanent restriction and break that forward compatibility. The consequence is deliberate: when the corresponding image is absent, every declared criterion fails and the event is silently not delivered — if an image is essential to the filter, also subscribe to the event types that carry it (`event_types`, plus `{"old_image": {"exists": true}}`-style predicates where appropriate) and/or enable `old_image` on the collection.
+Sink filters are **declarative and intentionally decoupled from the collection's current configuration**: creation does not reject an `oldImage` filter when the collection's stream currently has `oldImage=false`, nor `newImage` criteria that cannot match `REMOVE` events. Configuration is immutable per stream cycle, but it _can_ change over the sink's lifetime (disable stream → re-enable with `oldImage=true`), and a sink that already encodes its pre-image requirements is then correct without modification. Coupling sink definitions to the collection's current mode would turn a transient configuration state into a permanent restriction and break that forward compatibility. The consequence is deliberate: when the corresponding image is absent, every declared criterion fails and the event is silently not delivered — if an image is essential to the filter, also subscribe to the event types that carry it (`eventTypes`, plus `{"oldImage": {"exists": true}}`-style predicates where appropriate) and/or enable `oldImage` on the collection.
 
 ## Dispatcher
 
@@ -144,7 +144,7 @@ Collection (config.collections)
     │
     ├─ 0..* Sink (config.sinks)
     │
-    └─ stream_enabled = true ──▶ Watcher ──▶ Change Stream ──▶ Dispatcher ──▶ Sinks
+    └─ streamEnabled = true ──▶ Watcher ──▶ Change Stream ──▶ Dispatcher ──▶ Sinks
                                                           │
                                                           ▼
                                                   Retry Queue (Redis)
@@ -421,12 +421,12 @@ MongoDB connectivity and readiness gating are infrastructure concerns. Wrapping 
 
 ## Creating a Collection: `POST /api/collections`
 
-1. **HTTP binding**: `bindStrictJSON` parses only `collection_name`, `partition_key`, and `sort_key`. Unknown fields are rejected.
+1. **HTTP binding**: `bindStrictJSON` parses only `collectionName`, `partitionKey`, and `sortKey`. Unknown fields are rejected.
 2. **API handler** constructs a `collections.Collection` and calls `Manager.Create`.
 3. **Domain validation** inside `Manager.Create`:
-   - `collection_name` must be non-empty.
-   - If `sort_key` is set, `partition_key` must also be set.
-   - `partition_key` and `sort_key` cannot be the same.
+   - `collectionName` must be non-empty.
+   - If `sortKey` is set, `partitionKey` must also be set.
+   - `partitionKey` and `sortKey` cannot be the same.
    - `DeletionProtection` is forced to `true`.
    - `CreatedAt` and `UpdatedAt` are set.
 4. **Physical collection creation**:
@@ -435,27 +435,27 @@ MongoDB connectivity and readiness gating are infrastructure concerns. Wrapping 
    - A unique composite index on the configured key fields is created (or ensured) when a key schema is defined.
 5. **Configuration persistence**: the collection document is inserted into `config.collections`, and the generated `_id` is returned to the caller.
 6. **Notification**: the API publishes the collection name to the Redis channel `cdc:config-change`.
-7. **Worker reaction** (best-effort, via Pub/Sub): the watcher manager sees the notification, fetches the collection, and—because `stream_enabled` is still `false`—takes no watcher action.
+7. **Worker reaction** (best-effort, via Pub/Sub): the watcher manager sees the notification, fetches the collection, and—because `streamEnabled` is still `false`—takes no watcher action.
 
 The API returns `201 Created` with the collection body.
 
 ## Enabling a Stream: `POST /api/collections/{name}/stream`
 
-1. **HTTP binding**: the body must contain `old_image` (bool, required).
+1. **HTTP binding**: the body must contain `oldImage` (bool, required).
 2. **API handler** calls `Manager.EnableStream(ctx, name, oldImage)`.
 3. **Domain enforcement**:
-   - The update is conditional: it only succeeds when `stream_enabled` is not already `true`.
+   - The update is conditional: it only succeeds when `streamEnabled` is not already `true`.
    - If the update matches no document, Conduit checks whether the collection exists. If it does, `ErrStreamAlreadyExists` is returned; otherwise `ErrCollectionNotFound`.
    - Stream configuration is therefore immutable while enabled.
-4. **Physical MongoDB configuration**: when `old_image` is `true`, `changeStreamPreAndPostImages` is ensured on the collection via `collMod` (idempotent; collections created through Conduit already have it). A failure aborts the enablement and rolls the recorded stream back: enabling a stream with `old_image` on a deployment that cannot produce pre-images would silently drop every pre-image at the source.
-5. **Configuration persistence**: `stream_enabled`, `old_image`, and the first-start checkpoint `stream_started_at` (a `primitive.Timestamp` from the API host clock) are updated in `config.collections`. The checkpoint anchors the first watcher run so no event between enablement and watcher start is skipped.
+4. **Physical MongoDB configuration**: when `oldImage` is `true`, `changeStreamPreAndPostImages` is ensured on the collection via `collMod` (idempotent; collections created through Conduit already have it). A failure aborts the enablement and rolls the recorded stream back: enabling a stream with `oldImage` on a deployment that cannot produce pre-images would silently drop every pre-image at the source.
+5. **Configuration persistence**: `streamEnabled`, `oldImage`, and the first-start checkpoint `streamStartedAt` (a `primitive.Timestamp` from the API host clock) are updated in `config.collections`. The checkpoint anchors the first watcher run so no event between enablement and watcher start is skipped.
 6. **Notification**: the API publishes the collection name to `cdc:config-change`.
 7. **Worker reaction**:
    - The watcher manager receives the Pub/Sub message (or discovers the change on the next poll).
-   - It fetches the collection. Because `stream_enabled` is now `true` and no watcher exists, it calls `startWatcher`.
+   - It fetches the collection. Because `streamEnabled` is now `true` and no watcher exists, it calls `startWatcher`.
    - The manager loads the collection's sinks from `config.sinks` and registers them with the dispatcher.
    - It reads any existing resume token from `cdc:resume:{name}`.
-   - It creates a `Watcher` with the collection's `partition_key`, `sort_key`, `old_image`, and `start_at_operation_time` (= `stream_started_at`) settings, then starts the watch loop.
+   - It creates a `Watcher` with the collection's `partitionKey`, `sortKey`, `oldImage`, and `start_at_operation_time` (= `streamStartedAt`) settings, then starts the watch loop.
    - It registers the collection with the retry processor.
 
 The API returns `201 Created`.
@@ -466,11 +466,11 @@ The API returns `201 Created`.
 2. **API handler** calls `Manager.CreateSink(ctx, name, spec)`.
 3. **Domain enforcement**:
    - The collection must exist.
-   - The collection must have `stream_enabled = true`.
+   - The collection must have `streamEnabled = true`.
    - `Type` must be non-empty and `Config` must be present.
    - `EventTypes`, if provided, must be a subset of `{INSERT, MODIFY, REMOVE}`.
    - Type-specific validation is deferred to the sink implementation, not the shared `collections` package.
-4. **Persistence**: the sink is inserted into `config.sinks` with a reference to the collection's `_id` (`collection_id`). The generated sink `_id` is returned as `id`.
+4. **Persistence**: the sink is inserted into `config.sinks` with a reference to the collection's `_id` (`collectionId`). The generated sink `_id` is returned as `id`.
 5. **Notification**: the API publishes the collection name to `cdc:config-change`.
 6. **Worker reaction**:
    - The manager receives the notification and refreshes sinks for the collection.
@@ -541,24 +541,24 @@ Stored in MongoDB as `config.collections`.
 
 | Field                 | Type      | Meaning                                                                   |
 | --------------------- | --------- | ------------------------------------------------------------------------- |
-| `_id`                 | ObjectID  | Internal identifier, also used as `collection_id` in sinks.               |
-| `collection_name`     | string    | The MongoDB collection name. Unique.                                      |
-| `partition_key`       | string    | Optional partition key field name (DynamoDB-compatible mode).             |
-| `sort_key`            | string    | Optional sort key field name. Requires `partition_key`.                   |
-| `stream_enabled`      | bool      | Whether CDC is active. Default `false`.                                   |
-| `old_image`           | bool      | Whether to include pre-images. Only meaningful when streaming is enabled. |
-| `ttl_attribute`       | string    | Optional document field used for MongoDB TTL index.                       |
-| `deletion_protection` | bool      | Whether the collection can be deleted. Default `true` on create.          |
-| `created_at`          | timestamp | Creation time.                                                            |
-| `updated_at`          | timestamp | Last mutation time.                                                       |
+| `_id`                 | ObjectID  | Internal identifier, also used as `collectionId` in sinks.               |
+| `collectionName`     | string    | The MongoDB collection name. Unique.                                      |
+| `partitionKey`       | string    | Optional partition key field name (DynamoDB-compatible mode).             |
+| `sortKey`            | string    | Optional sort key field name. Requires `partitionKey`.                   |
+| `streamEnabled`      | bool      | Whether CDC is active. Default `false`.                                   |
+| `oldImage`           | bool      | Whether to include pre-images. Only meaningful when streaming is enabled. |
+| `ttlAttribute`       | string    | Optional document field used for MongoDB TTL index.                       |
+| `deletionProtection` | bool      | Whether the collection can be deleted. Default `true` on create.          |
+| `createdAt`          | timestamp | Creation time.                                                            |
+| `updatedAt`          | timestamp | Last mutation time.                                                       |
 
 ### Why these fields
 
-- `partition_key` / `sort_key` define the logical primary key for DynamoDB semantics without touching `_id`.
-- `stream_enabled` is the single opt-in flag for CDC. No watcher is created unless this is `true`.
-- `old_image` is stored with the stream flag because changing it requires reopening the change stream.
-- `ttl_attribute` is stored separately from the stream settings because TTL applies to document expiration, not event shape.
-- `deletion_protection` guards against accidental loss of both configuration and data.
+- `partitionKey` / `sortKey` define the logical primary key for DynamoDB semantics without touching `_id`.
+- `streamEnabled` is the single opt-in flag for CDC. No watcher is created unless this is `true`.
+- `oldImage` is stored with the stream flag because changing it requires reopening the change stream.
+- `ttlAttribute` is stored separately from the stream settings because TTL applies to document expiration, not event shape.
+- `deletionProtection` guards against accidental loss of both configuration and data.
 
 ## `config.sinks`
 
@@ -567,31 +567,31 @@ Stored in MongoDB as `config.sinks`.
 | Field           | Type                  | Meaning                                                                                       |
 | --------------- | --------------------- | --------------------------------------------------------------------------------------------- |
 | `_id`           | ObjectID              | Sink identifier, exposed as `id`.                                                             |
-| `collection_id` | string (ObjectID hex) | Reference to `config.collections._id`. Not exposed.                                           |
+| `collectionId` | string (ObjectID hex) | Reference to `config.collections._id`. Not exposed.                                           |
 | `type`          | string                | Sink type: `http`, `eventbridge`, `meilisearch`. **Immutable** (set at creation).             |
 | `spec`          | object                | Opaque, type-specific spec. Interpreted by the sink package. **Immutable** (set at creation). |
-| `event_types`   | []string              | Subset of `INSERT`, `MODIFY`, `REMOVE`. Empty means all. **Mutable** via PATCH.               |
-| `filter`        | object                | Per-image filters (`old_image`, `new_image`). **Mutable** via PATCH.                          |
+| `eventTypes`   | []string              | Subset of `INSERT`, `MODIFY`, `REMOVE`. Empty means all. **Mutable** via PATCH.               |
+| `filter`        | object                | Per-image filters (`oldImage`, `newImage`). **Mutable** via PATCH.                          |
 | `fingerprint`   | string                | Deterministic hash of the sink's immutable identity (type + spec); server-computed.           |
-| `created_at`    | timestamp             | Creation time.                                                                                |
-| `updated_at`    | timestamp             | Last mutation time.                                                                           |
+| `createdAt`    | timestamp             | Creation time.                                                                                |
+| `updatedAt`    | timestamp             | Last mutation time.                                                                           |
 
 A sink's **fingerprint** is a deterministic SHA-256 hash of its **immutable
 identity** — `type` and `spec` canonicalized (map keys sorted, timestamps and
 ids excluded) — so two sinks that deliver to the same destination produce the
 same fingerprint regardless of JSON ordering or administrative fields. It
-deliberately **excludes** the mutable behavior (`filter`, `event_types`): those
+deliberately **excludes** the mutable behavior (`filter`, `eventTypes`): those
 are updated in place via PATCH and must not change the destination identity. The
 fingerprint backs duplicate prevention:
 `CreateSink` rejects a second sink with the same fingerprint for the same
 collection (`409 sink_already_exists`), because two sinks with the same
 destination would be ambiguous. The check is race-safe via a unique compound
-index on (`collection_id`, `fingerprint`). Because `type`/`spec` are immutable,
+index on (`collectionId`, `fingerprint`). Because `type`/`spec` are immutable,
 PATCH can never collide with this index.
 
 The split is intentional: **immutable** fields (`type`, `spec`) are _where_ a
 sink delivers events — changing them requires creating a new sink; **mutable**
-fields (`filter`, `event_types`) are _how/when_ it delivers, updated
+fields (`filter`, `eventTypes`) are _how/when_ it delivers, updated
 live via PATCH. Events keep flowing while an update lands.
 
 ### Why `spec` Is Opaque
@@ -600,7 +600,7 @@ The shared `Sink` model deliberately stores type-specific settings as an opaque 
 
 ### Why Sinks Are Stored Separately
 
-A collection can have many sinks. Embedding them in the collection document would create unbounded arrays, complicate atomic updates, and make sink-level access control harder. A separate collection with `collection_id` is a normalized design: each sink is an independent configuration resource owned by exactly one collection.
+A collection can have many sinks. Embedding them in the collection document would create unbounded arrays, complicate atomic updates, and make sink-level access control harder. A separate collection with `collectionId` is a normalized design: each sink is an independent configuration resource owned by exactly one collection.
 
 ---
 
@@ -619,13 +619,13 @@ Sub-resources are toggled or created/deleted explicitly. There is no generic `PU
 
 Several configuration fields are immutable once set:
 
-- **Stream settings**: changing `old_image` requires reopening the MongoDB change stream. The code enforces immutability by rejecting `EnableStream` when `stream_enabled` is already `true`.
+- **Stream settings**: changing `oldImage` requires reopening the MongoDB change stream. The code enforces immutability by rejecting `EnableStream` when `streamEnabled` is already `true`.
 - **TTL attribute**: changing the TTL field would require dropping and recreating the TTL index. `SetTTL` rejects a second call.
 - **Deletion protection when already enabled**: `EnableDeletionProtection` is idempotent only in the sense that disabling is required first; re-enabling while already enabled returns a conflict.
 
 This design makes configuration changes explicit and auditable. Operators must perform a disable/create cycle instead of silently mutating behavior.
 
-**Sinks are the intentional exception.** A sink's _identity_ (`type`, `spec` — where events go) is immutable and follows the delete/recreate pattern, but its _behavior_ (`filter`, `event_types` — how/when events are delivered) is mutable and updated live via `PATCH /api/collections/{name}/sinks/{id}`. Attempting to change `type`/`spec` via PATCH returns `400 sink_identity_immutable`. This split lets operators tune delivery (filtering, event types) without touching the destination, while keeping the "where events go" identity stable and audited.
+**Sinks are the intentional exception.** A sink's _identity_ (`type`, `spec` — where events go) is immutable and follows the delete/recreate pattern, but its _behavior_ (`filter`, `eventTypes` — how/when events are delivered) is mutable and updated live via `PATCH /api/collections/{name}/sinks/{id}`. Attempting to change `type`/`spec` via PATCH returns `400 sink_identity_immutable`. This split lets operators tune delivery (filtering, event types) without touching the destination, while keeping the "where events go" identity stable and audited.
 
 ## Why Changing Configuration Requires DELETE + POST
 
@@ -649,8 +649,8 @@ These are creation operations on sub-resources, not replacements of the parent c
 
 `DELETE` on a sub-resource removes that feature:
 
-- `DELETE /api/collections/{name}/stream` disables streaming and clears `old_image`.
-- `DELETE /api/collections/{name}/ttl` drops the TTL index and clears `ttl_attribute`.
+- `DELETE /api/collections/{name}/stream` disables streaming and clears `oldImage`.
+- `DELETE /api/collections/{name}/ttl` drops the TTL index and clears `ttlAttribute`.
 - `DELETE /api/collections/{name}/sinks/{id}` removes one sink.
 - `DELETE /api/collections/{name}/protection` disables deletion protection.
 - `DELETE /api/collections/{name}` deletes the collection itself (only if unprotected).
@@ -664,7 +664,7 @@ These are creation operations on sub-resources, not replacements of the parent c
 | POST   | `/api/collections`                     | Create a collection (name + optional key schema). |
 | GET    | `/api/collections/:name`               | Get one collection.                               |
 | DELETE | `/api/collections/:name`               | Delete a collection if not protected.             |
-| POST   | `/api/collections/:name/stream`        | Enable streaming with `old_image`.                |
+| POST   | `/api/collections/:name/stream`        | Enable streaming with `oldImage`.                |
 | DELETE | `/api/collections/:name/stream`        | Disable streaming.                                |
 | POST   | `/api/collections/:name/ttl`           | Enable TTL on a field.                            |
 | DELETE | `/api/collections/:name/ttl`           | Disable TTL.                                      |
@@ -682,26 +682,26 @@ These are creation operations on sub-resources, not replacements of the parent c
 
 The following invariants are enforced by the code:
 
-- **Collection names are unique**. Enforced by a unique index on `config.collections.collection_name`.
+- **Collection names are unique**. Enforced by a unique index on `config.collections.collectionName`.
 - **A collection name is required** when creating a collection.
-- **If `sort_key` is defined, `partition_key` is required**.
-- **`partition_key` and `sort_key` cannot be the same field**.
+- **If `sortKey` is defined, `partitionKey` is required**.
+- **`partitionKey` and `sortKey` cannot be the same field**.
 - **Key field names are configurable and never hard-coded as `pk`/`sk`**. The code uses whatever names the operator provides.
 - **`_id` is managed by MongoDB and is never derived from key fields**. Key fields are stored explicitly on documents.
 - **Deletion protection is enabled by default** on collection creation. The create handler overwrites any caller-provided value with `true`.
 - **A protected collection cannot be deleted**. `Manager.Delete` returns `ErrDeletionProtectionEnabled` unless protection is first disabled.
-- **Stream configuration is immutable while enabled**. `EnableStream` returns `ErrStreamAlreadyExists` if `stream_enabled` is already `true`, regardless of the requested `old_image` value.
-- **Disabling a stream resets `stream_enabled` and `old_image` to `false`**. This allows redefinition.
-- **TTL configuration is immutable while set**. `SetTTL` returns `ErrTTLAlreadyExists` if `ttl_attribute` is already non-empty.
-- **A sink belongs to exactly one collection**. Enforced by the `collection_id` reference and by scoping sink reads/deletes to that collection.
+- **Stream configuration is immutable while enabled**. `EnableStream` returns `ErrStreamAlreadyExists` if `streamEnabled` is already `true`, regardless of the requested `oldImage` value.
+- **Disabling a stream resets `streamEnabled` and `oldImage` to `false`**. This allows redefinition.
+- **TTL configuration is immutable while set**. `SetTTL` returns `ErrTTLAlreadyExists` if `ttlAttribute` is already non-empty.
+- **A sink belongs to exactly one collection**. Enforced by the `collectionId` reference and by scoping sink reads/deletes to that collection.
 - **A sink can only be created if streaming is enabled** for its collection.
 - **Sink event types, when specified, must be `INSERT`, `MODIFY`, or `REMOVE`**.
 - **A sink must have a non-empty `type` and a non-empty `spec` object**. Type-specific required fields are validated by the sink implementation, not the shared model.
-- **A watcher exists only for stream-enabled collections**. The manager starts watchers only for collections with `stream_enabled = true`.
+- **A watcher exists only for stream-enabled collections**. The manager starts watchers only for collections with `streamEnabled = true`.
 - **There is at most one watcher per collection**. The manager's registry is keyed by collection name.
 - **Resume tokens are isolated per collection**. Key format: `cdc:resume:{collectionName}`.
 - **Resume tokens advance only after successful processing**. Failures route events to retry; the change stream cursor still advances, but the saved token reflects the last successfully handled event.
-- **A first-start checkpoint closes the enablement gap**. When a stream is enabled, `stream_started_at` is recorded; a fresh watcher with no resume token anchors its stream at that checkpoint (`startAtOperationTime`), so events written between enablement and the first watcher start are streamed instead of skipped.
+- **A first-start checkpoint closes the enablement gap**. When a stream is enabled, `streamStartedAt` is recorded; a fresh watcher with no resume token anchors its stream at that checkpoint (`startAtOperationTime`), so events written between enablement and the first watcher start are streamed instead of skipped.
 - **Resume tokens are never deleted on generic errors**. Transient failures (network, elections, cursor timeouts) preserve the token so the watcher resumes from the last successful position and skips nothing. The token is invalidated only when MongoDB explicitly rejects it as invalid (unparseable token, or a token from a dropped and recreated collection).
 - **Idempotency is required for all event processing**. Duplicate event IDs within the 24-hour TTL are skipped.
 - **Event IDs are deterministic and derived exclusively from change-stream data**. The primary source is the resume token (`_id._data`); `clusterTime` + `documentKey` serve as fallback. Application-generated timestamps (e.g. `time.Now()`) are never part of the ID, so the same MongoDB change produces the same ID across process restarts.
@@ -732,7 +732,7 @@ The following invariants are enforced by the code:
 2. Compares them with the current watcher registry.
 3. Starts watchers for new collections.
 4. For existing watchers:
-   - If `old_image` changed, restarts the watcher (because the change stream options must change).
+   - If `oldImage` changed, restarts the watcher (because the change stream options must change).
    - Refreshes sinks (see below).
 5. Stops watchers for collections that are no longer enabled.
 
@@ -758,7 +758,7 @@ Whenever the API mutates configuration, it publishes the affected collection nam
 
 - New sinks are built and registered.
 - Removed sinks are closed and unregistered.
-- Existing sinks whose **mutable** config changed (`filter`, `event_types`) are updated **in place** via `dispatcher.Update`: the persisted config is swapped atomically inside the running `RuntimeSink` (an `atomic.Pointer` snapshot), so the transport is preserved and dispatch is not interrupted.
+- Existing sinks whose **mutable** config changed (`filter`, `eventTypes`) are updated **in place** via `dispatcher.Update`: the persisted config is swapped atomically inside the running `RuntimeSink` (an `atomic.Pointer` snapshot), so the transport is preserved and dispatch is not interrupted.
 
 Sink identity is based on the persisted sink ID. `type`/`spec` are immutable for the sink's lifetime, but the mutable fields can change via PATCH; because each refresh reloads from `config.sinks`, a PATCHed sink converges on the next tick without restarting.
 
@@ -766,22 +766,22 @@ Sink identity is based on the persisted sink ID. `type`/`spec` are immutable for
 
 A mutable sink change flows end-to-end as:
 
-1. **PATCH** `PATCH /api/collections/{name}/sinks/{id}` updates the mutable fields (`filter`, `event_types`) in `config.sinks` and fires `OnPublish`.
+1. **PATCH** `PATCH /api/collections/{name}/sinks/{id}` updates the mutable fields (`filter`, `eventTypes`) in `config.sinks` and fires `OnPublish`.
 2. **Notify** — `OnPublish` publishes a config-change notification to Redis.
 3. **Refresh** — the manager's `configChangeLoop` (or the periodic `syncLoop`) calls `refreshSinks`, which reloads the persisted sinks from `config.sinks`.
 4. **Reconcile** — `ReconcileSinks` diffs the desired set against the current runtime set by sink ID; a mismatch in any mutable field emits `ChangeUpdated`.
 5. **Apply** — `ApplyChanges` routes `ChangeUpdated` to `dispatcher.Update`, which finds the live `RuntimeSink` by identity and calls `UpdateConfig` on it. `UpdateConfig` builds a fresh immutable snapshot (normalized event types + filter) and stores it in the sink's `atomic.Pointer`. The transport is never closed or recreated, and the change stream is never restarted.
 
-**What is applied live:** `filter` and `event_types` changes take effect atomically on the next refresh, without recreating the transport or interrupting dispatch. **What requires a new sink:** changing the immutable identity (`type`/`spec` — where events go) is rejected by PATCH (`400 sink_identity_immutable`); it requires delete + create, which rebuilds the transport by design. Sinks run whenever they exist (there is no `enabled` state); delivery is stopped by deleting the sink or disabling the stream.
+**What is applied live:** `filter` and `eventTypes` changes take effect atomically on the next refresh, without recreating the transport or interrupting dispatch. **What requires a new sink:** changing the immutable identity (`type`/`spec` — where events go) is rejected by PATCH (`400 sink_identity_immutable`); it requires delete + create, which rebuilds the transport by design. Sinks run whenever they exist (there is no `enabled` state); delivery is stopped by deleting the sink or disabling the stream.
 
 ## Resume Tokens
 
-Resume tokens are fetched from Redis when a watcher starts and saved to Redis after each successfully processed event. When a watcher restarts because of an `old_image` change or a transient error, it picks up the last token. If the token is invalid, the watcher clears it and resumes from the latest position.
+Resume tokens are fetched from Redis when a watcher starts and saved to Redis after each successfully processed event. When a watcher restarts because of an `oldImage` change or a transient error, it picks up the last token. If the token is invalid, the watcher clears it and resumes from the latest position.
 
 **First-start resume-policy (priority, high → low)** — `Watcher.buildChangeStreamOptions` decides where each watch session opens the stream:
 
 1. **Resume token** (when one exists): `resumeAfter` anchors the stream exactly at the last settled event (steady state; always wins).
-2. **First-start checkpoint** (no token, but `stream_started_at` present): `startAtOperationTime` anchors the stream at enablement, so every event from enablement is streamed — closing the enable → watcher-start gap and post-invalidate fresh sessions.
+2. **First-start checkpoint** (no token, but `streamStartedAt` present): `startAtOperationTime` anchors the stream at enablement, so every event from enablement is streamed — closing the enable → watcher-start gap and post-invalidate fresh sessions.
 3. **Neither**: a fresh stream at the current position (legacy behavior for collections enabled long before the worker, or a token-invalidated restart with no checkpoint).
 
 The checkpoint is captured at enablement from the API host clock (`primitive.Timestamp{T: unixNow, I: 1}`) — the pragmatic alternative to a causal-session `OperationTime`, documented as relying on approximate API-host/MongoDB clock agreement. After the first settled event, per-event token persistence in `processEvent` takes over and the checkpoint is never consulted again.
@@ -853,7 +853,7 @@ The following principles are reflected in the codebase:
 - **Business logic lives in the domain.** `collections.Manager` is the sole authority for configuration mutations.
 - **Infrastructure is isolated.** MongoDB and Redis are wrapped in dedicated packages that expose domain-shaped operations rather than raw driver methods.
 - **Configuration is the source of truth.** The worker does not hard-code which collections to watch; it reconciles its runtime state against `config.collections`.
-- **Resources are immutable whenever possible.** Stream, TTL, and protection sub-resources are immutable once set; changing them requires explicit deletion and recreation. Sinks are the exception: their _identity_ (`type`/`spec`) is immutable, but their _behavior_ (`filter`, `event_types`) is mutable via PATCH.
+- **Resources are immutable whenever possible.** Stream, TTL, and protection sub-resources are immutable once set; changing them requires explicit deletion and recreation. Sinks are the exception: their _identity_ (`type`/`spec`) is immutable, but their _behavior_ (`filter`, `eventTypes`) is mutable via PATCH.
 - **Small focused files.** Each Go file has one responsibility: one handler per API file, one concept per collections file, one sink implementation per file.
 - **Explicit behavior over magic.** There are no hidden watchers, no automatic sink enablement, and no implicit defaults that override operator intent.
 - **No global mutable state.** All components receive dependencies through constructors.
