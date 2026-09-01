@@ -2,7 +2,7 @@
 
 MongoDB Change Data Capture with a DynamoDB-style mental model.
 
-Conduit watches MongoDB collections and forwards change events to external sinks. Configure collections, streams, and destinations through a REST API; workers apply changes at runtime without restarting.
+Conduit watches MongoDB collections and forwards change events to external sinks. Configure collections, streams, and destinations through a REST API; the worker applies changes at runtime without restarting.
 
 > **⚠️ Development Status**
 > This project is under active development. APIs, configuration formats, and
@@ -26,7 +26,7 @@ Instead of every team rebuilding the same change-stream infrastructure, Conduit 
 ## Features
 
 - **MongoDB Change Streams** — watch inserts, updates, replaces, and deletes.
-- **Runtime configuration** — create, update, or remove collections, streams, and sinks without restarting workers.
+- **Runtime configuration** — create, update, or remove collections, streams, and sinks without restarting the worker.
 - **Multiple sink types** — HTTP webhooks today; EventBridge and Meilisearch registered for future SDK integration.
 - **Per-sink filtering** — filter by event type and by content of `newImage` / `oldImage`.
 - **Retry with exponential backoff** — failed deliveries are retried up to 5 times. Retries are themselves a duplicate source: an "ambiguous" failure (a timeout after the sink already processed the request) delivers the event twice.
@@ -58,6 +58,14 @@ Instead of every team rebuilding the same change-stream infrastructure, Conduit 
 - **Redis** — worker state: resume tokens, retry queues, DLQ, idempotency, and configuration-change notifications.
 - **Worker** — consumes change streams, dispatches events to sinks, and manages retries.
 
+### Current worker scaling constraint
+
+Conduit currently supports **a single active worker per deployment**. Running multiple active workers against the same collections is **not supported**.
+
+The active worker owns Change Stream processing and resume-token progression for every enabled collection. Starting multiple worker processes against the same MongoDB/Redis deployment can create multiple readers for the same collections and competing writers for the same resume-token and retry/DLQ state. This is a limitation of the current architecture, not a permanent design decision; proper multi-worker coordination may be introduced in the future.
+
+Concurrency still exists **inside** the current worker: the dispatcher delivers each event to that collection's sinks in parallel through bounded per-sink queues and worker pools. This improves sink fan-out throughput without introducing multiple Change Stream owners.
+
 ---
 
 ## How it Works
@@ -86,7 +94,7 @@ Conduit's idempotency is therefore **best-effort and bounded by the Redis proces
 
 ## Configuration
 
-Configuration is applied at runtime through the REST API. Workers detect changes automatically via Redis Pub/Sub and periodic polling.
+Configuration is applied at runtime through the REST API. The active worker detects changes automatically via Redis Pub/Sub and periodic polling.
 
 - **Collections** — the root resource. Define the MongoDB collection name, optional `partitionKey`/`sortKey`, and deletion protection.
 - **Streams** — opt a collection into CDC and choose whether to include `oldImage`.
@@ -335,8 +343,8 @@ Binaries are written to `./bin/`.
 ## Design Principles
 
 - **Event-driven** — the data plane reacts to MongoDB change streams.
-- **Configuration-driven** — workers reconcile their runtime state from `config.collections`.
-- **Dynamic runtime updates** — configuration changes take effect without restarting workers.
+- **Configuration-driven** — the active worker reconciles its runtime state from `config.collections`.
+- **Dynamic runtime updates** — configuration changes take effect without restarting the worker.
 - **Immutable configuration resources** — stream, TTL, and protection settings are changed by disabling and recreating them.
 - **API as an HTTP interface** — the API only adapts HTTP requests; business rules live in the domain layer.
 - **No event loss** — failed events retry; exhausted retries go to the DLQ. Resume tokens advance only on success. Delivery is at-least-once, not exactly-once: duplicates can occur, so downstream consumers must be idempotent using `eventID`.

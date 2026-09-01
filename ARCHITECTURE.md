@@ -20,7 +20,7 @@ MongoDB change streams are powerful but low-level. Building a reliable CDC pipel
 - Retrying failed deliveries with backoff and eventually isolating poison messages in a dead-letter queue.
 - Preventing accidental data loss when a collection or its configuration is removed.
 
-Conduit centralizes these concerns behind a small REST API and a stateless worker. Operators configure collections, streams, sinks, TTL, and deletion protection through the API; the worker realizes that configuration against MongoDB and Redis.
+Conduit centralizes these concerns behind a small REST API and a single active worker. Operators configure collections, streams, sinks, TTL, and deletion protection through the API; the worker realizes that configuration against MongoDB and Redis.
 
 ## Why Does it Exist?
 
@@ -51,7 +51,17 @@ The project exists to provide DynamoDB-aligned CDC semantics on top of MongoDB. 
 There are two runtime processes:
 
 - **API**: Exposes REST endpoints, writes configuration to MongoDB, publishes change notifications to Redis, and provides read-only access to documents.
-- **Worker**: Watches MongoDB change streams, dispatches events to sinks, manages resume tokens, retries, and DLQ. It is stateless except for the state it keeps in Redis.
+- **Worker**: Watches MongoDB change streams, dispatches events to sinks, manages resume tokens, retries, and DLQ. The current architecture supports one active worker per deployment; that worker owns Change Stream processing and resume-token progression.
+
+### Current worker scaling constraint
+
+Conduit currently supports **a single active worker per deployment**. Running multiple active workers against the same collections is **not supported**.
+
+The active worker is the single owner of Change Stream processing, resume-token progression, retry polling, and DLQ movement for the deployment. Multiple concurrent workers operating on the same collections would open duplicate change-stream readers and compete to write the same Redis resume-token and retry/DLQ keys. That mode is outside the current architecture.
+
+This constraint does not mean the data plane is single-threaded. Concurrency exists **inside** the active worker: the dispatcher fans each event out to sinks in parallel using bounded per-sink queues and worker pools. That internal concurrency improves sink delivery throughput while preserving a single Change Stream owner and a single resume-token progression point.
+
+This is a current limitation, not a permanent design decision. Future multi-worker support may add explicit coordination, leases, leader election, or collection partitioning, but those mechanisms are not implemented today.
 
 ---
 
@@ -309,7 +319,7 @@ The dispatcher uses **synchronous settlement with parallel per-sink lanes** — 
 - Decide whether an event should be retried. It only reports whether any sink (or submission) failed.
 - Break the settlement contract: returning nil must mean the event was delivered (or filtered) for every matching sink, so the single watcher/resume-token owner and the retry/DLQ semantics are untouched.
 - Silently drop an event because a lane queue is full. Full lanes apply backpressure to the caller.
-- Block forever on a single worker. Sink implementations own their timeouts (transports must respect `ctx`); the lane drains accepted jobs before closing.
+- Block forever on a single sink. Sink implementations own their timeouts (transports must respect `ctx`); the lane drains accepted jobs before closing.
 
 ### Why one watcher and one resume-token owner remain
 
@@ -1019,6 +1029,10 @@ The watcher manager depends on the small `Dispatcher` interface (`Dispatch(ctx, 
 
 The manager's `startWatcher` method instantiates `watcher.Watcher` directly today, but the watcher is a small struct with a clear lifecycle. A future design could introduce a `WatcherFactory` interface to support collection-specific watchers (for example, a watcher that batches events before dispatch).
 
+## Future Multi-Worker Scaling
+
+The current production architecture supports a single active worker per deployment. Horizontal scaling by running additional active worker processes against the same collections is not currently supported. A future design could add explicit worker coordination — for example leases, leader election, or collection partitioning — so multiple workers can safely divide Change Stream ownership and resume-token progression. Until such coordination exists, scalability comes from concurrency inside the active worker, especially parallel sink delivery.
+
 ## New API Surfaces
 
 Because all business rules live in `collections.Manager`, a gRPC service, a Terraform provider, or a future UI backend can reuse the same domain layer without duplicating invariants.
@@ -1033,6 +1047,6 @@ The DLQ is currently a final destination. A future extension could add an operat
 
 Conduit is a small, deliberate system that separates control from data. The API owns configuration and publishes change notifications; the worker realizes that configuration by opening MongoDB change streams, transforming changes into a DynamoDB-style record format, and dispatching them to pluggable sinks. Redis is the worker's memory: resume tokens, retry queues, DLQ, idempotency, and Pub/Sub.
 
-The design is conservative and explicit. Configuration is immutable where changing it would require infrastructure side effects; sub-resources are created and deleted explicitly; errors are domain-first and translated at the edge; watchers are reconciled from the database rather than hard-coded. The result is a stateless, horizontally scalable data plane that can survive restarts, transient downstream failures, and invalid resume tokens without losing events.
+The design is conservative and explicit. Configuration is immutable where changing it would require infrastructure side effects; sub-resources are created and deleted explicitly; errors are domain-first and translated at the edge; watchers are reconciled from the database rather than hard-coded. The current data plane is a single active worker with internal parallelism: it can survive restarts, transient downstream failures, and invalid resume tokens without losing events, and it scales sink fan-out through bounded per-sink worker pools. Horizontal scaling with multiple active worker processes remains future work.
 
 In short: Conduit gives MongoDB a DynamoDB-shaped CDC experience, one explicitly configured collection at a time.

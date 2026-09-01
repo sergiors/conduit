@@ -212,6 +212,10 @@ func (m *Manager) Create(ctx context.Context, collection *Collection) error {
 		return NewValidationError("collection name is required")
 	}
 
+	if IsReservedCollectionName(name) {
+		return NewValidationError("collection name %q is reserved", name)
+	}
+
 	if collection.SortKey != "" && collection.PartitionKey == "" {
 		return NewValidationError("partitionKey is required when sortKey is defined")
 	}

@@ -26,6 +26,13 @@ func (s *Server) listDocuments(c *gin.Context) {
 		return
 	}
 
+	// Only collections registered in config.collections (Collections.Get is the
+	// source of truth) may be read; unknown or unregistered names fail closed.
+	if _, err := s.deps.Collections.Get(ctx, collectionName); err != nil {
+		writeError(c, err)
+		return
+	}
+
 	store := collections.NewDocument(s.deps.MongoClient.Client, s.deps.MongoClient.Database(), collectionName)
 
 	documents, err := store.List(ctx, opts)
@@ -79,6 +86,13 @@ func (s *Server) getDocument(c *gin.Context) {
 	ctx := c.Request.Context()
 	collectionName := c.Param("name")
 	id := c.Param("id")
+
+	// Same managed-collection resolution as listDocuments: Collections.Get is
+	// the source of truth and this endpoint must not read unregistered names.
+	if _, err := s.deps.Collections.Get(ctx, collectionName); err != nil {
+		writeError(c, err)
+		return
+	}
 
 	store := collections.NewDocument(s.deps.MongoClient.Client, s.deps.MongoClient.Database(), collectionName)
 
