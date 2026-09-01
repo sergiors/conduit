@@ -60,12 +60,23 @@ func NewWorker(cfg config.Config) (*Worker, error) {
 	// Initialize collection manager
 	collectionsManager := collections.NewManager(mongoClient.Client, cfg.MongoDBDatabase)
 
+	// Create the manager's indexes (including the config.dlq dedupKey unique
+	// index) so DLQ idempotency holds even when the API hasn't run yet.
+	if err := collectionsManager.CreateIndex(ctx); err != nil {
+		redisClient.Close()
+		mongoClient.Close(ctx)
+		return nil, err
+	}
+
 	// Initialize dispatcher
 	dispatcher := dispatch.NewDispatcher()
 
-	// Initialize retry processor
+	// Initialize retry processor. The collections.Manager owns the MongoDB DLQ
+	// (config.dlq) and is passed as the DLQ dependency for exhausted retry
+	// events; the retry queue itself stays Redis-backed.
 	retryProcessor := retry.NewProcessor(
 		redisClient,
+		collectionsManager,
 		dispatcher,
 		retry.DefaultConfig(),
 	)

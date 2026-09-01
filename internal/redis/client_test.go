@@ -63,6 +63,34 @@ func TestRetryEvent(t *testing.T) {
 
 		assert.True(t, event.RetryCount >= event.MaxRetries)
 	})
+
+	t.Run("lastError serializes as camelCase and round-trips", func(t *testing.T) {
+		event := RetryEvent{
+			ID:             "users-1",
+			CollectionName: "users",
+			EventData:      []byte(`{"id":"1"}`),
+			RetryCount:     1,
+			MaxRetries:     5,
+			NextRetryAt:    time.Now(),
+			LastError:      "boom",
+		}
+
+		data, err := json.Marshal(event)
+		require.NoError(t, err)
+		assert.Contains(t, string(data), `"lastError":"boom"`)
+
+		var decoded RetryEvent
+		require.NoError(t, json.Unmarshal(data, &decoded))
+		assert.Equal(t, "boom", decoded.LastError)
+	})
+
+	t.Run("legacy member without lastError parses with empty LastError", func(t *testing.T) {
+		legacy := `{"id":"users-1","collectionName":"users","eventData":{"id":"1"},"retryCount":1,"maxRetries":5,"nextRetryAt":"2024-01-01T00:00:00Z"}`
+		events, skipped := parseRetryMembers([]string{legacy})
+		assert.Equal(t, 0, skipped)
+		require.Len(t, events, 1)
+		assert.Equal(t, "", events[0].LastError, "legacy members must parse with empty LastError")
+	})
 }
 
 func TestParseRetryMembers(t *testing.T) {
@@ -210,29 +238,11 @@ func TestClientIntegration(t *testing.T) {
 		assert.Equal(t, tableName, events[0].CollectionName)
 	})
 
-	t.Run("DLQ operations", func(t *testing.T) {
-		tableName := "test_table_" + time.Now().Format("20060102150405")
-
-		// Get initial length
-		length, err := client.GetDLQLength(ctx, tableName)
-		require.NoError(t, err)
-		initialLength := length
-
-		// Send to DLQ
-		event := map[string]interface{}{"id": "123", "data": "test"}
-		err = client.SendToDLQ(ctx, tableName, event)
-		require.NoError(t, err)
-
-		// Check length increased
-		length, err = client.GetDLQLength(ctx, tableName)
-		require.NoError(t, err)
-		assert.Equal(t, initialLength+1, length)
-	})
-
 	t.Run("delete collection state removes all artifacts", func(t *testing.T) {
 		tableName := "test_table_delstate_" + time.Now().Format("20060102150405")
 
-		// Seed one artifact in each of the three per-collection stores.
+		// Seed one artifact in each of the two per-collection stores (resume
+		// token and retry queue). The DLQ is no longer stored in Redis.
 		require.NoError(t, client.SetResumeToken(ctx, tableName, "resume-token-data"))
 		require.NoError(t, client.EnqueueRetry(ctx, RetryEvent{
 			ID:             tableName + "-123",
@@ -242,20 +252,16 @@ func TestClientIntegration(t *testing.T) {
 			MaxRetries:     5,
 			NextRetryAt:    time.Now().Add(-1 * time.Second),
 		}))
-		require.NoError(t, client.SendToDLQ(ctx, tableName, map[string]interface{}{"id": "123", "data": "test"}))
 
-		// All three exist before the purge.
+		// Both exist before the purge.
 		token, err := client.GetResumeToken(ctx, tableName)
 		require.NoError(t, err)
 		assert.Equal(t, "resume-token-data", token)
 		retryLen, err := client.GetRetryQueueLength(ctx, tableName)
 		require.NoError(t, err)
 		assert.Equal(t, int64(1), retryLen)
-		dlqLen, err := client.GetDLQLength(ctx, tableName)
-		require.NoError(t, err)
-		assert.Equal(t, int64(1), dlqLen)
 
-		// Purge wipes all three.
+		// Purge wipes both.
 		require.NoError(t, client.DeleteCollectionState(ctx, tableName))
 
 		token, err = client.GetResumeToken(ctx, tableName)
@@ -264,9 +270,6 @@ func TestClientIntegration(t *testing.T) {
 		retryLen, err = client.GetRetryQueueLength(ctx, tableName)
 		require.NoError(t, err)
 		assert.Equal(t, int64(0), retryLen)
-		dlqLen, err = client.GetDLQLength(ctx, tableName)
-		require.NoError(t, err)
-		assert.Equal(t, int64(0), dlqLen)
 	})
 }
 

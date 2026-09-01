@@ -37,6 +37,7 @@ type Manager struct {
 	database   string
 	collection *mongo.Collection
 	sinks      *mongo.Collection
+	dlq        *mongo.Collection
 
 	// OnPublish is an optional hook invoked after any successful configuration
 	// mutation (collection created or deleted, stream/TTL enabled or disabled,
@@ -65,6 +66,7 @@ func NewManager(client *mongo.Client, database string) *Manager {
 		database:   database,
 		collection: client.Database(database).Collection("config.collections"),
 		sinks:      client.Database(database).Collection("config.sinks"),
+		dlq:        client.Database(database).Collection(DLQCollectionName),
 	}
 }
 
@@ -121,7 +123,27 @@ func (m *Manager) CreateIndex(ctx context.Context) error {
 		Keys:    bson.D{{Key: "collectionId", Value: 1}, {Key: "fingerprint", Value: 1}},
 		Options: options.Index().SetUnique(true),
 	}
-	_, err := m.sinks.Indexes().CreateOne(ctx, sinkFingerprintIndex)
+	if _, err := m.sinks.Indexes().CreateOne(ctx, sinkFingerprintIndex); err != nil {
+		return err
+	}
+
+	// Unique dedupKey index backing idempotent DLQ persistence: a stale retry
+	// item that is re-processed after a failed removal must not create a
+	// duplicate DLQ entry.
+	dlqDedupIndex := mongo.IndexModel{
+		Keys:    bson.D{{Key: "dedupKey", Value: 1}},
+		Options: options.Index().SetUnique(true),
+	}
+	if _, err := m.dlq.Indexes().CreateOne(ctx, dlqDedupIndex); err != nil {
+		return err
+	}
+
+	// Compound index backing the collection-scoped DLQ list query, sorted by
+	// failedAt descending for deterministic pagination.
+	dlqListIndex := mongo.IndexModel{
+		Keys: bson.D{{Key: "collectionName", Value: 1}, {Key: "failedAt", Value: -1}},
+	}
+	_, err := m.dlq.Indexes().CreateOne(ctx, dlqListIndex)
 	return err
 }
 

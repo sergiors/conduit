@@ -38,4 +38,8 @@ func (s *Server) registerRoutes(r *gin.Engine) {
 	// Collection documents
 	api.GET("/collections/:name/documents", s.listDocuments)
 	api.GET("/collections/:name/documents/:id", s.getDocument)
+
+	// Collection dead-letter queue
+	api.GET("/collections/:name/dlq", s.listDLQ)
+	api.GET("/collections/:name/dlq/:id", s.getDLQ)
 }

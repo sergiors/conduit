@@ -43,21 +43,20 @@ The project exists to provide DynamoDB-aligned CDC semantics on top of MongoDB. 
 │  Pub/Sub        │                           │  State Store    │
 │  cdc:config-    │                           │  resume tokens  │
 │  change         │                           │  retry queues   │
-└─────────────────┘                           │  DLQ            │
-                                              │  idempotency    │
+└─────────────────┘                           │  idempotency    │
                                               └─────────────────┘
 ```
 
 There are two runtime processes:
 
-- **API**: Exposes REST endpoints, writes configuration to MongoDB, publishes change notifications to Redis, and provides read-only access to documents.
-- **Worker**: Watches MongoDB change streams, dispatches events to sinks, manages resume tokens, retries, and DLQ. The current architecture supports one active worker per deployment; that worker owns Change Stream processing and resume-token progression.
+- **API**: Exposes REST endpoints, writes configuration to MongoDB, publishes change notifications to Redis, and provides read-only access to documents and the dead-letter queue.
+- **Worker**: Watches MongoDB change streams, dispatches events to sinks, manages resume tokens and retries, and persists exhausted retries to the MongoDB DLQ. The current architecture supports one active worker per deployment; that worker owns Change Stream processing and resume-token progression.
 
 ### Current worker scaling constraint
 
 Conduit currently supports **a single active worker per deployment**. Running multiple active workers against the same collections is **not supported**.
 
-The active worker is the single owner of Change Stream processing, resume-token progression, retry polling, and DLQ movement for the deployment. Multiple concurrent workers operating on the same collections would open duplicate change-stream readers and compete to write the same Redis resume-token and retry/DLQ keys. That mode is outside the current architecture.
+The active worker is the single owner of Change Stream processing, resume-token progression, retry polling, and DLQ movement for the deployment. Multiple concurrent workers operating on the same collections would open duplicate change-stream readers and compete to write the same Redis resume-token and retry keys. That mode is outside the current architecture.
 
 This constraint does not mean the data plane is single-threaded. Concurrency exists **inside** the active worker: the dispatcher fans each event out to sinks in parallel using bounded per-sink queues and worker pools. That internal concurrency improves sink delivery throughput while preserving a single Change Stream owner and a single resume-token progression point.
 
@@ -80,7 +79,7 @@ Collections can operate in two modes:
 
 ## Collection Manager
 
-_Collection Manager_ is the domain service (`internal/collections.Manager`) that owns every configuration mutation and the physical MongoDB infrastructure behind it. It is the only place where the invariants around collections, streams, sinks, TTL, and deletion protection are enforced. The API layer delegates all business decisions to it.
+_Collection Manager_ is the domain service (`internal/collections.Manager`) that owns every configuration mutation and the physical MongoDB infrastructure behind it. It is the only place where the invariants around collections, streams, sinks, TTL, and deletion protection are enforced. The API layer delegates all business decisions to it. It also owns the dead-letter queue (`config.dlq`): it persists exhausted retry entries and serves the read-only DLQ inspection endpoints.
 
 ## Document
 
@@ -124,11 +123,11 @@ A _watcher_ (`internal/watcher.Watcher`) is a per-collection goroutine that open
 
 ## Retry
 
-When the dispatcher fails to deliver an event to every sink, the watcher puts the event into a per-collection Redis sorted set (`cdc:retry:{collectionName}`). A dedicated _retry processor_ polls the queues and re-attempts delivery with exponential backoff. After the configured maximum number of retries, the event is moved to the DLQ.
+When the dispatcher fails to deliver an event to every sink, the watcher puts the event into a per-collection Redis sorted set (`cdc:retry:{collectionName}`). A dedicated _retry processor_ polls the queues and re-attempts delivery with exponential backoff. After the configured maximum number of retries, the event is persisted to the MongoDB DLQ.
 
 ## DLQ
 
-The _dead-letter queue_ (`cdc:dlq:{collectionName}`) is a Redis list that holds events that could not be delivered after the maximum number of retry attempts. It is a manual inspection and recovery point; Conduit does not currently replay DLQ events automatically.
+The _dead-letter queue_ is a MongoDB collection (`config.dlq`) that holds events that could not be delivered after the maximum number of retry attempts. It is owned by `collections.Manager`, which persists entries and serves the read-only DLQ inspection endpoints. It is a manual inspection point; Conduit does not currently replay DLQ events automatically. The DLQ is the terminal destination for exhausted retries: the retry processor persists the entry to MongoDB **before** removing the retry item from Redis, so a failed DLQ write leaves the retry item recoverable. A unique `dedupKey` makes the write idempotent, so a stale retry item that is re-processed after a failed removal does not create unbounded duplicate DLQ entries.
 
 ## Resume Token
 
@@ -136,13 +135,13 @@ A _resume token_ is the opaque MongoDB change stream checkpoint for a collection
 
 ## Redis
 
-Redis is the worker's external memory. It stores resume tokens, retry queues, the DLQ, idempotency keys, and the Pub/Sub channel used to notify the worker of configuration changes. Redis is not the event bus for the actual CDC payloads; it is only state.
+Redis is the worker's external memory. It stores resume tokens, retry queues, idempotency keys, and the Pub/Sub channel used to notify the worker of configuration changes.
 
 ## MongoDB
 
 MongoDB serves two roles:
 
-1. **Storage engine**: it holds the application collections, the `config.collections` settings, and the `config.sinks` configurations.
+1. **Storage engine**: it holds the application collections, the `config.collections` settings, the `config.sinks` configurations, and the dead-letter queue (`config.dlq`) where exhausted deliveries are persisted.
 2. **CDC source**: it emits change stream events that the worker consumes.
 
 MongoDB must run as a replica set for change streams to work. The application never creates or modifies the replica set: topology is managed externally (operators, administrators, or deployment tooling). On startup the application only waits for readiness — a writable PRIMARY that the client can reach — before serving traffic or starting watchers.
@@ -160,10 +159,10 @@ Collection (config.collections)
                                                   Retry Queue (Redis)
                                                           │
                                                           ▼
-                                                  DLQ (Redis)
+                                                  DLQ (MongoDB: config.dlq)
 ```
 
-A collection is the root. Sinks hang off the collection. When streaming is enabled, a watcher is created. The watcher feeds the dispatcher, which fans out to sinks. Failures go to the retry queue, and permanent failures go to the DLQ.
+A collection is the root. Sinks hang off the collection. When streaming is enabled, a watcher is created. The watcher feeds the dispatcher, which fans out to sinks. Failures go to the retry queue, and permanent failures are persisted to the MongoDB DLQ.
 
 ---
 
@@ -182,7 +181,7 @@ The API layer is the control plane. It accepts HTTP requests, validates their sh
 
 ### Dependencies
 
-- `collections.Manager` for configuration CRUD and physical collection infrastructure.
+- `collections.Manager` for configuration CRUD, physical collection infrastructure, and DLQ reads.
 - `mongo.Client` for document reads.
 - `redis.Client` to publish configuration change notifications.
 
@@ -202,7 +201,7 @@ The API exists to give operators a stable, versioned HTTP surface while keeping 
 
 ### Responsibility
 
-`collections.Manager` is the heart of the control plane. It manages the `config.collections` and `config.sinks` MongoDB collections, enforces all domain invariants, and owns the physical MongoDB infrastructure (collection creation/drop, key/TTL/stream-capability indexes, and deletion state-purge fan-out).
+`collections.Manager` is the heart of the control plane. It manages the `config.collections`, `config.sinks`, and `config.dlq` MongoDB collections, enforces all domain invariants, and owns the physical MongoDB infrastructure (collection creation/drop, key/TTL/stream-capability indexes, and deletion state-purge fan-out). It also owns the dead-letter queue: it persists exhausted retry entries and serves the read-only DLQ inspection endpoints.
 
 ### Public API
 
@@ -213,6 +212,7 @@ The API exists to give operators a stable, versioned HTTP surface while keeping 
 - `SetTTL` / `DisableTTL` for TTL lifecycle.
 - `EnableDeletionProtection` / `DisableDeletionProtection` for protection lifecycle.
 - `CreateSink` / `GetSinks` / `DeleteSink` for sink lifecycle.
+- `CreateDLQEntry` / `ListDLQEntries` / `GetDLQEntry` / `CountDLQEntries` for the dead-letter queue.
 
 ### Dependencies
 
@@ -224,6 +224,7 @@ The API exists to give operators a stable, versioned HTTP surface while keeping 
 - Allow mutating stream, TTL, or deletion protection flags without explicit disable operations.
 - Allow deleting a protected collection.
 - Allow creating a sink on a collection that does not have streaming enabled.
+- Expose raw `*mongo.Collection` handles for the DLQ; DLQ access is through the named methods above.
 
 ### Why it Exists
 
@@ -364,11 +365,11 @@ A stable intermediate format decouples event producers (MongoDB change streams) 
 
 ### Responsibility
 
-`retry.Processor` polls the per-collection retry queues in Redis and re-attempts delivery via the dispatcher. It uses exponential backoff capped at a maximum delay and moves exhausted events to the DLQ.
+`retry.Processor` polls the per-collection retry queues in Redis and re-attempts delivery via the dispatcher. It uses exponential backoff capped at a maximum delay and persists exhausted events to the MongoDB DLQ.
 
 ### Public API
 
-- `NewProcessor(redisClient, dispatcher, config)` constructs the processor.
+- `NewProcessor(redisClient, collectionsManager, dispatcher, config)` constructs the processor.
 - `Start(ctx)` begins the polling loop.
 - `RegisterCollection(name)` / `UnregisterCollection(name)` tell the processor which collections to scan.
 - `ProcessCollectionQueue(ctx, name)` manually drains one collection's queue.
@@ -376,11 +377,12 @@ A stable intermediate format decouples event producers (MongoDB change streams) 
 ### Dependencies
 
 - `redis.Client` for queue operations.
+- `collections.Manager` (via a narrow DLQ interface) for persisting exhausted retry events to MongoDB.
 - `dispatch.Dispatcher` for redelivery.
 
 ### What it Must Never Do
 
-- Lose an event. A failed retry is re-queued; an exhausted retry is moved to the DLQ.
+- Lose an event. A failed retry is re-queued; an exhausted retry is persisted to the DLQ.
 - Block the watch loop. Retry is asynchronous.
 
 ### Why it Exists
@@ -400,7 +402,7 @@ Retry is separated from the watch loop so that a slow or failing downstream cann
 - `NewClient(ctx, config)` connects using URI or address/password.
 - Resume token: `GetResumeToken`, `SetResumeToken`, `DeleteResumeToken`.
 - Idempotency: `IsProcessed`, `MarkProcessed`.
-- Retry / DLQ: `EnqueueRetry`, `DequeueRetry`, `RemoveRetryEvent`, `SendToDLQ`, length helpers.
+- Retry queue: `EnqueueRetry`, `DequeueRetry`, `RemoveRetryEvent`, `GetRetryQueueLength`.
 - Notifications: `PublishConfigChange`, `SubscribeConfigChanges`.
 
 ### Dependencies
@@ -534,7 +536,7 @@ MongoDB Change Stream
                 │
                 ├── success: remove from queue
                 ├── failure (below max): re-queue with backoff
-                └── failure (max exceeded): SendToDLQ + remove
+                └── failure (max exceeded): persist to MongoDB DLQ + remove
 ```
 
 ### Step-by-step
@@ -555,7 +557,7 @@ MongoDB Change Stream
 10. **Retry outcome**:
     - Success: remove the event from the retry queue.
     - Failure below max retries: increment `retryCount`, recompute `nextRetryAt` with exponential backoff, remove the old member, and add the updated member.
-    - Failure at or above max retries: push the raw event to `cdc:dlq:{collection}`, then remove it from the retry queue.
+    - Failure at or above max retries: persist the event to the MongoDB DLQ (`config.dlq`), then remove it from the retry queue. The DLQ write happens first; if it fails, the retry item stays queued and is retried next tick. The write is idempotent on a `dedupKey`, so a stale retry item that is re-processed after a failed removal does not create unbounded duplicate DLQ entries.
 
 Resume tokens are updated after every successful event, never after a failure. A failure does not skip the event; it moves it to the retry path while the watcher continues consuming new changes. Because the processed-key write and the resume-token write are not atomic, and because the processed key expires after `PROCESSED_EVENT_TTL` (default 24h), delivery is **at-least-once**: a duplicate can be delivered after a crash, a Redis outage, or downtime longer than the TTL. Downstream consumers must be idempotent using the deterministic `eventID`.
 
@@ -567,12 +569,12 @@ Resume tokens are updated after every successful event, never after a failure. A
 
 Stored in MongoDB as `config.collections`.
 
-| Field                 | Type      | Meaning                                                                   |
-| --------------------- | --------- | ------------------------------------------------------------------------- |
-| `_id`                 | ObjectID  | Internal identifier, also used as `collectionId` in sinks.               |
+| Field                | Type      | Meaning                                                                   |
+| -------------------- | --------- | ------------------------------------------------------------------------- |
+| `_id`                | ObjectID  | Internal identifier, also used as `collectionId` in sinks.                |
 | `collectionName`     | string    | The MongoDB collection name. Unique.                                      |
 | `partitionKey`       | string    | Optional partition key field name (DynamoDB-compatible mode).             |
-| `sortKey`            | string    | Optional sort key field name. Requires `partitionKey`.                   |
+| `sortKey`            | string    | Optional sort key field name. Requires `partitionKey`.                    |
 | `streamEnabled`      | bool      | Whether CDC is active. Default `false`.                                   |
 | `oldImage`           | bool      | Whether to include pre-images. Only meaningful when streaming is enabled. |
 | `ttlAttribute`       | string    | Optional document field used for MongoDB TTL index.                       |
@@ -592,15 +594,15 @@ Stored in MongoDB as `config.collections`.
 
 Stored in MongoDB as `config.sinks`.
 
-| Field           | Type                  | Meaning                                                                                       |
-| --------------- | --------------------- | --------------------------------------------------------------------------------------------- |
-| `_id`           | ObjectID              | Sink identifier, exposed as `id`.                                                             |
+| Field          | Type                  | Meaning                                                                                       |
+| -------------- | --------------------- | --------------------------------------------------------------------------------------------- |
+| `_id`          | ObjectID              | Sink identifier, exposed as `id`.                                                             |
 | `collectionId` | string (ObjectID hex) | Reference to `config.collections._id`. Not exposed.                                           |
-| `type`          | string                | Sink type: `http`, `eventbridge`, `meilisearch`. **Immutable** (set at creation).             |
-| `spec`          | object                | Opaque, type-specific spec. Interpreted by the sink package. **Immutable** (set at creation). |
+| `type`         | string                | Sink type: `http`, `eventbridge`, `meilisearch`. **Immutable** (set at creation).             |
+| `spec`         | object                | Opaque, type-specific spec. Interpreted by the sink package. **Immutable** (set at creation). |
 | `eventTypes`   | []string              | Subset of `INSERT`, `MODIFY`, `REMOVE`. Empty means all. **Mutable** via PATCH.               |
-| `filter`        | object                | Per-image filters (`oldImage`, `newImage`). **Mutable** via PATCH.                          |
-| `fingerprint`   | string                | Deterministic hash of the sink's immutable identity (type + spec); server-computed.           |
+| `filter`       | object                | Per-image filters (`oldImage`, `newImage`). **Mutable** via PATCH.                            |
+| `fingerprint`  | string                | Deterministic hash of the sink's immutable identity (type + spec); server-computed.           |
 | `createdAt`    | timestamp             | Creation time.                                                                                |
 | `updatedAt`    | timestamp             | Last mutation time.                                                                           |
 
@@ -685,24 +687,26 @@ These are creation operations on sub-resources, not replacements of the parent c
 
 ## Endpoint Reference
 
-| Method | Endpoint                               | Purpose                                           |
-| ------ | -------------------------------------- | ------------------------------------------------- |
-| GET    | `/health`                              | Liveness probe.                                   |
-| GET    | `/api/collections`                     | List all collection configurations.               |
-| POST   | `/api/collections`                     | Create a collection (name + optional key schema). |
-| GET    | `/api/collections/:name`               | Get one collection.                               |
-| DELETE | `/api/collections/:name`               | Delete a collection if not protected.             |
-| POST   | `/api/collections/:name/stream`        | Enable streaming with `oldImage`.                |
-| DELETE | `/api/collections/:name/stream`        | Disable streaming.                                |
-| POST   | `/api/collections/:name/ttl`           | Enable TTL on a field.                            |
-| DELETE | `/api/collections/:name/ttl`           | Disable TTL.                                      |
-| POST   | `/api/collections/:name/protection`    | Enable deletion protection.                       |
-| DELETE | `/api/collections/:name/protection`    | Disable deletion protection.                      |
-| GET    | `/api/collections/:name/sinks`         | List sinks for a collection.                      |
-| POST   | `/api/collections/:name/sinks`         | Create a sink.                                    |
-| DELETE | `/api/collections/:name/sinks/:id`     | Delete a sink.                                    |
-| GET    | `/api/collections/:name/documents`     | List documents. Paginated: `limit` (default 100, max 1000) and `skip` (default 0); invalid values → `400 invalid_request`. |
-| GET    | `/api/collections/:name/documents/:id` | Get a document by `_id`.                          |
+| Method | Endpoint                               | Purpose                                                                                                                                                               |
+| ------ | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/health`                              | Liveness probe.                                                                                                                                                       |
+| GET    | `/api/collections`                     | List all collection configurations.                                                                                                                                   |
+| POST   | `/api/collections`                     | Create a collection (name + optional key schema).                                                                                                                     |
+| GET    | `/api/collections/:name`               | Get one collection.                                                                                                                                                   |
+| DELETE | `/api/collections/:name`               | Delete a collection if not protected.                                                                                                                                 |
+| POST   | `/api/collections/:name/stream`        | Enable streaming with `oldImage`.                                                                                                                                     |
+| DELETE | `/api/collections/:name/stream`        | Disable streaming.                                                                                                                                                    |
+| POST   | `/api/collections/:name/ttl`           | Enable TTL on a field.                                                                                                                                                |
+| DELETE | `/api/collections/:name/ttl`           | Disable TTL.                                                                                                                                                          |
+| POST   | `/api/collections/:name/protection`    | Enable deletion protection.                                                                                                                                           |
+| DELETE | `/api/collections/:name/protection`    | Disable deletion protection.                                                                                                                                          |
+| GET    | `/api/collections/:name/sinks`         | List sinks for a collection.                                                                                                                                          |
+| POST   | `/api/collections/:name/sinks`         | Create a sink.                                                                                                                                                        |
+| DELETE | `/api/collections/:name/sinks/:id`     | Delete a sink.                                                                                                                                                        |
+| GET    | `/api/collections/:name/documents`     | List documents. Paginated: `limit` (default 100, max 1000) and `skip` (default 0); invalid values → `400 invalid_request`.                                            |
+| GET    | `/api/collections/:name/documents/:id` | Get a document by `_id`.                                                                                                                                              |
+| GET    | `/api/collections/:name/dlq`           | List dead-letter entries. Paginated: `limit` (default 100, max 1000) and `skip` (default 0); invalid values → `400 invalid_request`. Sorted by `failedAt` descending. |
+| GET    | `/api/collections/:name/dlq/:id`       | Get a dead-letter entry by `_id` (only if it belongs to the requested collection).                                                                                    |
 
 ---
 
@@ -737,7 +741,7 @@ The following invariants are enforced by the code:
 - **Event IDs are deterministic and derived exclusively from change-stream data**. The primary source is the resume token (`_id._data`); `clusterTime` + `documentKey` serve as fallback. Application-generated timestamps (e.g. `time.Now()`) are never part of the ID, so the same MongoDB change produces the same ID across process restarts.
 - **Event ordering is not guaranteed**. Downstream consumers must be eventually consistent.
 - **Retry uses exponential backoff capped at 5 minutes** with a maximum of 5 attempts.
-- **Events exhausted from retry go to the DLQ**. Key format: `cdc:dlq:{collectionName}`.
+- **Events exhausted from retry are persisted to the MongoDB DLQ** (`config.dlq`), not Redis. The DLQ write precedes the retry-item removal, so a failed write leaves the retry item recoverable; the write is idempotent on a `dedupKey`.
 - **Sinks are closed when removed or when the collection is cleared**.
 - **Deleting a collection drops the MongoDB collection and cascades deletion to its sinks**.
 
@@ -831,6 +835,7 @@ When a watcher is started, the manager calls `retryProcessor.RegisterCollection`
 - `ErrCollectionNotFound`
 - `ErrDocumentNotFound`
 - `ErrSinkNotFound`
+- `ErrDLQEntryNotFound`
 - `ErrSinkIdentityImmutable`
 - `ErrDeletionProtectionEnabled`
 - `ErrValidation`
@@ -851,6 +856,7 @@ Callers identify these with `errors.Is`, never by string matching.
 | `ErrCollectionNotFound`                      | 404         | `collection_not_found`        |
 | `ErrDocumentNotFound`                        | 404         | `document_not_found`          |
 | `ErrSinkNotFound`                            | 404         | `sink_not_found`              |
+| `ErrDLQEntryNotFound`                        | 404         | `dlq_entry_not_found`         |
 | `ErrSinkIdentityImmutable`                   | 400         | `sink_identity_immutable`     |
 | `ErrDeletionProtectionEnabled`               | 403         | `deletion_protection_enabled` |
 | `ErrStreamAlreadyExists`                     | 409         | `stream_already_exists`       |
@@ -917,6 +923,7 @@ HTTP layer. Each file handles one resource or concern:
 - `ttl.go`: TTL enable/disable handlers.
 - `protection.go`: Deletion protection enable/disable handlers.
 - `documents.go`: Read-only document list/get handlers.
+- `dlq.go`: Read-only dead-letter list/get handlers.
 - `health.go`: Health check.
 - `bind.go`: Strict and non-strict JSON binding helpers.
 - `errors.go`: Canonical error response mapping.
@@ -933,6 +940,7 @@ Domain package for configuration.
 - `ttl.go`: TTL index creation/removal with immutability.
 - `protection.go`: Deletion protection toggle with conflict detection.
 - `document.go`: Read-only document access.
+- `dlq.go`: `DLQEntry` model and Manager-owned dead-letter queue (persist/list/get/count).
 - `filter.go`: Per-image filter matching for sink filtering.
 - `errors.go`: Sentinel domain errors.
 - `doc.go`: Package documentation.
@@ -963,14 +971,14 @@ Event routing and sink registry.
 
 Retry queue processing.
 
-- `processor.go`: Polling loop, backoff calculation, DLQ routing.
+- `processor.go`: Polling loop, backoff calculation, DLQ persistence.
 - `doc.go`: Package documentation.
 
 ## `internal/redis/`
 
 Redis wrapper.
 
-- `client.go`: Connection, key helpers, resume token, idempotency, retry/DLQ, Pub/Sub.
+- `client.go`: Connection, key helpers, resume token, idempotency, retry queue, Pub/Sub.
 - `doc.go`: Package documentation.
 
 ## `internal/mongo/`
@@ -1041,11 +1049,9 @@ Because all business rules live in `collections.Manager`, a gRPC service, a Terr
 
 The DLQ is currently a final destination. A future extension could add an operator endpoint to replay DLQ events back into the retry queue or directly to sinks.
 
----
-
 # Summary
 
-Conduit is a small, deliberate system that separates control from data. The API owns configuration and publishes change notifications; the worker realizes that configuration by opening MongoDB change streams, transforming changes into a DynamoDB-style record format, and dispatching them to pluggable sinks. Redis is the worker's memory: resume tokens, retry queues, DLQ, idempotency, and Pub/Sub.
+Conduit is a small, deliberate system that separates control from data. The API owns configuration and publishes change notifications; the worker realizes that configuration by opening MongoDB change streams, transforming changes into a DynamoDB-style record format, and dispatching them to pluggable sinks. Redis is the worker's memory: resume tokens, retry queues, idempotency, and Pub/Sub. The dead-letter queue is persisted to MongoDB (`config.dlq`).
 
 The design is conservative and explicit. Configuration is immutable where changing it would require infrastructure side effects; sub-resources are created and deleted explicitly; errors are domain-first and translated at the edge; watchers are reconciled from the database rather than hard-coded. The current data plane is a single active worker with internal parallelism: it can survive restarts, transient downstream failures, and invalid resume tokens without losing events, and it scales sink fan-out through bounded per-sink worker pools. Horizontal scaling with multiple active worker processes remains future work.
 

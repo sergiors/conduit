@@ -30,7 +30,7 @@ Instead of every team rebuilding the same change-stream infrastructure, Conduit 
 - **Multiple sink types** — HTTP webhooks today; EventBridge and Meilisearch registered for future SDK integration.
 - **Per-sink filtering** — filter by event type and by content of `newImage` / `oldImage`.
 - **Retry with exponential backoff** — failed deliveries are retried up to 5 times. Retries are themselves a duplicate source: an "ambiguous" failure (a timeout after the sink already processed the request) delivers the event twice.
-- **Dead Letter Queue** — exhausted retries land in a per-collection DLQ.
+- **Dead Letter Queue** — exhausted retries are persisted to a MongoDB DLQ (`config.dlq`), inspectable through the API.
 - **Resume tokens** — per-collection resume positions stored in Redis, saved only after successful processing.
 - **At-least-once delivery** — events are never lost, but duplicates can occur; downstream consumers must be idempotent (see [Delivery Semantics](#delivery-semantics)).
 - **Automatic watcher management** — one watcher per enabled collection, synchronized dynamically with configuration (worker sync interval: 30s, plus immediate reaction to configuration changes via pub/sub).
@@ -54,15 +54,15 @@ Instead of every team rebuilding the same change-stream infrastructure, Conduit 
 ```
 
 - **API** — REST control plane for configuration.
-- **MongoDB** — stores configuration and application data; emits change stream events.
-- **Redis** — worker state: resume tokens, retry queues, DLQ, idempotency, and configuration-change notifications.
+- **MongoDB** — stores configuration, application data, and the dead-letter queue; emits change stream events.
+- **Redis** — worker state: resume tokens, retry queues, idempotency, and configuration-change notifications.
 - **Worker** — consumes change streams, dispatches events to sinks, and manages retries.
 
 ### Current worker scaling constraint
 
 Conduit currently supports **a single active worker per deployment**. Running multiple active workers against the same collections is **not supported**.
 
-The active worker owns Change Stream processing and resume-token progression for every enabled collection. Starting multiple worker processes against the same MongoDB/Redis deployment can create multiple readers for the same collections and competing writers for the same resume-token and retry/DLQ state. This is a limitation of the current architecture, not a permanent design decision; proper multi-worker coordination may be introduced in the future.
+The active worker owns Change Stream processing and resume-token progression for every enabled collection. Starting multiple worker processes against the same MongoDB/Redis deployment can create multiple readers for the same collections and competing writers for the same resume-token and retry-queue state. This is a limitation of the current architecture, not a permanent design decision; proper multi-worker coordination may be introduced in the future.
 
 Concurrency still exists **inside** the current worker: the dispatcher delivers each event to that collection's sinks in parallel through bounded per-sink queues and worker pools. This improves sink fan-out throughput without introducing multiple Change Stream owners.
 
@@ -70,7 +70,7 @@ Concurrency still exists **inside** the current worker: the dispatcher delivers 
 
 ## How it Works
 
-MongoDB emits a change event → a per-collection watcher turns it into a `StreamRecord` → the dispatcher fans it out to the collection's sinks **in parallel** (each sink has its own bounded queue and worker pool) → failures are queued for retry with exponential backoff → exhausted retries move to the DLQ.
+MongoDB emits a change event → a per-collection watcher turns it into a `StreamRecord` → the dispatcher fans it out to the collection's sinks **in parallel** (each sink has its own bounded queue and worker pool) → failures are queued for retry with exponential backoff → exhausted retries are persisted to the MongoDB DLQ.
 
 The parallel fan-out increases throughput and isolates slow sinks from fast ones for each event, while keeping settlement synchronous: an event is acknowledged only after every matching sink has accepted it, preserving the single watcher and single resume-token owner. Full sink queues apply bounded backpressure rather than dropping events.
 
@@ -155,6 +155,35 @@ Results are sorted by `_id` ascending, so pages are deterministic. Example:
 ```bash
 curl -H "Authorization: Bearer $API_KEY" \
   "http://localhost:8080/api/collections/users/documents?limit=50&skip=100"
+```
+
+### Dead Letter Queue
+
+- `GET /api/collections/:name/dlq` — list dead-letter entries for a collection
+- `GET /api/collections/:name/dlq/:id` — get a single dead-letter entry
+
+The DLQ is the terminal destination for events that could not be delivered
+after the maximum number of retries. Entries are persisted to the MongoDB
+collection `config.dlq` (not Redis) and are read-only through the API; replay
+is not supported.
+
+The list endpoint is paginated server-side and never returns an unbounded
+result set:
+
+- `limit` — maximum entries per page; default `100`, capped at `1000`.
+  Zero, negative, and non-integer values are rejected with `400 invalid_request`.
+- `skip` — number of entries to skip before the page; default `0`.
+  Negative and non-integer values are rejected with `400 invalid_request`.
+
+Results are sorted by `failedAt` descending, so pages are deterministic. Both
+endpoints validate the collection through `config.collections` first: an
+unknown or unmanaged collection returns `404 collection_not_found`, and a
+single entry is only returned if it belongs to the requested collection
+(otherwise `404 dlq_entry_not_found`). Example:
+
+```bash
+curl -H "Authorization: Bearer $API_KEY" \
+  "http://localhost:8080/api/collections/users/dlq?limit=50&skip=100"
 ```
 
 ### Health
@@ -347,7 +376,7 @@ Binaries are written to `./bin/`.
 - **Dynamic runtime updates** — configuration changes take effect without restarting the worker.
 - **Immutable configuration resources** — stream, TTL, and protection settings are changed by disabling and recreating them.
 - **API as an HTTP interface** — the API only adapts HTTP requests; business rules live in the domain layer.
-- **No event loss** — failed events retry; exhausted retries go to the DLQ. Resume tokens advance only on success. Delivery is at-least-once, not exactly-once: duplicates can occur, so downstream consumers must be idempotent using `eventID`.
+- **No event loss** — failed events retry; exhausted retries are persisted to the MongoDB DLQ. Resume tokens advance only on success. Delivery is at-least-once, not exactly-once: duplicates can occur, so downstream consumers must be idempotent using `eventID`.
 
 ---
 

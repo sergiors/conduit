@@ -17,6 +17,9 @@ var (
 	ErrProtectionAlreadyExists   = errors.New("deletion protection is already enabled")
 	ErrSinkNotFound              = errors.New("sink not found")
 	ErrSinkAlreadyExists         = errors.New("an equivalent sink already exists")
+	// ErrDLQEntryNotFound is returned when a dead-letter entry does not exist
+	// or does not belong to the requested collection.
+	ErrDLQEntryNotFound = errors.New("dlq entry not found")
 	// ErrSinkIdentityImmutable is returned when a client attempts to modify a
 	// sink's immutable fields (type, spec) through the update endpoint.
 	ErrSinkIdentityImmutable = errors.New("sink type and spec are immutable; create a new sink instead")

@@ -64,6 +64,8 @@ func responseFor(err error) (int, string, string) {
 		return http.StatusNotFound, "collection_not_found", err.Error()
 	case errors.Is(err, collections.ErrDocumentNotFound):
 		return http.StatusNotFound, "document_not_found", err.Error()
+	case errors.Is(err, collections.ErrDLQEntryNotFound):
+		return http.StatusNotFound, "dlq_entry_not_found", err.Error()
 	case errors.Is(err, collections.ErrSinkNotFound):
 		return http.StatusNotFound, "sink_not_found", err.Error()
 	case errors.Is(err, collections.ErrSinkAlreadyExists):

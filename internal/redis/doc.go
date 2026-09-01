@@ -1,16 +1,18 @@
 // Package redis provides Redis client wrapper for CDC state management.
 //
-// This package manages all Redis operations for the CDC worker:
+// This package manages the Redis operations for the CDC worker:
 //   - Resume tokens: Per-table change stream resume positions
 //   - Retry queues: Events pending retry with exponential backoff
-//   - Dead Letter Queue (DLQ): Events exceeding max retries
 //   - Idempotency keys: Prevent duplicate event processing
+//
+// The dead-letter queue is NOT stored in Redis. Exhausted retry events are
+// persisted to MongoDB (config.dlq) by the retry processor; see the dlq
+// package.
 //
 // Key Naming Conventions:
 //
 //	cdc:resume:<collectionName>        - Resume token for a table
 //	cdc:retry:<collectionName>         - Retry queue (sorted set by nextRetryAt)
-//	cdc:dlq:<collectionName>           - Dead letter queue (list)
 //	cdc:processed:<eventID>            - Idempotency key (TTL: configurable, default 24h)
 //
 // The event ID is deterministic, derived from the MongoDB change event

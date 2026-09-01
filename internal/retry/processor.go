@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sergiors/conduit/internal/collections"
 	"github.com/sergiors/conduit/internal/dispatch"
 	"github.com/sergiors/conduit/internal/recover"
 	"github.com/sergiors/conduit/internal/redis"
@@ -15,19 +16,26 @@ import (
 
 // Store is the queue-storage facade the Processor needs. The concrete
 // *redis.Client satisfies it implicitly; tests inject a fake to exercise the
-// failure paths.
+// failure paths. It covers only the Redis-backed retry queue; the DLQ lives in
+// MongoDB (see DLQ).
 type Store interface {
 	DequeueRetry(ctx context.Context, collectionName string, limit int64) ([]redis.RetryEvent, error)
 	EnqueueRetry(ctx context.Context, event redis.RetryEvent) error
 	RemoveRetryEvent(ctx context.Context, collectionName string, event redis.RetryEvent) error
-	SendToDLQ(ctx context.Context, collectionName string, event interface{}) error
 	GetRetryQueueLength(ctx context.Context, collectionName string) (int64, error)
-	GetDLQLength(ctx context.Context, collectionName string) (int64, error)
+}
+
+// DLQ is the terminal persistence the Processor needs for exhausted retry
+// events. The concrete *collections.Manager satisfies it implicitly; tests
+// inject a fake to exercise the failure paths.
+type DLQ interface {
+	CreateDLQEntry(ctx context.Context, entry collections.DLQEntry) error
 }
 
 // Processor handles retry queue processing with exponential backoff
 type Processor struct {
 	store       Store
+	dlq         DLQ
 	dispatcher  *dispatch.Dispatcher
 	interval    time.Duration
 	maxRetries  int
@@ -65,11 +73,13 @@ func DefaultConfig() Config {
 // NewProcessor creates a new retry processor
 func NewProcessor(
 	store Store,
+	dlqStore DLQ,
 	dispatcher *dispatch.Dispatcher,
 	cfg Config,
 ) *Processor {
 	return &Processor{
 		store:       store,
+		dlq:         dlqStore,
 		dispatcher:  dispatcher,
 		interval:    cfg.Interval,
 		maxRetries:  cfg.MaxRetries,
@@ -222,25 +232,34 @@ func (p *Processor) processRetryEvent(ctx context.Context, collectionName string
 
 	// Check if max retries exceeded
 	if event.RetryCount >= event.MaxRetries {
-		log.Printf("Event exceeded max retries (%d), sending to DLQ: %s", event.MaxRetries, collectionName)
-		if p.store == nil {
+		log.Printf("Event exceeded max retries (%d), persisting to DLQ: %s", event.MaxRetries, collectionName)
+		if p.dlq == nil {
 			log.Printf("DLQ not available (nil store), event retained in queue: %s", collectionName)
 			return
 		}
-		// Enqueue-first style ordering: only remove the event after a
-		// successful DLQ push. If SendToDLQ fails, the event stays queued and
-		// is retried next tick; the max-retries branch will attempt the DLQ
-		// push again. This is safe because the DLQ push is at-least-once
-		// (a stale duplicate in the DLQ is acceptable; losing the event is not).
-		if err := p.store.SendToDLQ(bkctx, collectionName, event.EventData); err != nil {
-			log.Printf("Failed to send to DLQ: %v", err)
+		// Persist-first ordering: only remove the event after a successful DLQ
+		// write. If Persist fails, the event stays queued and is retried next
+		// tick; the max-retries branch will attempt the DLQ write again. This
+		// is safe because the DLQ write is at-least-once (idempotent on the
+		// dedup key, so a stale duplicate is a no-op; losing the event is not).
+		entry := collections.DLQEntry{
+			CollectionName: collectionName,
+			EventData:      event.EventData,
+			Attempts:       event.RetryCount,
+			LastError:      event.LastError,
+			FailedAt:       time.Now(),
+			DedupKey:       event.ID,
+		}
+		if err := p.dlq.CreateDLQEntry(bkctx, entry); err != nil {
+			log.Printf("Failed to persist to DLQ: %v", err)
 			return
 		}
-		// Remove from retry queue only after a successful DLQ push. If the
+		// Remove from retry queue only after a successful DLQ write. If the
 		// removal itself fails, a stale duplicate remains in the retry queue;
 		// that is intentional under at-least-once semantics, since the event
 		// is already durably present in the DLQ and a duplicate is preferable
-		// to a loss.
+		// to a loss. The idempotent dedup key prevents the stale duplicate
+		// from creating unbounded DLQ entries on re-processing.
 		if err := p.store.RemoveRetryEvent(bkctx, collectionName, event); err != nil {
 			log.Printf("Failed to remove event from retry queue: %v", err)
 		}
@@ -277,6 +296,7 @@ func (p *Processor) processRetryEvent(ctx context.Context, collectionName string
 		original := event
 		event.RetryCount++
 		event.NextRetryAt = p.calculateNextRetry(event.RetryCount)
+		event.LastError = err.Error()
 		if err := p.store.EnqueueRetry(bkctx, event); err != nil {
 			log.Printf("Failed to re-queue retry event: %v", err)
 			return
@@ -315,12 +335,4 @@ func (p *Processor) GetRetryQueueLength(ctx context.Context, collectionName stri
 		return 0, nil
 	}
 	return p.store.GetRetryQueueLength(ctx, collectionName)
-}
-
-// GetDLQLength returns the DLQ length for a collection
-func (p *Processor) GetDLQLength(ctx context.Context, collectionName string) (int64, error) {
-	if p.store == nil {
-		return 0, nil
-	}
-	return p.store.GetDLQLength(ctx, collectionName)
 }

@@ -29,7 +29,7 @@ func TestDefaultConfig(t *testing.T) {
 func TestProcessorCreation(t *testing.T) {
 	t.Run("new processor with correct configuration", func(t *testing.T) {
 		cfg := DefaultConfig()
-		processor := NewProcessor(nil, nil, cfg)
+		processor := NewProcessor(nil, nil, nil, cfg)
 
 		assert.NotNil(t, processor)
 		assert.Equal(t, cfg.Interval, processor.interval)
@@ -79,7 +79,7 @@ func TestProcessRetryEvent(t *testing.T) {
 		// Register a mock transport that always succeeds wrapped in a runtime sink.
 		dispatcher.Register("users", dispatch.NewRuntimeSink(collections.Sink{}, &successTransport{}))
 
-		processor := NewProcessor(nil, dispatcher, DefaultConfig())
+		processor := NewProcessor(nil, nil, dispatcher, DefaultConfig())
 
 		ctx := context.Background()
 		eventData, _ := bson.MarshalExtJSON(streams.StreamRecord{
@@ -100,9 +100,9 @@ func TestProcessRetryEvent(t *testing.T) {
 		processor.processRetryEvent(ctx, "users", event)
 	})
 
-	t.Run("max retries exceeded skips DLQ when redis is nil", func(t *testing.T) {
+	t.Run("max retries exceeded skips DLQ when dlq store is nil", func(t *testing.T) {
 		dispatcher := dispatch.NewDispatcher()
-		processor := NewProcessor(nil, dispatcher, DefaultConfig())
+		processor := NewProcessor(nil, nil, dispatcher, DefaultConfig())
 
 		ctx := context.Background()
 		eventData, _ := bson.MarshalExtJSON(streams.StreamRecord{
@@ -118,8 +118,8 @@ func TestProcessRetryEvent(t *testing.T) {
 			MaxRetries:     5,
 		}
 
-		// Should not panic with nil redis client
-		// The SendToDLQ will fail silently (logged) but not panic
+		// Should not panic with nil dlq store
+		// The DLQ persist will fail silently (logged) but not panic
 		processor.processRetryEvent(ctx, "users", event)
 	})
 }
@@ -145,7 +145,7 @@ func TestRetryEventStructure(t *testing.T) {
 
 func TestProcessorStop(t *testing.T) {
 	t.Run("Stop before Start is safe", func(t *testing.T) {
-		processor := NewProcessor(nil, nil, DefaultConfig())
+		processor := NewProcessor(nil, nil, nil, DefaultConfig())
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 
@@ -157,7 +157,7 @@ func TestProcessorStop(t *testing.T) {
 		// cancel the loop and wait for it to exit.
 		cfg := DefaultConfig()
 		cfg.Interval = 10 * time.Millisecond
-		processor := NewProcessor(nil, nil, cfg)
+		processor := NewProcessor(nil, nil, nil, cfg)
 
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -167,7 +167,7 @@ func TestProcessorStop(t *testing.T) {
 	})
 
 	t.Run("Stop is idempotent", func(t *testing.T) {
-		processor := NewProcessor(nil, nil, DefaultConfig())
+		processor := NewProcessor(nil, nil, nil, DefaultConfig())
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 
@@ -178,7 +178,7 @@ func TestProcessorStop(t *testing.T) {
 	})
 
 	t.Run("Start is idempotent", func(t *testing.T) {
-		processor := NewProcessor(nil, nil, DefaultConfig())
+		processor := NewProcessor(nil, nil, nil, DefaultConfig())
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 
@@ -195,7 +195,7 @@ func TestProcessorLoopPanicIsolation(t *testing.T) {
 	// ProtectErr wrapper recovers it and the loop continues until Stop.
 	cfg := DefaultConfig()
 	cfg.Interval = 10 * time.Millisecond
-	processor := NewProcessor(nil, nil, cfg)
+	processor := NewProcessor(nil, nil, nil, cfg)
 	// Register a collection so processQueue actually reaches DequeueRetry on
 	// the nil redisClient, which panics.
 	processor.RegisterCollection("users")
@@ -237,20 +237,16 @@ func retryEventKey(event redis.RetryEvent) string {
 type fakeStore struct {
 	queue map[string][]redis.RetryEvent
 
-	failEnqueue   bool
-	failRemove    bool
-	failSendToDLQ bool
+	failEnqueue bool
+	failRemove  bool
 
 	enqueueCalls int
 	removeCalls  int
-	dlqCalls     int
-	dlqByCol     map[string][][]byte
 }
 
 func newFakeStore() *fakeStore {
 	return &fakeStore{
-		queue:    make(map[string][]redis.RetryEvent),
-		dlqByCol: make(map[string][][]byte),
+		queue: make(map[string][]redis.RetryEvent),
 	}
 }
 
@@ -290,22 +286,8 @@ func (f *fakeStore) RemoveRetryEvent(ctx context.Context, collectionName string,
 	return nil
 }
 
-func (f *fakeStore) SendToDLQ(ctx context.Context, collectionName string, event interface{}) error {
-	f.dlqCalls++
-	if f.failSendToDLQ {
-		return assert.AnError
-	}
-	data, _ := json.Marshal(event)
-	f.dlqByCol[collectionName] = append(f.dlqByCol[collectionName], data)
-	return nil
-}
-
 func (f *fakeStore) GetRetryQueueLength(ctx context.Context, collectionName string) (int64, error) {
 	return int64(len(f.queue[collectionName])), nil
-}
-
-func (f *fakeStore) GetDLQLength(ctx context.Context, collectionName string) (int64, error) {
-	return int64(len(f.dlqByCol[collectionName])), nil
 }
 
 func (f *fakeStore) queuedMembers(collectionName string) []string {
@@ -314,6 +296,31 @@ func (f *fakeStore) queuedMembers(collectionName string) []string {
 		members = append(members, retryEventKey(e))
 	}
 	return members
+}
+
+// fakeDLQ is a map-backed DLQ used to exercise the retry processor's DLQ
+// persistence failure and ordering semantics without a live MongoDB.
+type fakeDLQ struct {
+	entries map[string][]collections.DLQEntry
+
+	failPersist bool
+
+	persistCalls int
+}
+
+func newFakeDLQ() *fakeDLQ {
+	return &fakeDLQ{
+		entries: make(map[string][]collections.DLQEntry),
+	}
+}
+
+func (f *fakeDLQ) CreateDLQEntry(ctx context.Context, entry collections.DLQEntry) error {
+	f.persistCalls++
+	if f.failPersist {
+		return assert.AnError
+	}
+	f.entries[entry.CollectionName] = append(f.entries[entry.CollectionName], entry)
+	return nil
 }
 
 func TestProcessRetryEventDispatchFailure(t *testing.T) {
@@ -349,7 +356,7 @@ func TestProcessRetryEventDispatchFailure(t *testing.T) {
 		original := makeEvent(0, 5, time.Now().Add(-time.Second))
 		store.queue["users"] = []redis.RetryEvent{original}
 
-		p := NewProcessor(store, newDispatcher(), DefaultConfig())
+		p := NewProcessor(store, nil, newDispatcher(), DefaultConfig())
 		p.processRetryEvent(ctx, collectionName, original)
 
 		// Old event must still be present, unmodified.
@@ -365,7 +372,7 @@ func TestProcessRetryEventDispatchFailure(t *testing.T) {
 		original := makeEvent(0, 5, time.Now().Add(-time.Second))
 		store.queue["users"] = []redis.RetryEvent{original}
 
-		p := NewProcessor(store, newDispatcher(), DefaultConfig())
+		p := NewProcessor(store, nil, newDispatcher(), DefaultConfig())
 		p.processRetryEvent(ctx, collectionName, original)
 
 		// Exactly one member remains, with RetryCount incremented and a new
@@ -374,6 +381,8 @@ func TestProcessRetryEventDispatchFailure(t *testing.T) {
 		assert.Equal(t, 1, store.queue["users"][0].RetryCount)
 		assert.True(t, store.queue["users"][0].NextRetryAt.After(original.NextRetryAt),
 			"NextRetryAt should be bumped for the next attempt")
+		assert.Equal(t, assert.AnError.Error(), store.queue["users"][0].LastError,
+			"LastError should record the dispatch failure on the requeued event")
 		assert.Equal(t, 1, store.enqueueCalls)
 		assert.Equal(t, 1, store.removeCalls)
 	})
@@ -384,7 +393,7 @@ func TestProcessRetryEventDispatchFailure(t *testing.T) {
 		original := makeEvent(0, 5, time.Now().Add(-time.Second))
 		store.queue["users"] = []redis.RetryEvent{original}
 
-		p := NewProcessor(store, newDispatcher(), DefaultConfig())
+		p := NewProcessor(store, nil, newDispatcher(), DefaultConfig())
 		p.processRetryEvent(ctx, collectionName, original)
 
 		// The updated event must be enqueued (nothing lost); remove(old) failing
@@ -400,6 +409,7 @@ func TestProcessRetryEventDispatchFailure(t *testing.T) {
 		}
 		require.NotNil(t, updated, "updated event (RetryCount=1) must be present")
 		assert.True(t, updated.NextRetryAt.After(original.NextRetryAt), "NextRetryAt should be bumped")
+		assert.Equal(t, assert.AnError.Error(), updated.LastError, "LastError should record the dispatch failure")
 		assert.Equal(t, 1, store.enqueueCalls)
 		assert.Equal(t, 1, store.removeCalls, "remove was attempted and failed")
 	})
@@ -411,7 +421,7 @@ func TestProcessRetryEventDispatchFailure(t *testing.T) {
 		dispatcher := dispatch.NewDispatcher()
 		dispatcher.Register("users", dispatch.NewRuntimeSink(collections.Sink{}, &successTransport{}))
 
-		p := NewProcessor(store, dispatcher, DefaultConfig())
+		p := NewProcessor(store, nil, dispatcher, DefaultConfig())
 		p.processRetryEvent(ctx, collectionName, original)
 
 		// Success: the event is settled/delivered so it must be removed from
@@ -436,38 +446,64 @@ func TestProcessRetryEventMaxRetries(t *testing.T) {
 			RetryCount:     retryCount,
 			MaxRetries:     maxRetries,
 			NextRetryAt:    time.Now().Add(-time.Second),
+			LastError:      "last dispatch failure",
 		}
 	}
 
 	ctx := context.Background()
 	collectionName := "users"
 
-	t.Run("max retries and SendToDLQ fails: event retained, not removed", func(t *testing.T) {
+	t.Run("max retries and DLQ persist fails: event retained, not removed", func(t *testing.T) {
 		store := newFakeStore()
-		store.failSendToDLQ = true
+		dlqStore := newFakeDLQ()
+		dlqStore.failPersist = true
 		event := makeEvent(5, 5)
 		store.queue["users"] = []redis.RetryEvent{event}
 
-		p := NewProcessor(store, newDispatcher(), DefaultConfig())
+		p := NewProcessor(store, dlqStore, newDispatcher(), DefaultConfig())
 		p.processRetryEvent(ctx, collectionName, event)
 
 		// DLQ was attempted, but the event must NOT be removed.
-		assert.Equal(t, 1, store.dlqCalls)
+		assert.Equal(t, 1, dlqStore.persistCalls)
 		assert.Equal(t, 0, store.removeCalls)
-		require.Len(t, store.queue["users"], 1, "event must stay queued when DLQ push fails")
+		require.Len(t, store.queue["users"], 1, "event must stay queued when DLQ persist fails")
 	})
 
-	t.Run("max retries and SendToDLQ succeeds: event removed, DLQ payload recorded", func(t *testing.T) {
+	t.Run("max retries and DLQ persist succeeds: event removed, DLQ entry recorded", func(t *testing.T) {
 		store := newFakeStore()
+		dlqStore := newFakeDLQ()
 		event := makeEvent(5, 5)
 		store.queue["users"] = []redis.RetryEvent{event}
 
-		p := NewProcessor(store, newDispatcher(), DefaultConfig())
+		p := NewProcessor(store, dlqStore, newDispatcher(), DefaultConfig())
 		p.processRetryEvent(ctx, collectionName, event)
 
-		assert.Equal(t, 1, store.dlqCalls)
+		assert.Equal(t, 1, dlqStore.persistCalls)
 		assert.Equal(t, 1, store.removeCalls)
-		assert.Len(t, store.queue["users"], 0, "event removed after successful DLQ push")
-		require.Len(t, store.dlqByCol["users"], 1, "DLQ payload must be recorded")
+		assert.Len(t, store.queue["users"], 0, "event removed after successful DLQ persist")
+		require.Len(t, dlqStore.entries["users"], 1, "DLQ entry must be recorded")
+		assert.Equal(t, "users-123", dlqStore.entries["users"][0].DedupKey)
+		assert.Equal(t, 5, dlqStore.entries["users"][0].Attempts)
+		assert.Equal(t, "last dispatch failure", dlqStore.entries["users"][0].LastError,
+			"LastError must be carried into the DLQ entry on max-retry persistence")
+	})
+
+	t.Run("max retries and DLQ persist succeeds but remove fails: stale duplicate tolerated", func(t *testing.T) {
+		store := newFakeStore()
+		store.failRemove = true
+		dlqStore := newFakeDLQ()
+		event := makeEvent(5, 5)
+		store.queue["users"] = []redis.RetryEvent{event}
+
+		p := NewProcessor(store, dlqStore, newDispatcher(), DefaultConfig())
+		p.processRetryEvent(ctx, collectionName, event)
+
+		// The DLQ entry is durably persisted; the failed removal leaves a stale
+		// retry item, which is acceptable under at-least-once. The idempotent
+		// dedup key prevents a duplicate DLQ entry on re-processing.
+		assert.Equal(t, 1, dlqStore.persistCalls)
+		assert.Equal(t, 1, store.removeCalls)
+		require.Len(t, store.queue["users"], 1, "stale retry item remains after failed removal")
+		require.Len(t, dlqStore.entries["users"], 1, "DLQ entry must be recorded")
 	})
 }

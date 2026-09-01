@@ -3,9 +3,11 @@
 // This package manages collection configurations stored in MongoDB:
 //   - Collection: Represents a MongoDB collection with CDC settings
 //   - Sink: A sink configuration stored in its own collection
+//   - DLQEntry: A dead-letter record for an exhausted retry event, stored in
+//     config.dlq
 //   - Manager: owns collection lifecycle and their physical MongoDB
 //     infrastructure (collections, indexes, TTL, change-stream capability,
-//     deletion with state-purge fan-out)
+//     deletion with state-purge fan-out) and the dead-letter queue (config.dlq)
 //
 // Key Features:
 //   - Per-collection stream enable/disable
@@ -13,6 +15,7 @@
 //   - Event type filtering per sink
 //   - Deletion protection flag
 //   - TTL attribute configuration
+//   - Dead-letter queue persistence and read access (config.dlq)
 //
 // Pre-image support is a permanent capability of every managed collection: the
 // physical MongoDB collection is created with changeStreamPreAndPostImages

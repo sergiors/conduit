@@ -83,10 +83,6 @@ func (c *Client) retryQueueKey(collectionName string) string {
 	return "cdc:retry:" + collectionName
 }
 
-func (c *Client) dlqKey(collectionName string) string {
-	return "cdc:dlq:" + collectionName
-}
-
 func (c *Client) processedKey(id string) string {
 	return "cdc:processed:" + id
 }
@@ -122,17 +118,17 @@ func (c *Client) DeleteResumeToken(ctx context.Context, collectionName string) e
 }
 
 // DeleteCollectionState removes every per-collection CDC artifact from Redis:
-// the resume token, the retry queue and the dead-letter queue. It is the
-// cleanup hook for collection deletion. Idempotent: DEL on a non-existent key
-// is a no-op, and deleting one collection's keys never touches another
-// collection's (the keys are namespaced per collection by name). Callers use
-// the returned error only for logging/retry; a partial failure still deleted
-// some keys and can be retried safely.
+// the resume token and the retry queue. It is the cleanup hook for collection
+// deletion. Idempotent: DEL on a non-existent key is a no-op, and deleting one
+// collection's keys never touches another collection's (the keys are namespaced
+// per collection by name). Callers use the returned error only for
+// logging/retry; a partial failure still deleted some keys and can be retried
+// safely. The DLQ is no longer stored in Redis (it lives in MongoDB), so it is
+// not part of this purge.
 func (c *Client) DeleteCollectionState(ctx context.Context, collectionName string) error {
 	return c.client.Del(ctx,
 		c.resumeTokenKey(collectionName),
 		c.retryQueueKey(collectionName),
-		c.dlqKey(collectionName),
 	).Err()
 }
 
@@ -162,6 +158,10 @@ type RetryEvent struct {
 	RetryCount     int             `json:"retryCount"`
 	MaxRetries     int             `json:"maxRetries"`
 	NextRetryAt    time.Time       `json:"nextRetryAt"`
+	// LastError is the most recent dispatch error, carried across requeues so
+	// the terminal DLQ entry can record why the event ultimately failed. It is
+	// optional: legacy retry members without it unmarshal to an empty string.
+	LastError string `json:"lastError,omitempty"`
 }
 
 // EnqueueRetry adds an event to the retry queue with exponential backoff
@@ -238,25 +238,6 @@ func (c *Client) RemoveRetryEvent(ctx context.Context, collectionName string, ev
 		return fmt.Errorf("marshal retry event: %w", err)
 	}
 	return c.client.ZRem(ctx, key, string(data)).Err()
-}
-
-// DLQ operations
-// SendToDLQ adds an event to the dead letter queue
-func (c *Client) SendToDLQ(ctx context.Context, collectionName string, event interface{}) error {
-	key := c.dlqKey(collectionName)
-	data, err := json.Marshal(event)
-	if err != nil {
-		return fmt.Errorf("marshal DLQ event: %w", err)
-	}
-
-	// Push to list (DLQ)
-	return c.client.RPush(ctx, key, data).Err()
-}
-
-// GetDLQLength returns the number of events in the DLQ
-func (c *Client) GetDLQLength(ctx context.Context, collectionName string) (int64, error) {
-	key := c.dlqKey(collectionName)
-	return c.client.LLen(ctx, key).Result()
 }
 
 // Monitor operations
