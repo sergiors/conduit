@@ -8,6 +8,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 // Document provides read-only access to documents in a MongoDB collection.
@@ -26,11 +27,30 @@ func NewDocument(client *mongo.Client, database, collection string) *Document {
 	}
 }
 
-// List returns all documents in the collection.
-func (d *Document) List(ctx context.Context) ([]bson.M, error) {
+// DocumentListOptions controls the bounded result set returned by List.
+// A zero value lists documents without a limit or skip.
+type DocumentListOptions struct {
+	// Limit caps the number of documents returned. Zero means no limit.
+	Limit int64
+	// Skip is the number of documents to skip before returning results.
+	// It must be non-negative.
+	Skip int64
+}
+
+// List returns documents in the collection, bounded by opts. Results are
+// sorted by _id ascending for deterministic pagination. An empty result set
+// is returned as an empty (non-nil) slice.
+func (d *Document) List(ctx context.Context, opts DocumentListOptions) ([]bson.M, error) {
 	coll := d.client.Database(d.database).Collection(d.collection)
 
-	cursor, err := coll.Find(ctx, bson.M{})
+	findOpts := options.Find().
+		SetSort(bson.D{{Key: "_id", Value: 1}}).
+		SetSkip(opts.Skip)
+	if opts.Limit > 0 {
+		findOpts.SetLimit(opts.Limit)
+	}
+
+	cursor, err := coll.Find(ctx, bson.M{}, findOpts)
 	if err != nil {
 		return nil, fmt.Errorf("find documents: %w", err)
 	}

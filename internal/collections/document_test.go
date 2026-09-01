@@ -55,9 +55,73 @@ func TestItem_List(t *testing.T) {
 			})
 		}
 
-		documents, err := store.List(ctx)
+		documents, err := store.List(ctx, DocumentListOptions{})
 		require.NoError(t, err)
 		assert.Len(t, documents, 25)
+	})
+
+	t.Run("list applies limit", func(t *testing.T) {
+		store, cleanup := setupTestDocument(t)
+		defer cleanup()
+
+		ctx := context.Background()
+
+		coll := store.client.Database(store.database).Collection(store.collection)
+		for i := 0; i < 25; i++ {
+			coll.InsertOne(ctx, bson.M{
+				"_id":   string(rune('A' + i)),
+				"name":  "Item " + string(rune('A'+i)),
+				"value": i,
+			})
+		}
+
+		documents, err := store.List(ctx, DocumentListOptions{Limit: 5})
+		require.NoError(t, err)
+		assert.Len(t, documents, 5)
+	})
+
+	t.Run("list applies skip", func(t *testing.T) {
+		store, cleanup := setupTestDocument(t)
+		defer cleanup()
+
+		ctx := context.Background()
+
+		coll := store.client.Database(store.database).Collection(store.collection)
+		for i := 0; i < 10; i++ {
+			coll.InsertOne(ctx, bson.M{
+				"_id":   string(rune('A' + i)),
+				"name":  "Item " + string(rune('A'+i)),
+				"value": i,
+			})
+		}
+
+		documents, err := store.List(ctx, DocumentListOptions{Skip: 5})
+		require.NoError(t, err)
+		assert.Len(t, documents, 5)
+		// Sorted by _id ascending, so skipping 5 returns the last 5 items.
+		assert.Equal(t, "Item F", documents[0]["name"])
+	})
+
+	t.Run("list applies limit and skip together", func(t *testing.T) {
+		store, cleanup := setupTestDocument(t)
+		defer cleanup()
+
+		ctx := context.Background()
+
+		coll := store.client.Database(store.database).Collection(store.collection)
+		for i := 0; i < 10; i++ {
+			coll.InsertOne(ctx, bson.M{
+				"_id":   string(rune('A' + i)),
+				"name":  "Item " + string(rune('A'+i)),
+				"value": i,
+			})
+		}
+
+		documents, err := store.List(ctx, DocumentListOptions{Limit: 3, Skip: 4})
+		require.NoError(t, err)
+		assert.Len(t, documents, 3)
+		assert.Equal(t, "Item E", documents[0]["name"])
+		assert.Equal(t, "Item G", documents[2]["name"])
 	})
 
 	t.Run("list empty collection returns empty array", func(t *testing.T) {
@@ -66,7 +130,19 @@ func TestItem_List(t *testing.T) {
 
 		ctx := context.Background()
 
-		documents, err := store.List(ctx)
+		documents, err := store.List(ctx, DocumentListOptions{})
+		require.NoError(t, err)
+		assert.NotNil(t, documents)
+		assert.Empty(t, documents)
+	})
+
+	t.Run("list with limit and skip on empty collection returns empty array", func(t *testing.T) {
+		store, cleanup := setupTestDocument(t)
+		defer cleanup()
+
+		ctx := context.Background()
+
+		documents, err := store.List(ctx, DocumentListOptions{Limit: 10, Skip: 5})
 		require.NoError(t, err)
 		assert.NotNil(t, documents)
 		assert.Empty(t, documents)
