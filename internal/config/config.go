@@ -11,12 +11,13 @@ import (
 
 // Config holds all application settings.
 type Config struct {
-	MongoDBURI      string
-	MongoDBDatabase string
-	RedisURI        string
-	Port            string
-	APIKey          string
-	ShutdownTimeout time.Duration
+	MongoDBURI        string
+	MongoDBDatabase   string
+	RedisURI          string
+	Port              string
+	APIKey            string
+	ShutdownTimeout   time.Duration
+	ProcessedEventTTL time.Duration
 }
 
 // Load is the API binary's loader. It reads the full application
@@ -42,25 +43,32 @@ func Load() Config {
 // at their zero values.
 func LoadWorker() Config {
 	return Config{
-		MongoDBURI:      requiredEnv("MONGODB_URI"),
-		MongoDBDatabase: requiredEnv("MONGODB_DATABASE"),
-		RedisURI:        requiredEnv("REDIS_URI"),
-		ShutdownTimeout: loadShutdownTimeout(getEnv("SHUTDOWN_TIMEOUT", "30s")),
+		MongoDBURI:        requiredEnv("MONGODB_URI"),
+		MongoDBDatabase:   requiredEnv("MONGODB_DATABASE"),
+		RedisURI:          requiredEnv("REDIS_URI"),
+		ShutdownTimeout:   loadDuration("SHUTDOWN_TIMEOUT", getEnv("SHUTDOWN_TIMEOUT", "30s"), 30*time.Second),
+		ProcessedEventTTL: loadDuration("PROCESSED_EVENT_TTL", getEnv("PROCESSED_EVENT_TTL", "24h"), 24*time.Hour),
 	}
 }
 
-// loadShutdownTimeout parses the SHUTDOWN_TIMEOUT value into a duration. It
-// bounds the whole graceful-shutdown sequence. On an invalid value it logs a
-// warning and falls back to the default rather than aborting the process: this
-// is an optional tuning knob, not a required setting.
-func loadShutdownTimeout(value string) time.Duration {
-	const fallback = 30 * time.Second
+// loadDuration parses an optional duration environment variable into a
+// time.Duration. On an empty, invalid, or non-positive value it logs a warning
+// and falls back to the provided default rather than aborting the process:
+// these are optional tuning knobs, not required settings. Non-positive values
+// (e.g. "0s", "-1s") are rejected because they would otherwise disable or
+// invert operational behavior such as graceful shutdown or idempotency-key
+// expiry.
+func loadDuration(name, value string, fallback time.Duration) time.Duration {
 	if value == "" {
 		return fallback
 	}
 	d, err := time.ParseDuration(value)
 	if err != nil {
-		log.Printf("Invalid SHUTDOWN_TIMEOUT %q, using default %s: %v", value, fallback, err)
+		log.Printf("Invalid %s %q, using default %s: %v", name, value, fallback, err)
+		return fallback
+	}
+	if d <= 0 {
+		log.Printf("Invalid %s %q (must be positive), using default %s", name, value, fallback)
 		return fallback
 	}
 	return d

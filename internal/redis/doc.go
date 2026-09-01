@@ -11,11 +11,17 @@
 //	cdc:resume:<collectionName>        - Resume token for a table
 //	cdc:retry:<collectionName>         - Retry queue (sorted set by nextRetryAt)
 //	cdc:dlq:<collectionName>           - Dead letter queue (list)
-//	cdc:processed:<eventID>            - Idempotency key (TTL: 24h)
+//	cdc:processed:<eventID>            - Idempotency key (TTL: configurable, default 24h)
 //
 // The event ID is deterministic, derived from the MongoDB change event
 // (resume token, or clusterTime + documentKey as fallback), so replays of the
 // same change always map to the same key.
+//
+// Idempotency is best-effort and bounded by the processed-key TTL (default
+// 24h, configurable via PROCESSED_EVENT_TTL). Delivery is at-least-once: a
+// duplicate may be delivered if the processed key has expired, if the
+// MarkProcessed write is lost, or if Redis is unavailable. Downstream
+// consumers must be idempotent using the event ID.
 //
 // Usage:
 //

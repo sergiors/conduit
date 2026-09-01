@@ -521,7 +521,7 @@ MongoDB Change Stream
 4. **The manager's handler** receives the `StreamRecord`.
 5. **Idempotency**: the manager uses the event ID derived by the watcher from change-stream data — the resume token (`_id._data`), with `clusterTime` + `documentKey` as fallback — and checks `cdc:processed:{id}` in Redis. If present, the event is skipped.
 6. **Dispatch**: the dispatcher fans the record out to all sinks registered for that collection. Each sink may filter by event type and by image criteria before sending.
-7. **Success path**: if all sinks succeed, the manager marks the event as processed with a 24-hour TTL and the watcher saves the change stream resume token to Redis.
+7. **Success path**: if all sinks succeed, the manager marks the event as processed with the configured TTL (default 24h, `PROCESSED_EVENT_TTL`) and the watcher saves the change stream resume token to Redis. These two writes are **not atomic**: if the processed-key or resume-token write fails after dispatch, the event is replayed and delivered again — delivery is at-least-once.
 8. **Failure path**: if any sink fails, the manager marshals the record to JSON and enqueues a `RetryEvent` into the Redis sorted set `cdc:retry:{collection}` with `retryCount = 0` and `nextRetryAt = now + 1s`.
 9. **Retry processor** wakes up every interval, dequeues events whose `nextRetryAt` has passed, and attempts dispatch again.
 10. **Retry outcome**:
@@ -529,7 +529,7 @@ MongoDB Change Stream
     - Failure below max retries: increment `retryCount`, recompute `nextRetryAt` with exponential backoff, remove the old member, and add the updated member.
     - Failure at or above max retries: push the raw event to `cdc:dlq:{collection}`, then remove it from the retry queue.
 
-Resume tokens are updated after every successful event, never after a failure. A failure does not skip the event; it moves it to the retry path while the watcher continues consuming new changes.
+Resume tokens are updated after every successful event, never after a failure. A failure does not skip the event; it moves it to the retry path while the watcher continues consuming new changes. Because the processed-key write and the resume-token write are not atomic, and because the processed key expires after `PROCESSED_EVENT_TTL` (default 24h), delivery is **at-least-once**: a duplicate can be delivered after a crash, a Redis outage, or downtime longer than the TTL. Downstream consumers must be idempotent using the deterministic `eventID`.
 
 ---
 
@@ -701,9 +701,11 @@ The following invariants are enforced by the code:
 - **There is at most one watcher per collection**. The manager's registry is keyed by collection name.
 - **Resume tokens are isolated per collection**. Key format: `cdc:resume:{collectionName}`.
 - **Resume tokens advance only after successful processing**. Failures route events to retry; the change stream cursor still advances, but the saved token reflects the last successfully handled event.
+- **Delivery is at-least-once, not exactly-once.** A change event is delivered to the sinks at least once, but duplicates can occur: if the `MarkProcessed` idempotency write or the resume-token write fails after a successful dispatch, if Redis is unavailable, on crashes/restarts, or after downtime longer than the processed-key TTL. Downstream consumers must be idempotent using the deterministic `eventID`.
+- **Idempotency is best-effort and bounded by the Redis processed-key TTL.** The processed key (`cdc:processed:{id}`) suppresses duplicate deliveries only within its TTL window (default `24h`, configurable via `PROCESSED_EVENT_TTL`). After it expires, a replayed event is delivered again.
 - **A first-start checkpoint closes the enablement gap**. When a stream is enabled, `streamStartedAt` is recorded; a fresh watcher with no resume token anchors its stream at that checkpoint (`startAtOperationTime`), so events written between enablement and the first watcher start are streamed instead of skipped.
 - **Resume tokens are never deleted on generic errors**. Transient failures (network, elections, cursor timeouts) preserve the token so the watcher resumes from the last successful position and skips nothing. The token is invalidated only when MongoDB explicitly rejects it as invalid (unparseable token, or a token from a dropped and recreated collection).
-- **Idempotency is required for all event processing**. Duplicate event IDs within the 24-hour TTL are skipped.
+- **Idempotency is required for all event processing**. Duplicate event IDs within the processed-key TTL (default 24h, configurable via `PROCESSED_EVENT_TTL`) are skipped. Idempotency is best-effort and bounded by that TTL; delivery is at-least-once, so downstream consumers must be idempotent using `eventID`.
 - **Event IDs are deterministic and derived exclusively from change-stream data**. The primary source is the resume token (`_id._data`); `clusterTime` + `documentKey` serve as fallback. Application-generated timestamps (e.g. `time.Now()`) are never part of the ID, so the same MongoDB change produces the same ID across process restarts.
 - **Event ordering is not guaranteed**. Downstream consumers must be eventually consistent.
 - **Retry uses exponential backoff capped at 5 minutes** with a maximum of 5 attempts.

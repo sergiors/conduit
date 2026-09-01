@@ -31,6 +31,7 @@ type Manager struct {
 	currentSinks       map[string][]collections.Sink
 	mu                 sync.RWMutex
 	syncInterval       time.Duration
+	processedEventTTL  time.Duration
 	pubsub             *redis.PubSub
 	configChan         <-chan *redis.Message
 
@@ -80,12 +81,18 @@ type Dispatcher interface {
 type Config struct {
 	SyncInterval time.Duration // How often to sync with config.collections
 	HTTPEndpoint string        // HTTP endpoint for creating sinks
+	// ProcessedEventTTL is how long a dispatched event's idempotency key is
+	// retained in Redis. Duplicate deliveries are suppressed only within this
+	// window; after it expires a replayed event is delivered again (at-least-once
+	// semantics). Defaults to 24h.
+	ProcessedEventTTL time.Duration
 }
 
 // DefaultConfig returns sensible defaults
 func DefaultConfig() Config {
 	return Config{
-		SyncInterval: 30 * time.Second,
+		SyncInterval:      30 * time.Second,
+		ProcessedEventTTL: 24 * time.Hour,
 	}
 }
 
@@ -99,6 +106,14 @@ func NewManager(
 	retryProcessor *retry.Processor,
 	cfg Config,
 ) *Manager {
+	// Apply safe defaults so a zero-value Config (or one built without
+	// DefaultConfig) still behaves correctly.
+	if cfg.SyncInterval == 0 {
+		cfg.SyncInterval = 30 * time.Second
+	}
+	if cfg.ProcessedEventTTL == 0 {
+		cfg.ProcessedEventTTL = 24 * time.Hour
+	}
 	return &Manager{
 		mongoClient:        mongoClient,
 		database:           database,
@@ -109,6 +124,7 @@ func NewManager(
 		watchers:           make(map[string]*Watcher),
 		currentSinks:       make(map[string][]collections.Sink),
 		syncInterval:       cfg.SyncInterval,
+		processedEventTTL:  cfg.ProcessedEventTTL,
 	}
 }
 
@@ -405,14 +421,15 @@ func (m *Manager) handleEvent(ctx context.Context, collectionName string, record
 	}
 
 	// Mark as processed
-	// Use 24h TTL for idempotency key.
+	// Use the configured TTL for the idempotency key (default 24h). Delivery is
+	// at-least-once: this key only suppresses duplicates within its TTL window.
 	//
 	// The dispatch already succeeded, so this write must survive a shutdown
 	// that cancels the live ctx mid-event; losing it would cause a duplicate
 	// delivery on restart.
 	bkctx, bkCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer bkCancel()
-	if err := m.redisClient.MarkProcessed(bkctx, eventID, 24*time.Hour); err != nil {
+	if err := m.redisClient.MarkProcessed(bkctx, eventID, m.processedEventTTL); err != nil {
 		log.Printf("Failed to mark event as processed: %v", err)
 	}
 

@@ -71,6 +71,8 @@ func NewWorker(cfg config.Config) (*Worker, error) {
 	)
 
 	// Initialize watcher manager
+	watcherCfg := watcher.DefaultConfig()
+	watcherCfg.ProcessedEventTTL = cfg.ProcessedEventTTL
 	watcherManager := watcher.NewManager(
 		mongoClient.Client,
 		cfg.MongoDBDatabase,
@@ -78,7 +80,7 @@ func NewWorker(cfg config.Config) (*Worker, error) {
 		redisClient,
 		dispatcher,
 		retryProcessor,
-		watcher.DefaultConfig(),
+		watcherCfg,
 	)
 
 	return &Worker{

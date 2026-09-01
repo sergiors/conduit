@@ -32,6 +32,7 @@ Instead of every team rebuilding the same change-stream infrastructure, Conduit 
 - **Retry with exponential backoff** — failed deliveries are retried up to 5 times.
 - **Dead Letter Queue** — exhausted retries land in a per-collection DLQ.
 - **Resume tokens** — per-collection resume positions stored in Redis, saved only after successful processing.
+- **At-least-once delivery** — events are never lost, but duplicates can occur; downstream consumers must be idempotent (see [Delivery Semantics](#delivery-semantics)).
 - **Automatic watcher management** — one watcher per enabled collection, synchronized dynamically with configuration (worker sync interval: 30s, plus immediate reaction to configuration changes via pub/sub).
 - **Deletion protection** — enabled by default; collections cannot be deleted until protection is explicitly disabled.
 - **TTL support** — configure a TTL attribute and Conduit creates the corresponding MongoDB TTL index.
@@ -63,7 +64,20 @@ Instead of every team rebuilding the same change-stream infrastructure, Conduit 
 
 MongoDB emits a change event → a per-collection watcher turns it into a `StreamRecord` → the dispatcher fans it out to the collection's sinks → failures are queued for retry with exponential backoff → exhausted retries move to the DLQ.
 
-Resume tokens are updated only after successful processing, so events are never skipped on failure.
+Resume tokens are updated only after successful processing, so events are never skipped on failure. Delivery is **at-least-once**, not exactly-once: see [Delivery Semantics](#delivery-semantics).
+
+---
+
+## Delivery Semantics
+
+Conduit guarantees **at-least-once** delivery, **not** exactly-once. Every change event is delivered to the sinks at least once, but a duplicate delivery can occur in the following situations:
+
+- **MarkProcessed / resume-token write fails after a successful sink dispatch.** The event is dispatched, but if the "processed" idempotency key or the resume token is not durably written (e.g. Redis is unavailable, or the process crashes between dispatch and the bookkeeping write), the change stream replays the event on the next session and it is delivered again.
+- **Redis is unavailable.** The idempotency check (`IsProcessed`) and the processed-key write (`MarkProcessed`) both depend on Redis. If Redis is down, Conduit deliberately continues processing rather than drop events — so the same event can be delivered more than once.
+- **Crashes and restarts.** A crash after dispatch but before the resume token is persisted causes the event to be replayed.
+- **Downtime longer than `PROCESSED_EVENT_TTL`.** The idempotency key expires after the configured TTL (default `24h`). If a change stream replays an event whose key has already expired, it is delivered again.
+
+Conduit's idempotency is therefore **best-effort and bounded by the Redis processed-key TTL**. Downstream consumers **must be idempotent**: they should deduplicate using the deterministic `eventID` carried on every `StreamRecord`. The `eventID` is derived from the MongoDB change event (resume token, or `clusterTime` + `documentKey` as fallback), so the same change always produces the same ID across restarts.
 
 ---
 
@@ -251,6 +265,11 @@ PORT=8080
 API_KEY=your-secret-key
 # Optional: bounded by a 30s default; applies to the worker's graceful shutdown.
 # SHUTDOWN_TIMEOUT=45s
+# Optional: how long a dispatched event's idempotency key is retained in Redis
+# (default 24h). Delivery is at-least-once; duplicates are suppressed only
+# within this window. A very short TTL narrows the dedup window and increases
+# duplicate deliveries. Downstream consumers must be idempotent using eventID.
+# PROCESSED_EVENT_TTL=24h
 # Optional: only needed for the EventBridge sink. AWS_ACCESS_KEY_ID,
 # AWS_SECRET_ACCESS_KEY, and AWS_REGION (plus optional AWS_SESSION_TOKEN) are
 # resolved via the AWS SDK default credential chain.
@@ -296,7 +315,7 @@ Binaries are written to `./bin/`.
 - **Dynamic runtime updates** — configuration changes take effect without restarting workers.
 - **Immutable configuration resources** — stream, TTL, and protection settings are changed by disabling and recreating them.
 - **API as an HTTP interface** — the API only adapts HTTP requests; business rules live in the domain layer.
-- **No event loss** — failed events retry; exhausted retries go to the DLQ. Resume tokens advance only on success.
+- **No event loss** — failed events retry; exhausted retries go to the DLQ. Resume tokens advance only on success. Delivery is at-least-once, not exactly-once: duplicates can occur, so downstream consumers must be idempotent using `eventID`.
 
 ---
 
