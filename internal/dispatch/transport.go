@@ -2,21 +2,19 @@ package dispatch
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log"
 
 	"github.com/sergiors/conduit/internal/collections"
 	"github.com/sergiors/conduit/internal/streams"
 )
 
-// Transport registry pattern:
-// Each transport type registers itself via init() in the transports package.
-// The application's main.go must import the transports package with a blank
-// import to trigger initialization:
+// Transport builders register themselves via init() in the transports package.
+// main.go must import that package with a blank import so all init() functions
+// run before main() and BuildTransport() can find them:
 //
 //	import _ "github.com/sergiors/conduit/internal/dispatch/transports"
-//
-// This ensures all init() functions run before main(), registering all
-// transport builders so BuildTransport() can find them.
 
 // Transport defines the runtime interface responsible for delivering stream
 // events to a destination. A transport knows only how to deliver an event;
@@ -26,16 +24,12 @@ type Transport interface {
 	Close() error
 }
 
-// TransportBuilder builds a transport from its persisted spec.
-// The builder is responsible for decoding the type-specific spec payload,
-// validating it, and returning a ready-to-use Transport. The collection name
-// may be used for transport-specific defaults (e.g. a default Meilisearch
-// index name), but event types, filter criteria and sink identity must not be
-// handled here. If the spec is invalid or unsupported, the builder should
-// return nil.
+// TransportBuilder builds a ready-to-use Transport from a persisted spec,
+// returning nil if the spec is invalid or unsupported at runtime. The collection
+// name may feed transport-specific defaults (e.g. a Meilisearch index name);
+// event types, filters and sink identity must not be handled here.
 type TransportBuilder func(ctx context.Context, collectionName string, t collections.Type, spec map[string]interface{}) Transport
 
-// transportBuilders holds registered transport builders by type.
 var transportBuilders = make(map[collections.Type]TransportBuilder)
 
 // RegisterTransport registers a builder function for a transport type.
@@ -52,15 +46,48 @@ func RegisterTransport(t collections.Type, builder TransportBuilder) {
 }
 
 // BuildTransport creates a transport using the registered builder.
-// Returns nil if the type is not registered or the builder rejects the spec.
+//
+// Fail-closed: a configured sink must never be silently skipped. If the type is
+// unregistered or the builder rejects the spec, BuildTransport returns a non-nil
+// erroring transport. The sink still participates in dispatch and Send fails
+// every matching event, so the watcher treats it as unsettled and retries; a nil
+// return is never produced for a configured sink.
 func BuildTransport(ctx context.Context, collectionName string, t collections.Type, spec map[string]interface{}) Transport {
 	builder, exists := transportBuilders[t]
 	if !exists {
-		log.Printf("no transport registered for sink type %q (collection %s)", t, collectionName)
-		return nil
+		err := fmt.Errorf("no transport registered for sink type %q (collection %s)", t, collectionName)
+		log.Print(err)
+		return newUnavailableTransport(err)
 	}
-	return builder(ctx, collectionName, t, spec)
+	transport := builder(ctx, collectionName, t, spec)
+	if transport == nil {
+		err := fmt.Errorf("transport builder rejected spec for sink type %q (collection %s)", t, collectionName)
+		log.Print(err)
+		return newUnavailableTransport(err)
+	}
+	return transport
 }
+
+// unavailableTransport fails Send for every matching event so a sink that
+// cannot be built at runtime is never silently acknowledged; the watcher
+// treats the error as unsettled and retries.
+type unavailableTransport struct {
+	err error
+}
+
+func newUnavailableTransport(err error) Transport {
+	return &unavailableTransport{err: err}
+}
+
+func (t *unavailableTransport) Send(ctx context.Context, record streams.StreamRecord) error {
+	return fmt.Errorf("%w: %v", errUnavailable, t.err)
+}
+
+func (t *unavailableTransport) Close() error { return nil }
+
+// errUnavailable is a sentinel so callers can identify an unavailable
+// transport without string matching.
+var errUnavailable = errors.New("sink transport unavailable")
 
 // RegisteredTransportTypes returns all registered transport types.
 func RegisteredTransportTypes() []collections.Type {

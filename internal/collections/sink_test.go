@@ -11,9 +11,7 @@ import (
 )
 
 func TestSinkFingerprintDeterministic(t *testing.T) {
-	// Two sinks differing only in JSON key insertion order must produce the
-	// same fingerprint. EventTypes order and mutable filter/behavior are not
-	// part of the identity (they are updated in place via PATCH).
+	// Sinks differing only in JSON key insertion order must fingerprint the same.
 	a := Sink{
 		Type: SinkTypeHTTP,
 		Spec: map[string]interface{}{
@@ -77,9 +75,8 @@ func TestSinkFingerprintDistinct(t *testing.T) {
 	fpBase, err := base.ComputeFingerprint()
 	require.NoError(t, err)
 
-	// The fingerprint covers the immutable identity (type + spec) only.
-	// Mutable/behavioral fields are updated in place via PATCH and must not
-	// change the destination identity.
+	// The fingerprint covers only the immutable identity (type + spec);
+	// mutable fields are updated in place via PATCH.
 	t.Run("different type changes fingerprint", func(t *testing.T) {
 		s := base
 		s.Type = SinkTypeEventBridge
@@ -191,6 +188,76 @@ func TestSinkBSONTags(t *testing.T) {
 	assert.Equal(t, string(SinkTypeHTTP), decoded["type"])
 	assert.Equal(t, map[string]interface{}{"endpoint": "http://localhost:3000/events"}, decoded["spec"])
 	assert.Equal(t, []interface{}{"INSERT"}, []interface{}(decoded["eventTypes"].(primitive.A)))
+}
+
+func TestSinkValidateTypeSpecific(t *testing.T) {
+	t.Run("unknown sink type rejected", func(t *testing.T) {
+		s := Sink{Type: "kafka", Spec: map[string]interface{}{"endpoint": "http://localhost:3000/events"}}
+		err := s.Validate()
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrValidation)
+		assert.Contains(t, err.Error(), "unknown sink type")
+	})
+
+	t.Run("http requires valid endpoint", func(t *testing.T) {
+		cases := []struct {
+			name string
+			spec map[string]interface{}
+		}{
+			{"missing endpoint", map[string]interface{}{}},
+			{"empty endpoint", map[string]interface{}{"endpoint": ""}},
+			{"relative endpoint", map[string]interface{}{"endpoint": "/events"}},
+			{"no scheme", map[string]interface{}{"endpoint": "localhost:3000/events"}},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				s := Sink{Type: SinkTypeHTTP, Spec: tc.spec}
+				err := s.Validate()
+				require.Error(t, err)
+				assert.ErrorIs(t, err, ErrValidation)
+			})
+		}
+	})
+
+	t.Run("http valid endpoint accepted", func(t *testing.T) {
+		s := Sink{Type: SinkTypeHTTP, Spec: map[string]interface{}{"endpoint": "https://webhook.example.com/events"}}
+		require.NoError(t, s.Validate())
+	})
+
+	t.Run("eventbridge requires eventBusName", func(t *testing.T) {
+		s := Sink{Type: SinkTypeEventBridge, Spec: map[string]interface{}{"source": "x"}}
+		err := s.Validate()
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrValidation)
+		assert.Contains(t, err.Error(), "eventBusName")
+	})
+
+	t.Run("eventbridge valid spec accepted without AWS config", func(t *testing.T) {
+		// Region/credentials are infrastructure config resolved at runtime and
+		// must not be required in the persisted spec.
+		s := Sink{Type: SinkTypeEventBridge, Spec: map[string]interface{}{"eventBusName": "my-bus"}}
+		require.NoError(t, s.Validate())
+	})
+
+	t.Run("meilisearch requires host", func(t *testing.T) {
+		s := Sink{Type: SinkTypeMeilisearch, Spec: map[string]interface{}{"indexName": "x"}}
+		err := s.Validate()
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrValidation)
+		assert.Contains(t, err.Error(), "host")
+	})
+
+	t.Run("meilisearch invalid host rejected", func(t *testing.T) {
+		s := Sink{Type: SinkTypeMeilisearch, Spec: map[string]interface{}{"host": "not a url"}}
+		err := s.Validate()
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrValidation)
+	})
+
+	t.Run("meilisearch valid host accepted", func(t *testing.T) {
+		s := Sink{Type: SinkTypeMeilisearch, Spec: map[string]interface{}{"host": "http://localhost:7700"}}
+		require.NoError(t, s.Validate())
+	})
 }
 
 func TestManagerSinkCRUD(t *testing.T) {

@@ -11,10 +11,11 @@ import (
 	"github.com/sergiors/conduit/internal/collections"
 	"github.com/sergiors/conduit/internal/streams"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"
 )
 
-// MockTransport is a test double for the Transport interface.
+// MockTransport is a test double for Transport.
 type MockTransport struct {
 	sent       bool
 	closed     bool
@@ -363,9 +364,9 @@ func (a *atomicTransport) sent() bool { return a.sentFlag.Load() }
 
 // TestDispatcherDispatchConcurrent proves Dispatch delivers to sinks in
 // parallel rather than sequentially. A slow (blocking) sink is registered
-// first; under the previous sequential fan-out it would block Dispatch before
-// the fast sink was ever touched, so the fast sink completing while the slow
-// sink is still blocked is a deterministic proof of concurrency (no sleeps).
+// first; under sequential fan-out it would block Dispatch before the fast sink
+// was touched, so the fast sink completing while the slow sink is still blocked
+// is a deterministic proof of concurrency (no sleeps).
 func TestDispatcherDispatchConcurrent(t *testing.T) {
 	d := NewDispatcher()
 	fast := &atomicTransport{}
@@ -381,15 +382,14 @@ func TestDispatcherDispatchConcurrent(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- d.Dispatch(ctx, "table1", record) }()
 
-	// The slow sink must have started (and blocked) its lane.
 	select {
 	case <-slow.entered:
 	case <-time.After(5 * time.Second):
 		t.Fatal("slow sink never entered Send")
 	}
 
-	// The fast sink must complete while the slow sink is still blocked. If
-	// dispatch were sequential this would hang until we release the gate.
+	// Fast sink must complete while slow is still blocked; sequential dispatch
+	// would hang here until we release the gate.
 	release := make(chan struct{})
 	go func() {
 		select {
@@ -402,7 +402,6 @@ func TestDispatcherDispatchConcurrent(t *testing.T) {
 	case <-release:
 		t.Fatal("fast sink was not reached while slow sink was blocked; dispatch appears sequential")
 	case <-time.After(500 * time.Millisecond):
-		// fast was delivered concurrently; now let the slow sink finish.
 	}
 	assert.True(t, fast.sent(), "fast sink should have delivered while slow was blocked")
 
@@ -418,10 +417,9 @@ func TestDispatcherDispatchConcurrent(t *testing.T) {
 
 // TestDispatcherBackpressure proves a full sink lane applies bounded
 // backpressure: a Dispatch submission blocks (rather than dropping) until a
-// worker frees capacity. A single worker and a queue size of 1 means a second
+// worker frees capacity. A single worker and queue size 1 means a second
 // concurrent event cannot be accepted until the first is delivered.
 func TestDispatcherBackpressure(t *testing.T) {
-	// queueSize 1, workerCount 1: at most one event in flight or queued.
 	d := NewDispatcherWithConfig(Config{QueueSize: 1, WorkerCount: 1})
 	slow := newBlockingTransport()
 	d.Register("table1", newTestSink(slow))
@@ -432,9 +430,8 @@ func TestDispatcherBackpressure(t *testing.T) {
 	// First dispatch occupies the single worker (blocks in Send).
 	firstDone := make(chan error, 1)
 	go func() { firstDone <- d.Dispatch(ctx, "table1", record) }()
-	<-slow.entered // worker is now blocked in Send; queue is full.
+	<-slow.entered
 
-	// A concurrent second dispatch must block until the first completes.
 	secondStarted := make(chan error, 1)
 	go func() { secondStarted <- d.Dispatch(ctx, "table1", record) }()
 
@@ -444,13 +441,12 @@ func TestDispatcherBackpressure(t *testing.T) {
 	default:
 	}
 
-	// The second dispatch must still be outstanding (blocked on the full lane),
-	// not returned (which would mean it was dropped).
+	// The second dispatch must still be blocked on the full lane, not returned
+	// (which would mean it was dropped).
 	select {
 	case err := <-secondStarted:
 		t.Fatalf("second dispatch returned %v while the lane was full; expected backpressure, not drop", err)
 	case <-time.After(300 * time.Millisecond):
-		// backpressure held; good.
 	}
 
 	// Release the first worker; both dispatches should now complete.
@@ -492,12 +488,11 @@ func TestNewDispatcherWithConfigSanitization(t *testing.T) {
 }
 
 // TestDispatcherCloseDuringDispatch races Close against in-flight Dispatch
-// calls (with a transport that completes quickly) to prove Close neither
-// panics nor drops accepted jobs under concurrency. A Close may legitimately
-// wait for an in-flight delivery to settle (the design preserves the settlement
-// contract), so this uses a fast transport; the watcher is stopped before
-// Close in production, so a blocked slow transport during Close is not a case
-// the dispatcher must abort.
+// calls (with a fast transport) to prove Close neither panics nor drops accepted
+// jobs. Close may legitimately wait for an in-flight delivery to settle (the
+// settlement contract), so this uses a fast transport; the watcher is stopped
+// before Close in production, so a blocked slow transport during Close is not a
+// case the dispatcher must abort.
 func TestDispatcherCloseDuringDispatch(t *testing.T) {
 	d := NewDispatcher()
 	transport := &countingTransport{}
@@ -531,9 +526,7 @@ func TestDispatcherCloseDuringDispatch(t *testing.T) {
 // TestDispatcherDispatchContextCancel proves a cancelled context surfaces as a
 // non-nil error from Dispatch rather than hanging or dropping. With workerCount
 // 1 and queueSize 1, two prior dispatches occupy the lone worker and its queue;
-// a third dispatch then blocks on submission and sees the context cancel, which
-// must contribute exactly one result to Dispatch's wait loop (the lane that
-// failed to submit emits its own error).
+// a third dispatch then blocks on submission and sees the context cancel.
 func TestDispatcherDispatchContextCancel(t *testing.T) {
 	d := NewDispatcherWithConfig(Config{QueueSize: 1, WorkerCount: 1})
 	slow := newBlockingTransport()
@@ -550,7 +543,6 @@ func TestDispatcherDispatchContextCancel(t *testing.T) {
 	// dispatch2 fills the queue (worker is blocked, so this job stays queued).
 	f2 := make(chan error, 1)
 	go func() { f2 <- d.Dispatch(ctx, "table1", record) }()
-	// Give dispatch2 time to enqueue into the now-full queue.
 	time.Sleep(100 * time.Millisecond)
 
 	// dispatch3 blocks on the full queue; cancel its context to force a submit
@@ -561,6 +553,7 @@ func TestDispatcherDispatchContextCancel(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	cancel()
 
+	// The cancelled submit must contribute exactly one result to the wait loop.
 	select {
 	case err := <-f3:
 		if err != context.Canceled {
@@ -580,10 +573,9 @@ func TestDispatcherDispatchContextCancel(t *testing.T) {
 // submit blocked on a full lane queue. With workerCount 1 and queueSize 1, a
 // first dispatch occupies the lone worker (blocked in Send) and a second fills
 // the queue; a third dispatch then blocks on submission. Closing the lane must
-// unblock that submit (with errLaneClosed) promptly rather than waiting on the
-// backpressured submit while the submit waits on queue capacity. Close itself
-// still waits for the in-flight worker to finish (the settlement contract), so
-// the gate is released after the backpressured submit is proven unblocked.
+// unblock that submit (with errLaneClosed) promptly. Close itself still waits
+// for the in-flight worker to finish (the settlement contract), so the gate is
+// released after the backpressured submit is proven unblocked.
 func TestDispatcherCloseWhileBackpressured(t *testing.T) {
 	d := NewDispatcherWithConfig(Config{QueueSize: 1, WorkerCount: 1})
 	slow := newBlockingTransport()
@@ -600,7 +592,6 @@ func TestDispatcherCloseWhileBackpressured(t *testing.T) {
 	// dispatch2 fills the queue (worker is blocked, so this job stays queued).
 	f2 := make(chan error, 1)
 	go func() { f2 <- d.Dispatch(ctx, "table1", record) }()
-	// Give dispatch2 time to enqueue into the now-full queue.
 	time.Sleep(100 * time.Millisecond)
 
 	// dispatch3 blocks on the full queue: this is the backpressured submit that
@@ -609,14 +600,14 @@ func TestDispatcherCloseWhileBackpressured(t *testing.T) {
 	go func() { f3 <- d.Dispatch(ctx, "table1", record) }()
 	time.Sleep(100 * time.Millisecond)
 
-	// Close must unblock the backpressured submit even though the worker is
-	// still blocked in Send. Before the fix this deadlocked: close waited on
-	// stateMu while the submit held it waiting for queue capacity.
+	// Close must unblock the backpressured submit even while the worker is still
+	// blocked; before the fix this deadlocked (close waited on stateMu while the
+	// submit held it waiting for queue capacity).
 	closeDone := make(chan error, 1)
 	go func() { closeDone <- d.Close() }()
 
 	// The backpressured submit must be rejected with errLaneClosed while the
-	// worker is still blocked — proving close (not the freed worker) unblocked it.
+	// worker is still blocked, proving close (not the freed worker) unblocked it.
 	select {
 	case err := <-f3:
 		assert.ErrorIs(t, err, errLaneClosed)
@@ -640,10 +631,9 @@ func TestDispatcherCloseWhileBackpressured(t *testing.T) {
 // orphan-job race: a submit that wins the send race after close begins must
 // still be drained and produce a result, never hang. Close rejects new submits
 // (phase 1) but only signals workers to drain/exit (phase 2) after every
-// in-flight submit has settled, so an accepted job is always delivered. This
-// test hammers many concurrent Dispatch calls against a Close and asserts that
-// every Dispatch returns (nil or errLaneClosed) and Close returns — a hang or a
-// dropped result would fail under the race detector.
+// in-flight submit has settled, so an accepted job is always delivered. The
+// test hammers concurrent Dispatch calls against a Close and asserts every
+// Dispatch returns (nil or errLaneClosed) and Close returns.
 func TestDispatcherCloseOrphanRace(t *testing.T) {
 	d := NewDispatcherWithConfig(Config{QueueSize: 4, WorkerCount: 2})
 	transport := &atomicTransport{}
@@ -731,4 +721,65 @@ func TestDispatcherRemoveWhileBackpressured(t *testing.T) {
 	}
 	<-f1
 	<-f2
+}
+
+// TestBuildTransportFailClosed verifies that a configured sink whose transport
+// cannot be built at runtime (unknown type, or a builder that rejects the spec)
+// yields a non-nil erroring transport rather than nil, so the sink is never
+// silently skipped.
+func TestBuildTransportFailClosed(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("unknown sink type returns erroring transport", func(t *testing.T) {
+		tr := BuildTransport(ctx, "users", collections.Type("kafka"), map[string]interface{}{"endpoint": "http://localhost:3000"})
+		require.NotNil(t, tr, "unknown type must not return nil")
+		err := tr.Send(ctx, streams.StreamRecord{RecordType: streams.InsertRecord})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, errUnavailable)
+	})
+
+	t.Run("builder rejecting spec returns erroring transport", func(t *testing.T) {
+		// Register a unique test-only builder that rejects its spec by
+		// returning nil, so the subtest exercises the registered-builder
+		// path rather than the "no registered builder" path.
+		testType := collections.Type("test-rejecting-builder")
+		RegisterTransport(testType, func(ctx context.Context, collectionName string, t collections.Type, spec map[string]interface{}) Transport {
+			return nil
+		})
+		defer delete(transportBuilders, testType)
+
+		tr := BuildTransport(ctx, "users", testType, map[string]interface{}{})
+		require.NotNil(t, tr, "rejected spec must not return nil")
+		err := tr.Send(ctx, streams.StreamRecord{RecordType: streams.InsertRecord})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, errUnavailable)
+	})
+}
+
+// TestDispatcherUnavailableLaneFailClosed proves a configured sink whose
+// transport could not be built still participates in dispatch: Dispatch returns
+// an error for matching events (so the watcher does not advance the resume token
+// and routes to retry) instead of silently settling them.
+func TestDispatcherUnavailableLaneFailClosed(t *testing.T) {
+	ctx := context.Background()
+	d := NewDispatcher()
+
+	tr := newUnavailableTransport(errors.New("no transport registered for sink type"))
+	require.NotNil(t, tr)
+	d.Register("users", NewRuntimeSink(collections.Sink{ID: "s1"}, tr))
+
+	// A matching event must fail dispatch, not be silently acknowledged.
+	err := d.Dispatch(ctx, "users", streams.StreamRecord{RecordType: streams.InsertRecord})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, errUnavailable)
+}
+
+// TestDispatcherZeroSinksStillSucceeds proves a collection with no configured
+// sinks continues to Dispatch()==nil; the legitimate zero-sink case is not a
+// failure.
+func TestDispatcherZeroSinksStillSucceeds(t *testing.T) {
+	d := NewDispatcher()
+	ctx := context.Background()
+	err := d.Dispatch(ctx, "users", streams.StreamRecord{RecordType: streams.InsertRecord})
+	assert.NoError(t, err)
 }

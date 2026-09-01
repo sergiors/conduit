@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"reflect"
+	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -17,6 +19,11 @@ import (
 
 // ValidEventTypes are the allowed event types for sinks.
 var ValidEventTypes = []string{"INSERT", "MODIFY", "REMOVE"}
+
+// ValidSinkTypes are sink types with a registered runtime transport. A persisted
+// sink must use one of these; an unknown type can never become a runtime delivery
+// lane and is rejected before persistence.
+var ValidSinkTypes = []Type{SinkTypeHTTP, SinkTypeEventBridge, SinkTypeMeilisearch}
 
 // Sink is a persisted sink configuration stored in config.sinks.
 // The CollectionID references the _id of the owning collection in
@@ -52,7 +59,11 @@ func (s *Sink) ValidateEventTypes() error {
 	return nil
 }
 
-// Validate checks the common sink configuration required by every sink type.
+// Validate validates the common configuration for every sink type, then the
+// statically-checkable type-specific spec fields. It rejects unknown types and
+// specs that could never build a transport, so a persisted sink is always a
+// buildable delivery lane. Infrastructure requirements (AWS credentials/region)
+// are NOT validated here: they are resolved at runtime by the transport builder.
 func (s *Sink) Validate() error {
 	if s.Type == "" {
 		return NewValidationError("sink type is required")
@@ -63,7 +74,74 @@ func (s *Sink) Validate() error {
 	if err := s.ValidateEventTypes(); err != nil {
 		return err
 	}
+	if err := s.validateType(); err != nil {
+		return err
+	}
 	return nil
+}
+
+// validateType rejects unknown sink types and validates the type-specific
+// persisted spec fields that can be checked statically.
+func (s *Sink) validateType() error {
+	switch s.Type {
+	case SinkTypeHTTP:
+		return s.validateHTTPSpec()
+	case SinkTypeEventBridge:
+		return s.validateEventBridgeSpec()
+	case SinkTypeMeilisearch:
+		return s.validateMeilisearchSpec()
+	default:
+		return NewValidationError("unknown sink type %q: must be one of %s", s.Type, validSinkTypesString())
+	}
+}
+
+// validateHTTPSpec requires a valid endpoint URL; the bearer token is optional.
+func (s *Sink) validateHTTPSpec() error {
+	endpoint, _ := s.Spec["endpoint"].(string)
+	if endpoint == "" {
+		return NewValidationError("http sink requires spec.endpoint")
+	}
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return NewValidationError("http sink spec.endpoint is not a valid URL: %v", err)
+	}
+	if u.Scheme == "" || u.Host == "" {
+		return NewValidationError("http sink spec.endpoint must be an absolute URL with a scheme and host")
+	}
+	return nil
+}
+
+// validateEventBridgeSpec requires an eventBusName. AWS region and credentials
+// are infrastructure configuration resolved at runtime by the transport builder
+// and are intentionally not required in the persisted spec.
+func (s *Sink) validateEventBridgeSpec() error {
+	bus, _ := s.Spec["eventBusName"].(string)
+	if bus == "" {
+		return NewValidationError("eventbridge sink requires spec.eventBusName")
+	}
+	return nil
+}
+
+// validateMeilisearchSpec requires a host that parses as a valid URL. The API
+// key is optional; the index name defaults to the collection name at runtime.
+func (s *Sink) validateMeilisearchSpec() error {
+	host, _ := s.Spec["host"].(string)
+	if host == "" {
+		return NewValidationError("meilisearch sink requires spec.host")
+	}
+	if u, err := url.Parse(host); err != nil || u.Scheme == "" || u.Host == "" {
+		return NewValidationError("meilisearch sink spec.host must be a valid URL with a scheme and host")
+	}
+	return nil
+}
+
+// validSinkTypesString renders the supported sink types for error messages.
+func validSinkTypesString() string {
+	parts := make([]string, 0, len(ValidSinkTypes))
+	for _, t := range ValidSinkTypes {
+		parts = append(parts, string(t))
+	}
+	return strings.Join(parts, ", ")
 }
 
 // Identity returns a stable identifier for the sink.
@@ -281,7 +359,7 @@ func (m *Manager) UpdateSink(ctx context.Context, collectionName, sinkID string,
 		ctx,
 		bson.M{"_id": mustObjectID(sinkID), "collectionId": current.CollectionID},
 		bson.M{"$set": bson.M{
-			"filter":      updated.Filter,
+			"filter":     updated.Filter,
 			"eventTypes": updated.EventTypes,
 			"updatedAt":  updated.UpdatedAt,
 		}},

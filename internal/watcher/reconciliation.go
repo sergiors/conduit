@@ -114,19 +114,11 @@ func (r *Reconciliation) ApplyChanges(ctx context.Context, collectionName string
 			// registered (e.g. created while the watcher was stopped).
 			if !disp.Update(collectionName, change.Sink) {
 				transport := dispatch.BuildTransport(ctx, collectionName, change.Sink.Type, change.Sink.Spec)
-				if transport == nil {
-					log.Printf("Failed to build transport for updated sink type %s (collection %s, sink %s); skipping registration", change.Sink.Type, collectionName, change.Sink.ID)
-					continue
-				}
 				sink := dispatch.NewRuntimeSink(change.Sink, transport)
 				disp.Register(collectionName, sink)
 			}
 		case ChangeAdded:
 			transport := dispatch.BuildTransport(ctx, collectionName, change.Sink.Type, change.Sink.Spec)
-			if transport == nil {
-				log.Printf("Failed to build transport for added sink type %s (collection %s, sink %s); skipping registration", change.Sink.Type, collectionName, change.Sink.ID)
-				continue
-			}
 			sink := dispatch.NewRuntimeSink(change.Sink, transport)
 			disp.Register(collectionName, sink)
 		}
