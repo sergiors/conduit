@@ -198,6 +198,12 @@ Sends `StreamRecord` JSON documents to a webhook endpoint via `POST`. Supports a
 }
 ```
 
+Delivery behavior:
+
+- **Redirects are rejected, never followed.** The configured `endpoint` is the only delivery target. If the endpoint responds with a 3xx redirect, the delivery fails with an error (naming the redirect target) and the event flows into the normal retry pipeline — it is never silently delivered elsewhere.
+- **Response bodies are drained (bounded) after a successful delivery.** A small prefix of a 2xx response body is read and discarded so the underlying HTTP connection can be reused (keep-alive) for subsequent deliveries. The body is never inspected and never read into memory; a body larger than the drain budget is ignored, not an error.
+- Any non-2xx response (including a rejected redirect) is a delivery failure: the event is retried, and exhausted retries land in the DLQ.
+
 ### AWS EventBridge
 
 Fully implemented sink that publishes `StreamRecord` documents to an AWS
