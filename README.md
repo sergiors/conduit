@@ -29,7 +29,7 @@ Instead of every team rebuilding the same change-stream infrastructure, Conduit 
 - **Runtime configuration** — create, update, or remove collections, streams, and sinks without restarting workers.
 - **Multiple sink types** — HTTP webhooks today; EventBridge and Meilisearch registered for future SDK integration.
 - **Per-sink filtering** — filter by event type and by content of `newImage` / `oldImage`.
-- **Retry with exponential backoff** — failed deliveries are retried up to 5 times.
+- **Retry with exponential backoff** — failed deliveries are retried up to 5 times. Retries are themselves a duplicate source: an "ambiguous" failure (a timeout after the sink already processed the request) delivers the event twice.
 - **Dead Letter Queue** — exhausted retries land in a per-collection DLQ.
 - **Resume tokens** — per-collection resume positions stored in Redis, saved only after successful processing.
 - **At-least-once delivery** — events are never lost, but duplicates can occur; downstream consumers must be idempotent (see [Delivery Semantics](#delivery-semantics)).
@@ -77,6 +77,7 @@ Conduit guarantees **at-least-once** delivery, **not** exactly-once. Every chang
 - **MarkProcessed / resume-token write fails after a successful sink dispatch.** The event is dispatched, but if the "processed" idempotency key or the resume token is not durably written (e.g. Redis is unavailable, or the process crashes between dispatch and the bookkeeping write), the change stream replays the event on the next session and it is delivered again.
 - **Redis is unavailable.** The idempotency check (`IsProcessed`) and the processed-key write (`MarkProcessed`) both depend on Redis. If Redis is down, Conduit deliberately continues processing rather than drop events — so the same event can be delivered more than once.
 - **Crashes and restarts.** A crash after dispatch but before the resume token is persisted causes the event to be replayed.
+- **Ambiguous failures on the retry path.** A delivery error does not always mean the sink did not receive the event: a request that times out after the sink processed it (response lost), or a connection reset after a successful write, looks identical to a failure. The event goes to the retry queue and is delivered again — the sink may receive the same event twice even though Conduit behaved correctly.
 - **Downtime longer than `PROCESSED_EVENT_TTL`.** The idempotency key expires after the configured TTL (default `24h`). If a change stream replays an event whose key has already expired, it is delivered again.
 
 Conduit's idempotency is therefore **best-effort and bounded by the Redis processed-key TTL**. Downstream consumers **must be idempotent**: they should deduplicate using the deterministic `eventID` carried on every `StreamRecord`. The `eventID` is derived from the MongoDB change event (resume token, or `clusterTime` + `documentKey` as fallback), so the same change always produces the same ID across restarts.
@@ -132,6 +133,21 @@ When a stream is enabled, Conduit records a start checkpoint. The first watcher 
 
 - `GET /api/collections/:name/documents` — list documents
 - `GET /api/collections/:name/documents/:id` — get a document
+
+The list endpoint is paginated server-side and never returns an unbounded
+result set:
+
+- `limit` — maximum documents per page; default `100`, capped at `1000`.
+  Zero, negative, and non-integer values are rejected with `400 invalid_request`.
+- `skip` — number of documents to skip before the page; default `0`.
+  Negative and non-integer values are rejected with `400 invalid_request`.
+
+Results are sorted by `_id` ascending, so pages are deterministic. Example:
+
+```bash
+curl -H "Authorization: Bearer $API_KEY" \
+  "http://localhost:8080/api/collections/users/documents?limit=50&skip=100"
+```
 
 ### Health
 

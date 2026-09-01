@@ -225,12 +225,12 @@ Centralizing configuration mutations in one package guarantees that invariants a
 
 ### Responsibility
 
-`collections.Document` provides read-only access to the documents inside a collection. It supports listing all documents and fetching a document by `_id` (either an ObjectID or a string).
+`collections.Document` provides read-only access to the documents inside a collection. It supports bounded, paginated listing and fetching a document by `_id` (either an ObjectID or a string).
 
 ### Public API
 
 - `NewDocument(client, database, collection)` constructs a reader.
-- `List(ctx)` returns all documents.
+- `List(ctx, opts)` returns at most `opts.Limit` documents, skipping the first `opts.Skip` (sorted by `_id` ascending for deterministic pagination). A zero `Limit` means no limit — the API layer always supplies one (default 100, max 1000).
 - `Get(ctx, id)` returns a single document.
 
 ### Dependencies
@@ -691,7 +691,7 @@ These are creation operations on sub-resources, not replacements of the parent c
 | GET    | `/api/collections/:name/sinks`         | List sinks for a collection.                      |
 | POST   | `/api/collections/:name/sinks`         | Create a sink.                                    |
 | DELETE | `/api/collections/:name/sinks/:id`     | Delete a sink.                                    |
-| GET    | `/api/collections/:name/documents`     | List documents.                                   |
+| GET    | `/api/collections/:name/documents`     | List documents. Paginated: `limit` (default 100, max 1000) and `skip` (default 0); invalid values → `400 invalid_request`. |
 | GET    | `/api/collections/:name/documents/:id` | Get a document by `_id`.                          |
 
 ---
@@ -719,7 +719,7 @@ The following invariants are enforced by the code:
 - **There is at most one watcher per collection**. The manager's registry is keyed by collection name.
 - **Resume tokens are isolated per collection**. Key format: `cdc:resume:{collectionName}`.
 - **Resume tokens advance only after successful processing**. Failures route events to retry; the change stream cursor still advances, but the saved token reflects the last successfully handled event.
-- **Delivery is at-least-once, not exactly-once.** A change event is delivered to the sinks at least once, but duplicates can occur: if the `MarkProcessed` idempotency write or the resume-token write fails after a successful dispatch, if Redis is unavailable, on crashes/restarts, or after downtime longer than the processed-key TTL. Downstream consumers must be idempotent using the deterministic `eventID`.
+- **Delivery is at-least-once, not exactly-once.** A change event is delivered to the sinks at least once, but duplicates can occur: if the `MarkProcessed` idempotency write or the resume-token write fails after a successful dispatch, if Redis is unavailable, on crashes/restarts, on ambiguous delivery failures (e.g. a timeout after the sink already processed the request — the event is retried and delivered again), or after downtime longer than the processed-key TTL. Downstream consumers must be idempotent using the deterministic `eventID`.
 - **Idempotency is best-effort and bounded by the Redis processed-key TTL.** The processed key (`cdc:processed:{id}`) suppresses duplicate deliveries only within its TTL window (default `24h`, configurable via `PROCESSED_EVENT_TTL`). After it expires, a replayed event is delivered again.
 - **A first-start checkpoint closes the enablement gap**. When a stream is enabled, `streamStartedAt` is recorded; a fresh watcher with no resume token anchors its stream at that checkpoint (`startAtOperationTime`), so events written between enablement and the first watcher start are streamed instead of skipped.
 - **Resume tokens are never deleted on generic errors**. Transient failures (network, elections, cursor timeouts) preserve the token so the watcher resumes from the last successful position and skips nothing. The token is invalidated only when MongoDB explicitly rejects it as invalid (unparseable token, or a token from a dropped and recreated collection).
