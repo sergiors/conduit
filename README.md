@@ -62,7 +62,9 @@ Instead of every team rebuilding the same change-stream infrastructure, Conduit 
 
 ## How it Works
 
-MongoDB emits a change event → a per-collection watcher turns it into a `StreamRecord` → the dispatcher fans it out to the collection's sinks → failures are queued for retry with exponential backoff → exhausted retries move to the DLQ.
+MongoDB emits a change event → a per-collection watcher turns it into a `StreamRecord` → the dispatcher fans it out to the collection's sinks **in parallel** (each sink has its own bounded queue and worker pool) → failures are queued for retry with exponential backoff → exhausted retries move to the DLQ.
+
+The parallel fan-out increases throughput and isolates slow sinks from fast ones for each event, while keeping settlement synchronous: an event is acknowledged only after every matching sink has accepted it, preserving the single watcher and single resume-token owner. Full sink queues apply bounded backpressure rather than dropping events.
 
 Resume tokens are updated only after successful processing, so events are never skipped on failure. Delivery is **at-least-once**, not exactly-once: see [Delivery Semantics](#delivery-semantics).
 
@@ -160,7 +162,7 @@ Each sink type owns its own configuration, which lives in a `spec` object in the
 - A filter block you don't declare is ignored.
 - A declared filter block (e.g. `oldImage`) whose image is **absent** evaluates to `false` — so an `oldImage` filter never matches `INSERT` events or collections streaming with `oldImage=false`, and a `newImage` filter never matches `REMOVE` events. This is intentional: a content predicate needs content to match.
 - Sink filters are independent of the collection's current configuration. Sink creation does **not** reject an `oldImage` filter on a collection currently streaming with `oldImage=false` — if you later re-enable the stream with `oldImage=true`, the existing sink simply starts matching. Until then, unmatched events are silently (by design) not delivered to that sink.
-- The filter is a **flat, AND-only** predicate: an event is delivered only when *every* declared criterion matches. Complex boolean expressions (OR, etc.) are expressed by creating **multiple sinks** on the same destination.
+- The filter is a **flat, AND-only** predicate: an event is delivered only when _every_ declared criterion matches. Complex boolean expressions (OR, etc.) are expressed by creating **multiple sinks** on the same destination.
 
 The full operator reference is in [`docs/filter.md`](docs/filter.md).
 

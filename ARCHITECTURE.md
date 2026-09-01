@@ -106,7 +106,7 @@ Sink filters are **declarative and intentionally decoupled from the collection's
 
 ## Dispatcher
 
-The _dispatcher_ (`internal/dispatch.Dispatcher`) is the event router inside the worker. It maintains a registry of `collection → []Sink`. When a change stream record arrives, the dispatcher calls `Send` on every sink registered for that collection. It tolerates individual sink failures: one failing sink does not prevent others from receiving the event, but the dispatcher returns the last error so the caller can decide to retry.
+The _dispatcher_ (`internal/dispatch.Dispatcher`) is the event router inside the worker. It maintains a registry of `collection → []RuntimeSink`. When a change stream record arrives, the dispatcher fans the record out to every sink registered for that collection **in parallel**, delivering through each sink's own execution lane (a bounded job queue + worker pool), and waits for every delivery to settle. It tolerates individual sink failures: one failing (or slow) sink does not prevent others from receiving the event, but the dispatcher returns an error so the caller can decide to retry. See the detailed [Dispatcher](#dispatcher-1) section below for the concurrency and backpressure model.
 
 ## Watcher
 
@@ -281,30 +281,47 @@ Isolating the watch loop to one collection makes failure domains small. If one c
 
 ### Responsibility
 
-`dispatch.Dispatcher` routes a `StreamRecord` to every sink registered for the event's collection. It is a thin, concurrent-safe fan-out layer.
+`dispatch.Dispatcher` routes a `StreamRecord` to every sink registered for the event's collection. It is a concurrent-safe fan-out layer that delivers to all matching sinks **in parallel** while preserving the caller's settlement contract.
 
 ### Public API
 
-- `NewDispatcher()` creates a dispatcher.
-- `Register(collection, sink)` adds a sink for a collection.
-- `Remove(collection, name)` removes and closes a single sink.
-- `Update(collection, sink)` atomically applies a new persisted config to an existing sink in place, preserving its transport.
-- `Clear(collection)` removes all sinks for a collection.
-- `Dispatch(ctx, collection, record)` sends the record to all registered sinks.
-- `Close()` closes every sink.
+- `NewDispatcher()` creates a dispatcher using default per-sink lane config.
+- `NewDispatcherWithConfig(cfg)` creates a dispatcher with a custom `Config{QueueSize, WorkerCount}`; zero/negative values fall back to the defaults (`QueueSize=1024`, `WorkerCount=4`).
+- `Register(collection, sink)` adds a sink for a collection, creating and starting its delivery lane.
+- `Remove(collection, name)` removes and closes a single sink's lane.
+- `Update(collection, sink)` atomically applies a new persisted config to an existing sink in place, preserving its transport and its running lane.
+- `Clear(collection)` removes and closes all lanes for a collection.
+- `Dispatch(ctx, collection, record)` sends the record to all registered sinks in parallel and blocks until every matching sink delivery has settled.
+- `Close()` stops and closes every lane, idempotently.
 
-### Dependencies
+### Concurrency and settlement model (the "why")
 
-- `Sink` implementations registered via `dispatch.RegisterSink`.
+The dispatcher uses **synchronous settlement with parallel per-sink lanes** — not volatile fire-and-forget.
+
+- **One registered sink ⇒ one lane.** Every `RuntimeSink` owns a lane: a bounded job queue drained by a small worker pool (default 4 workers). Workers call `RuntimeSink.Send(ctx, record)` for each job. Filtering still happens inside `Send`, so a filtered event returns nil and is settled for that sink.
+- **Per-event parallel fan-out.** `Dispatch` snapshots the collection's lanes under a read lock, then submits one job per lane **concurrently** (a separate goroutine per lane) so a full or slow sink lane cannot prevent the event from being offered to the other lanes. It then waits for every submission and, after all deliveries complete, returns an aggregate error if any matching sink failed.
+- **Isolation by default.** Because each sink has its own queue and worker pool, a slow or blocked sink (e.g. a webhook endpoint that stops responding up to its timeout) cannot hold up delivery to other sinks for the duration of an event.
+- **Bounded backpressure, no drops.** Each lane's queue is bounded. When a queue is full, `Dispatch`'s submission for that lane blocks until a worker frees capacity, the caller's context is cancelled, or the lane is closed. Events are never silently dropped; the watcher/retry caller receives backpressure instead.
+- **Settlement is unchanged.** `Dispatch` returns nil only when the event was delivered to every matching sink. This is what preserves the pipeline's at-least-once and resume-token guarantees.
 
 ### What it Must Never Do
 
-- Decide whether an event should be retried. It only reports whether any sink failed.
-- Block forever on a single sink. Individual sink implementations own timeouts.
+- Decide whether an event should be retried. It only reports whether any sink (or submission) failed.
+- Break the settlement contract: returning nil must mean the event was delivered (or filtered) for every matching sink, so the single watcher/resume-token owner and the retry/DLQ semantics are untouched.
+- Silently drop an event because a lane queue is full. Full lanes apply backpressure to the caller.
+- Block forever on a single worker. Sink implementations own their timeouts (transports must respect `ctx`); the lane drains accepted jobs before closing.
+
+### Why one watcher and one resume-token owner remain
+
+Delivery concurrency lives **inside** `Dispatch`, per event, per sink. It does not create additional change-stream readers: there is still exactly one watcher per enabled collection and exactly one owner of that collection's resume token. The token advances only after the watcher's handler (→ `Dispatch`) returns nil — meaning the event was delivered to every matching sink. A crash after a nil return cannot lose an event the sink already accepted, because nothing is acknowledged by enqueuing into a volatile in-memory queue; every sink queue is drained before `Dispatch` returns nil. Per-sink queues therefore add throughput and failure isolation without weakening durability or introducing a second resume-token owner.
+
+### Dependencies
+
+- `Sink` implementations registered via the transport builder registry in `transports/`.
 
 ### Why it Exists
 
-Fan-out is a separate concern from event production and from sink implementation. The dispatcher lets the system add, remove, and update sinks without touching the watcher or retry code.
+Fan-out is a separate concern from event production and from sink implementation. The dispatcher lets the system add, remove, and update sinks without touching the watcher or retry code, and — with parallel per-sink lanes — scales delivery throughput to multiple sinks without additional change-stream readers or a second resume-token owner.
 
 ---
 
@@ -495,7 +512,8 @@ MongoDB Change Stream
    Manager.handleEvent()
    ├── idempotency check (Redis)
    ├── dispatcher.Dispatch()
-   │       └── each Sink.Send()
+   │       └── for each sink: submit a job to its lane, in parallel
+   │               └── lane worker → RuntimeSink.Send()
    └── on failure: queueRetry()
                 │
                 ▼
@@ -520,7 +538,7 @@ MongoDB Change Stream
    - `drop` / `invalidate` → cancels the watcher and stops gracefully
 4. **The manager's handler** receives the `StreamRecord`.
 5. **Idempotency**: the manager uses the event ID derived by the watcher from change-stream data — the resume token (`_id._data`), with `clusterTime` + `documentKey` as fallback — and checks `cdc:processed:{id}` in Redis. If present, the event is skipped.
-6. **Dispatch**: the dispatcher fans the record out to all sinks registered for that collection. Each sink may filter by event type and by image criteria before sending.
+6. **Dispatch**: the dispatcher fans the record out to all sinks registered for that collection **in parallel** — one job per sink lane — and waits for every delivery to settle before returning. Each sink may filter by event type and by image criteria before sending (in `RuntimeSink.Send`, inside its lane worker). A full lane applies backpressure (bounded by queue capacity) instead of dropping; once all lanes settle, the event is durably delivered to every matching sink.
 7. **Success path**: if all sinks succeed, the manager marks the event as processed with the configured TTL (default 24h, `PROCESSED_EVENT_TTL`) and the watcher saves the change stream resume token to Redis. These two writes are **not atomic**: if the processed-key or resume-token write fails after dispatch, the event is replayed and delivered again — delivery is at-least-once.
 8. **Failure path**: if any sink fails, the manager marshals the record to JSON and enqueues a `RetryEvent` into the Redis sorted set `cdc:retry:{collection}` with `retryCount = 0` and `nextRetryAt = now + 1s`.
 9. **Retry processor** wakes up every interval, dequeues events whose `nextRetryAt` has passed, and attempts dispatch again.
@@ -875,7 +893,7 @@ Entry points for the two runtime processes.
 - `cmd/api/main.go`: Loads configuration, initializes MongoDB and Redis, creates `collections.Manager`, and starts the Gin HTTP server.
 - `cmd/worker/main.go`: Loads configuration, initializes infrastructure, creates the dispatcher, retry processor, and watcher manager, and runs until a shutdown signal.
 
-  **Graceful shutdown.** On SIGINT or SIGTERM the worker shuts down in dependency order, bounded by `SHUTDOWN_TIMEOUT` (default 30s): (1) the watcher manager is stopped first — cancelling its run context, waiting for its sync/config-change loops and every watcher, and closing pub/sub — so no new events flow while in-flight bookkeeping drains; (2) the retry processor is stopped, letting the current pass finish; (3) the dispatcher closes all sinks/transports; (4) Redis is closed; (5) MongoDB is closed. Terminal bookkeeping writes (resume-token persist, `MarkProcessed`, retry `Enqueue`/`Remove`) and change-stream cursor close use a short detached context so a mid-flight event is never lost when the live context is cancelled. No arbitrary sleeps are used; shutdown is driven entirely by context cancellation and `sync.WaitGroup` waits. Panics in worker goroutines are contained: each long-running goroutine has a recover backstop that logs with a stack trace, per-event/per-tick work is panic-isolated so a single bad event cannot kill its loop, and a panicking watcher marks itself stopped for the manager's sync to reconcile.
+  **Graceful shutdown.** On SIGINT or SIGTERM the worker shuts down in dependency order, bounded by `SHUTDOWN_TIMEOUT` (default 30s): (1) the watcher manager is stopped first — cancelling its run context, waiting for its sync/config-change loops and every watcher, and closing pub/sub — so no new events flow while in-flight bookkeeping drains; (2) the retry processor is stopped, letting the current pass finish; (3) the dispatcher stops every sink lane (waiting for in-flight deliveries to drain) and closes the transports; (4) Redis is closed; (5) MongoDB is closed. Terminal bookkeeping writes (resume-token persist, `MarkProcessed`, retry `Enqueue`/`Remove`) and change-stream cursor close use a short detached context so a mid-flight event is never lost when the live context is cancelled. No arbitrary sleeps are used; shutdown is driven entirely by context cancellation and `sync.WaitGroup` waits. Panics in worker goroutines are contained: each long-running goroutine has a recover backstop that logs with a stack trace, per-event/per-tick work is panic-isolated so a single bad event cannot kill its loop, and a panicking watcher marks itself stopped for the manager's sync to reconcile.
 
 ## `internal/api/`
 
@@ -923,7 +941,8 @@ Worker's watcher lifecycle management.
 
 Event routing and sink registry.
 
-- `dispatcher.go`: `Dispatcher` with concurrent-safe sink registry.
+- `dispatcher.go`: `Dispatcher` with concurrent-safe sink registry and parallel fan-out across per-sink lanes.
+- `lane.go`: Per-sink execution lane — bounded job queue + worker pool; owns submission/backpressure and close/drain coordination.
 - `sink.go`: `Sink` interface, builder registry, `BuildSink` factory.
 - `sinks/http.go`: Fully implemented HTTP webhook sink with its own `HTTPSpec`.
 - `transports/eventbridge.go`: Fully implemented EventBridge sink with its own `EventBridgeSpec` (AWS SDK v2 PutEvents, SDK-resolved region). The region comes from the AWS SDK default region chain (`AWS_REGION`, shared config, or the compute environment) — never the spec. Credentials come from the AWS SDK default credential chain — never the spec — and construction fails fast if none resolve.

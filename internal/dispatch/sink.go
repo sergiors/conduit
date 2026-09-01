@@ -73,7 +73,9 @@ func (rs *RuntimeSink) Send(ctx context.Context, record streams.StreamRecord) er
 
 // UpdateConfig atomically swaps the sink's filter and event types,
 // preserving the transport. Must be called under the dispatcher's mutex so
-// the embedded Sink field (read by Key) is not raced.
+// the embedded Sink field (read by Key) is not raced. The lane keeps running
+// across an update: only the snapshot is swapped, so in-flight jobs observe
+// either the old or the new config, never a torn one.
 func (rs *RuntimeSink) UpdateConfig(sink collections.Sink) {
 	rs.Sink = sink
 	rs.snapshot.Store(newSinkSnapshot(sink))
