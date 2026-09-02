@@ -48,7 +48,6 @@ func TestManagerDLQPersistAndRead(t *testing.T) {
 	entry := DLQEntry{
 		CollectionName: "users",
 		EventData:      []byte(`{"tableName":"users"}`),
-		Attempts:       5,
 		FailedAt:       time.Now(),
 		DedupKey:       "users:event-1",
 	}
@@ -60,7 +59,6 @@ func TestManagerDLQPersistAndRead(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, entries, 1)
 		assert.Equal(t, "users", entries[0].CollectionName)
-		assert.Equal(t, 5, entries[0].Attempts)
 		assert.Equal(t, "users:event-1", entries[0].DedupKey)
 	})
 
@@ -107,7 +105,6 @@ func TestManagerDLQPersistAndRead(t *testing.T) {
 		other := DLQEntry{
 			CollectionName: "orders",
 			EventData:      []byte(`{"tableName":"orders"}`),
-			Attempts:       3,
 			FailedAt:       time.Now(),
 			DedupKey:       "orders:event-1",
 		}
@@ -134,7 +131,6 @@ func TestManagerDLQListPagination(t *testing.T) {
 		require.NoError(t, manager.CreateDLQEntry(ctx, DLQEntry{
 			CollectionName: "users",
 			EventData:      []byte(`{"tableName":"users"}`),
-			Attempts:       5,
 			FailedAt:       time.Now().Add(time.Duration(i) * time.Second),
 			DedupKey:       "users:event-" + string(rune('a'+i)),
 		}))

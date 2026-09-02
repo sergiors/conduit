@@ -843,6 +843,7 @@ type fakeRedis struct {
 	lastMarkTTL   time.Duration
 	enqueueCalls  int
 	enqueueResult error
+	lastEnqueued  redisclient.RetryEvent
 	subscribeErr  error
 }
 
@@ -899,6 +900,7 @@ func (f *fakeRedis) EnqueueRetry(ctx context.Context, event redisclient.RetryEve
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.enqueueCalls++
+	f.lastEnqueued = event
 	return f.enqueueResult
 }
 
@@ -1048,6 +1050,8 @@ func TestHandleEventSettlement(t *testing.T) {
 
 		assert.NoError(t, err, "event durably queued for retry is settled")
 		assert.Equal(t, 1, fr.enqueueCalls)
+		assert.Equal(t, "users:abc", fr.lastEnqueued.ID,
+			"retry ID must use the eventID directly, not collectionName:eventID")
 		assert.Equal(t, 0, fr.markCalls, "a queued event is not yet delivered, so not marked processed")
 	})
 

@@ -67,14 +67,12 @@ func TestDLQEndpointsRegisteredCollectionOnly(t *testing.T) {
 	require.NoError(t, manager.CreateDLQEntry(ctx, collections.DLQEntry{
 		CollectionName: "managed_dlq_users",
 		EventData:      []byte(`{"tableName":"managed_dlq_users"}`),
-		Attempts:       5,
 		FailedAt:       time.Now(),
 		DedupKey:       "managed_dlq_users:event-1",
 	}))
 	require.NoError(t, manager.CreateDLQEntry(ctx, collections.DLQEntry{
 		CollectionName: "managed_dlq_orders",
 		EventData:      []byte(`{"tableName":"managed_dlq_orders"}`),
-		Attempts:       3,
 		FailedAt:       time.Now(),
 		DedupKey:       "managed_dlq_orders:event-1",
 	}))

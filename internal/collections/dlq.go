@@ -29,13 +29,12 @@ type DLQEntry struct {
 	CollectionName string             `bson:"collectionName" json:"collectionName"`
 	SinkID         string             `bson:"sinkId,omitempty" json:"sinkId,omitempty"`
 	EventData      json.RawMessage    `bson:"eventData" json:"eventData"`
-	Attempts       int                `bson:"attempts" json:"attempts"`
 	LastError      string             `bson:"lastError,omitempty" json:"lastError,omitempty"`
 	FailedAt       time.Time          `bson:"failedAt" json:"failedAt"`
-	// DedupKey is the retry event ID (collectionName:eventID). A unique index
-	// on it makes CreateDLQEntry idempotent: if the retry item removal fails and
-	// the event is re-processed, the second persist is a no-op instead of a
-	// duplicate DLQ entry.
+	// DedupKey is the retry event ID, which already carries the collection
+	// prefix (e.g. "users:<token>"). A unique index on it makes CreateDLQEntry
+	// idempotent: if the retry item removal fails and the event is re-processed,
+	// the second persist is a no-op instead of a duplicate DLQ entry.
 	DedupKey string `bson:"dedupKey" json:"dedupKey"`
 }
 

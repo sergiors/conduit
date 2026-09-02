@@ -234,3 +234,12 @@ func (d *Dispatcher) Clear(collection string) {
 		delete(d.sinks, collection)
 	}
 }
+
+// SinkCount returns the number of currently-registered runtime sink lanes for a
+// collection. It is a read-only inspection helper used to assert runtime sink
+// state in tests.
+func (d *Dispatcher) SinkCount(collection string) int {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return len(d.sinks[collection])
+}

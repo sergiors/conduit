@@ -19,11 +19,18 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
+// collectionsStore is the manager's persisted collection/sink config dependency.
+type collectionsStore interface {
+	ListStreamEnabled(ctx context.Context) ([]collections.Collection, error)
+	Get(ctx context.Context, name string) (*collections.Collection, error)
+	GetSinks(ctx context.Context, collectionName string) ([]collections.Sink, error)
+}
+
 // Manager manages CDC watchers for all enabled collections
 type Manager struct {
 	mongoClient        *mongo.Client
 	database           string
-	collectionsManager *collections.Manager
+	collectionsManager collectionsStore
 	redisClient        RedisClient
 	dispatcher         Dispatcher
 	retryProcessor     *retry.Processor
@@ -43,25 +50,13 @@ type Manager struct {
 	startMu   sync.Mutex
 }
 
-// ErrEventUnsettled is returned by handleEvent when a change event was neither
-// dispatched to the sinks nor persisted into the retry queue. In that state the
-// event is lost if the watcher acknowledges it, so the caller must NOT advance
-// the resume token: the change stream must replay the event on the next
-// session.
-//
-// Settlement contract (Manager <-> Watcher):
-//   - handleEvent returns nil only when the event is settled, i.e. either it
-//     was dispatched to all sinks, or it was successfully enqueued for retry.
-//   - handleEvent returns a non-nil error (wrapping ErrEventUnsettled when the
-//     root cause is a persistence failure) only when the event is NOT settled.
-//
-// The watcher may therefore advance the resume token if and only if the handler
-// it invoked returned nil.
+// ErrEventUnsettled means the event was neither delivered nor durably queued;
+// the watcher must not advance the resume token.
 var ErrEventUnsettled = errors.New("event neither dispatched nor persisted; do not acknowledge")
 
 // RedisClient is the subset of the Redis client used by the watcher and the
-// manager. It is an interface (rather than the concrete *redis.Client) so tests
-// can inject a fake; the production *redis.Client satisfies it.
+// manager. It is an interface so tests can inject a fake; the production
+// *redis.Client satisfies it.
 type RedisClient interface {
 	GetResumeToken(ctx context.Context, collectionName string) (string, error)
 	SetResumeToken(ctx context.Context, collectionName, token string) error
@@ -100,14 +95,13 @@ func DefaultConfig() Config {
 func NewManager(
 	mongoClient *mongo.Client,
 	database string,
-	collectionsManager *collections.Manager,
+	collectionsManager collectionsStore,
 	redisClient RedisClient,
 	dispatcher Dispatcher,
 	retryProcessor *retry.Processor,
 	cfg Config,
 ) *Manager {
-	// Apply safe defaults so a zero-value Config (or one built without
-	// DefaultConfig) still behaves correctly.
+	// Apply safe defaults so a zero-value Config still behaves correctly.
 	if cfg.SyncInterval == 0 {
 		cfg.SyncInterval = 30 * time.Second
 	}
@@ -245,20 +239,16 @@ func (m *Manager) Stop(ctx context.Context) error {
 // startWatcher creates and starts a watcher for a collection.
 //
 // The resume token is read from Redis BEFORE any sinks are registered or state
-// is written: registration is not rolled back on failure, so aborting before
-// it leaves no side effects for a later reconciliation. A token-read error
-// (Redis transport/timeout/failover) aborts startup with the watcher not
-// registered; starting with an empty token would resume from the current oplog
-// position and silently skip every event since the last persisted token, so the
-// collection is instead left for the manager's reconciliation to retry. A
-// missing token (redis.Nil mapped to ("", nil)) means first run: start with an
+// is written, so a read failure aborts with no side effects for a later
+// reconciliation. Starting with an empty token would resume from the current
+// oplog position and silently skip every event since the last persisted token.
+// A missing token (redis.Nil mapped to ("", nil)) means first run: start with an
 // empty token and a fresh change stream.
 //
-// The watcher and its handler derive from m.runCtx, not the caller's ctx:
-// canceling the manager (Stop) must tear down any watcher, including one
-// created concurrently mid-flight by configChangeLoop. startWatcher refuses to
-// run once m.runCtx is cancelled, so Stop can never race into registering a
-// watcher it never drains.
+// Sink loading is fail-closed: an error is unknown configuration, not an empty
+// configuration, so startup aborts and reconciliation retries later.
+//
+// The watcher and handler derive from m.runCtx so Stop owns teardown.
 func (m *Manager) startWatcher(ctx context.Context, collection collections.Collection) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -290,16 +280,16 @@ func (m *Manager) startWatcher(ctx context.Context, collection collections.Colle
 		}
 	}
 
-	// Register sinks for this collection
+	// Unknown sink state must not be treated as zero sinks.
 	var sinkConfigs []collections.Sink
 	if m.collectionsManager != nil {
 		var err error
 		sinkConfigs, err = m.loadSinks(ctx, collection.CollectionName)
 		if err != nil {
-			log.Printf("Failed to load sinks for %s: %v", collection.CollectionName, err)
-			sinkConfigs = nil
+			return fmt.Errorf("load sinks for %s: %w", collection.CollectionName, err)
 		}
 	}
+
 	if err := m.registerSinks(ctx, collection.CollectionName, sinkConfigs); err != nil {
 		log.Printf("Failed to register sinks for %s: %v", collection.CollectionName, err)
 	}
@@ -319,8 +309,6 @@ func (m *Manager) startWatcher(ctx context.Context, collection collections.Colle
 		m.redisClient,
 	)
 
-	// Start watcher with event handler deriving from m.runCtx so Stop tears it
-	// down (see doc comment above).
 	if err := watcher.Start(m.runCtx, func(record streams.StreamRecord) error {
 		return m.handleEvent(m.runCtx, collection.CollectionName, record)
 	}); err != nil {
@@ -391,7 +379,6 @@ func (m *Manager) handleEvent(ctx context.Context, collectionName string, record
 		// Continue processing - better duplicate than lost
 	}
 	if processed {
-		// Dispatched (and marked processed) in a previous attempt, so it is settled.
 		log.Printf("Event %s already processed (idempotent skip)", eventID)
 		return nil
 	}
@@ -399,7 +386,7 @@ func (m *Manager) handleEvent(ctx context.Context, collectionName string, record
 	// Dispatch to sinks
 	if err := m.dispatcher.Dispatch(ctx, collectionName, record); err != nil {
 		log.Printf("Dispatch failed for %s: %v", eventID, err)
-		// Not delivered. Settled only if the retry enqueue persists it, else unsettled.
+		// Settled only if the retry enqueue persists it, else unsettled.
 		if enqErr := m.queueRetry(ctx, collectionName, record, eventID); enqErr != nil {
 			return fmt.Errorf("%w: dispatch %v; enqueue retry: %w", ErrEventUnsettled, err, enqErr)
 		}
@@ -427,15 +414,17 @@ func (m *Manager) handleEvent(ctx context.Context, collectionName string, record
 // persisted anywhere and must be replayed: the caller must not advance the
 // resume token.
 func (m *Manager) queueRetry(ctx context.Context, collectionName string, record streams.StreamRecord, eventID string) error {
-	retryID := fmt.Sprintf("%s:%s", collectionName, eventID)
-
 	eventData, err := json.Marshal(record)
 	if err != nil {
 		return fmt.Errorf("marshal stream record: %w", err)
 	}
 
+	// eventID already carries the collection prefix (e.g. "users:<token>"), so
+	// it is used directly as the retry ID / DLQ dedup key. Prefixing it again
+	// would yield "users:users:<token>" and break dedup across the retry queue
+	// and DLQ.
 	retryEvent := redisclient.RetryEvent{
-		ID:             retryID,
+		ID:             eventID,
 		CollectionName: collectionName,
 		EventData:      eventData,
 		RetryCount:     0,
@@ -493,9 +482,8 @@ func (m *Manager) handleCollectionChange(ctx context.Context, collectionName str
 	if err != nil {
 		// A published change for a missing config means the collection was
 		// DELETED (Manager.Delete removes the config doc and fires OnPublish):
-		// stop the watcher immediately — the CDC stream must not run for a
-		// deleted collection. No state purge here: Manager.OnPurge (the deleter)
-		// owns Redis cleanup, and a deleted-then-recreated race is safe regardless.
+		// stop the watcher immediately. No state purge here: Manager.OnPurge
+		// owns Redis cleanup, and a deleted-then-recreated race is safe.
 		if errors.Is(err, collections.ErrCollectionNotFound) {
 			log.Printf("Collection %s not found (deleted), stopping watcher", collectionName)
 			if err := m.stopWatcher(ctx, collectionName); err != nil {
@@ -512,8 +500,8 @@ func (m *Manager) handleCollectionChange(ctx context.Context, collectionName str
 	m.mu.RUnlock()
 
 	if !collection.StreamEnabled {
-		// Stop the watcher if running. No CDC-state purge: a disabled stream may
-		// be re-enabled later, so its resume token and retry queue must survive.
+		// No CDC-state purge: a disabled stream may be re-enabled later, so its
+		// resume token and retry queue must survive.
 		if watcherExists {
 			log.Printf("Stream for collection %s is disabled, stopping watcher", collectionName)
 			if err := m.stopWatcher(ctx, collectionName); err != nil {
@@ -523,9 +511,7 @@ func (m *Manager) handleCollectionChange(ctx context.Context, collectionName str
 		return
 	}
 
-	// Stream enabled
 	if !watcherExists {
-		// Enabled but no watcher yet: start one (which also registers sinks).
 		log.Printf("Stream for collection %s is enabled, starting watcher", collectionName)
 		if err := m.startWatcher(ctx, *collection); err != nil {
 			log.Printf("Failed to start watcher for %s: %v", collectionName, err)
@@ -533,7 +519,6 @@ func (m *Manager) handleCollectionChange(ctx context.Context, collectionName str
 		return
 	}
 
-	// Always refresh sinks for existing watchers
 	if err := m.refreshSinks(ctx, collectionName); err != nil {
 		log.Printf("Failed to refresh sinks for %s: %v", collectionName, err)
 	}
@@ -594,7 +579,6 @@ func (m *Manager) syncWithCollections(ctx context.Context) {
 	for collectionName, collection := range enabledSet {
 		existingWatcher, exists := currentWatchers[collectionName]
 		if !exists {
-			// New collection — start watcher (which also registers sinks).
 			if err := m.startWatcher(ctx, collection); err != nil {
 				log.Printf("Failed to start watcher for %s: %v", collectionName, err)
 			}
@@ -615,7 +599,6 @@ func (m *Manager) syncWithCollections(ctx context.Context) {
 				log.Printf("recreated watcher for %s", collectionName)
 			}
 		} else {
-			// Always refresh sinks for existing collections
 			if err := m.refreshSinks(ctx, collectionName); err != nil {
 				log.Printf("Failed to refresh sinks for %s: %v", collectionName, err)
 			}
@@ -640,6 +623,11 @@ func (m *Manager) syncWithCollections(ctx context.Context) {
 }
 
 // refreshSinks reconciles current vs desired sinks and only applies changes.
+//
+// Fail-safe on load failure: it returns immediately (before any reconciliation
+// or currentSinks write) when the persisted sink configuration cannot be read,
+// so an already-running watcher keeps its last-known-good sinks and runtime
+// lanes rather than being reset to an empty/unknown state.
 func (m *Manager) refreshSinks(ctx context.Context, collectionName string) error {
 	d, ok := m.dispatcher.(*dispatch.Dispatcher)
 	if !ok {

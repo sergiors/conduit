@@ -89,7 +89,7 @@ func TestProcessRetryEvent(t *testing.T) {
 		}, false, false)
 
 		event := redis.RetryEvent{
-			ID:             "users-123",
+			ID:             "users:abc",
 			CollectionName: "users",
 			EventData:      eventData,
 			RetryCount:     0,
@@ -440,7 +440,7 @@ func TestProcessRetryEventMaxRetries(t *testing.T) {
 
 	makeEvent := func(retryCount, maxRetries int) redis.RetryEvent {
 		return redis.RetryEvent{
-			ID:             "users-123",
+			ID:             "users:abc",
 			CollectionName: "users",
 			EventData:      []byte(`{"tableName":"users"}`),
 			RetryCount:     retryCount,
@@ -482,8 +482,8 @@ func TestProcessRetryEventMaxRetries(t *testing.T) {
 		assert.Equal(t, 1, store.removeCalls)
 		assert.Len(t, store.queue["users"], 0, "event removed after successful DLQ persist")
 		require.Len(t, dlqStore.entries["users"], 1, "DLQ entry must be recorded")
-		assert.Equal(t, "users-123", dlqStore.entries["users"][0].DedupKey)
-		assert.Equal(t, 5, dlqStore.entries["users"][0].Attempts)
+		assert.Equal(t, "users:abc", dlqStore.entries["users"][0].DedupKey,
+			"DLQ dedupKey must use event.ID unchanged, not collectionName:eventID")
 		assert.Equal(t, "last dispatch failure", dlqStore.entries["users"][0].LastError,
 			"LastError must be carried into the DLQ entry on max-retry persistence")
 	})

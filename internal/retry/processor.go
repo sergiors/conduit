@@ -204,6 +204,15 @@ func (p *Processor) UnregisterCollection(collectionName string) {
 	delete(p.collections, collectionName)
 }
 
+// IsCollectionRegistered reports whether a collection is currently registered
+// with the retry processor. It is an inspection helper used by tests to assert
+// registration state.
+func (p *Processor) IsCollectionRegistered(collectionName string) bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.collections[collectionName]
+}
+
 // ProcessCollectionQueue processes retry queue for a specific collection
 func (p *Processor) ProcessCollectionQueue(ctx context.Context, collectionName string) {
 	p.processCollectionQueue(ctx, collectionName)
@@ -245,7 +254,6 @@ func (p *Processor) processRetryEvent(ctx context.Context, collectionName string
 		entry := collections.DLQEntry{
 			CollectionName: collectionName,
 			EventData:      event.EventData,
-			Attempts:       event.RetryCount,
 			LastError:      event.LastError,
 			FailedAt:       time.Now(),
 			DedupKey:       event.ID,
