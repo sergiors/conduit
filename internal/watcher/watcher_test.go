@@ -518,40 +518,27 @@ func TestManagerConfig(t *testing.T) {
 	t.Run("default config has sensible values", func(t *testing.T) {
 		cfg := DefaultConfig()
 		assert.Equal(t, 30*time.Second, cfg.SyncInterval)
-		assert.Equal(t, 24*time.Hour, cfg.ProcessedEventTTL)
 	})
 
 	t.Run("custom config", func(t *testing.T) {
 		cfg := Config{
-			SyncInterval:      60 * time.Second,
-			ProcessedEventTTL: 12 * time.Hour,
+			SyncInterval: 60 * time.Second,
 		}
 		assert.Equal(t, 60*time.Second, cfg.SyncInterval)
-		assert.Equal(t, 12*time.Hour, cfg.ProcessedEventTTL)
 	})
 }
 
-func TestManagerProcessedEventTTL(t *testing.T) {
-	t.Run("zero-value config falls back to the 24h default", func(t *testing.T) {
-		manager := NewManager(nil, "conduit", nil, nil, nil, nil, Config{})
-		assert.Equal(t, 24*time.Hour, manager.processedEventTTL)
-	})
-
-	t.Run("configured TTL is propagated to the manager", func(t *testing.T) {
-		manager := NewManager(nil, "conduit", nil, nil, nil, nil, Config{ProcessedEventTTL: 6 * time.Hour})
-		assert.Equal(t, 6*time.Hour, manager.processedEventTTL)
-	})
-
-	t.Run("handleEvent marks processed with the configured TTL", func(t *testing.T) {
+func TestManagerMarkProcessedTTL(t *testing.T) {
+	t.Run("handleEvent marks processed with the fixed 24h TTL", func(t *testing.T) {
 		fr := newFakeRedis()
-		manager := NewManager(nil, "conduit", nil, fr, &fakeDispatcher{}, nil, Config{ProcessedEventTTL: 6 * time.Hour})
+		manager := NewManager(nil, "conduit", nil, fr, &fakeDispatcher{}, nil, Config{})
 		record := streams.StreamRecord{TableName: "users", EventID: "users:abc"}
 
 		err := manager.handleEvent(context.Background(), "users", record)
 
 		assert.NoError(t, err)
 		assert.Equal(t, 1, fr.markCalls)
-		assert.Equal(t, 6*time.Hour, fr.lastMarkTTL)
+		assert.Equal(t, 24*time.Hour, fr.lastMarkTTL)
 	})
 }
 

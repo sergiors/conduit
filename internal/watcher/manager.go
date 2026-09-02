@@ -38,7 +38,6 @@ type Manager struct {
 	currentSinks       map[string][]collections.Sink
 	mu                 sync.RWMutex
 	syncInterval       time.Duration
-	processedEventTTL  time.Duration
 	pubsub             *redis.PubSub
 	configChan         <-chan *redis.Message
 
@@ -53,6 +52,12 @@ type Manager struct {
 // ErrEventUnsettled means the event was neither delivered nor durably queued;
 // the watcher must not advance the resume token.
 var ErrEventUnsettled = errors.New("event neither dispatched nor persisted; do not acknowledge")
+
+// processedEventTTL is how long a dispatched event's idempotency key is
+// retained in Redis. Duplicate deliveries are suppressed only within this
+// window; after it expires a replayed event is delivered again (at-least-once
+// semantics).
+const processedEventTTL = 24 * time.Hour
 
 // RedisClient is the subset of the Redis client used by the watcher and the
 // manager. It is an interface so tests can inject a fake; the production
@@ -76,18 +81,12 @@ type Dispatcher interface {
 type Config struct {
 	SyncInterval time.Duration // How often to sync with config.collections
 	HTTPEndpoint string        // HTTP endpoint for creating sinks
-	// ProcessedEventTTL is how long a dispatched event's idempotency key is
-	// retained in Redis. Duplicate deliveries are suppressed only within this
-	// window; after it expires a replayed event is delivered again (at-least-once
-	// semantics). Defaults to 24h.
-	ProcessedEventTTL time.Duration
 }
 
 // DefaultConfig returns sensible defaults
 func DefaultConfig() Config {
 	return Config{
-		SyncInterval:      30 * time.Second,
-		ProcessedEventTTL: 24 * time.Hour,
+		SyncInterval: 30 * time.Second,
 	}
 }
 
@@ -105,9 +104,6 @@ func NewManager(
 	if cfg.SyncInterval == 0 {
 		cfg.SyncInterval = 30 * time.Second
 	}
-	if cfg.ProcessedEventTTL == 0 {
-		cfg.ProcessedEventTTL = 24 * time.Hour
-	}
 	return &Manager{
 		mongoClient:        mongoClient,
 		database:           database,
@@ -118,7 +114,6 @@ func NewManager(
 		watchers:           make(map[string]*Watcher),
 		currentSinks:       make(map[string][]collections.Sink),
 		syncInterval:       cfg.SyncInterval,
-		processedEventTTL:  cfg.ProcessedEventTTL,
 	}
 }
 
@@ -399,7 +394,7 @@ func (m *Manager) handleEvent(ctx context.Context, collectionName string, record
 	// would cause a duplicate delivery on restart.
 	bkctx, bkCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer bkCancel()
-	if err := m.redisClient.MarkProcessed(bkctx, eventID, m.processedEventTTL); err != nil {
+	if err := m.redisClient.MarkProcessed(bkctx, eventID, processedEventTTL); err != nil {
 		log.Printf("Failed to mark event as processed: %v", err)
 	}
 

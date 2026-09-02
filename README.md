@@ -86,7 +86,7 @@ Conduit guarantees **at-least-once** delivery, **not** exactly-once. Every chang
 - **Redis is unavailable.** The idempotency check (`IsProcessed`) and the processed-key write (`MarkProcessed`) both depend on Redis. If Redis is down, Conduit deliberately continues processing rather than drop events — so the same event can be delivered more than once.
 - **Crashes and restarts.** A crash after dispatch but before the resume token is persisted causes the event to be replayed.
 - **Ambiguous failures on the retry path.** A delivery error does not always mean the sink did not receive the event: a request that times out after the sink processed it (response lost), or a connection reset after a successful write, looks identical to a failure. The event goes to the retry queue and is delivered again — the sink may receive the same event twice even though Conduit behaved correctly.
-- **Downtime longer than `PROCESSED_EVENT_TTL`.** The idempotency key expires after the configured TTL (default `24h`). If a change stream replays an event whose key has already expired, it is delivered again.
+- **Downtime longer than the 24h idempotency TTL.** The idempotency key expires after 24h. If a change stream replays an event whose key has already expired, it is delivered again.
 
 Conduit's idempotency is therefore **best-effort and bounded by the Redis processed-key TTL**. Downstream consumers **must be idempotent**: they should deduplicate using the deterministic `eventID` carried on every `StreamRecord`. The `eventID` is derived from the MongoDB change event (resume token, or `clusterTime` + `documentKey` as fallback), so the same change always produces the same ID across restarts.
 
@@ -164,8 +164,7 @@ curl -H "Authorization: Bearer $API_KEY" \
 
 The DLQ is the terminal destination for events that could not be delivered
 after the maximum number of retries. Entries are persisted to the MongoDB
-collection `config.dlq` (not Redis) and are read-only through the API; replay
-is not supported.
+collection `config.dlq` (not Redis) and are read-only through the API;
 
 The list endpoint is paginated server-side and never returns an unbounded
 result set:
@@ -326,11 +325,6 @@ PORT=8080
 API_KEY=your-secret-key
 # Optional: bounded by a 30s default; applies to the worker's graceful shutdown.
 # SHUTDOWN_TIMEOUT=45s
-# Optional: how long a dispatched event's idempotency key is retained in Redis
-# (default 24h). Delivery is at-least-once; duplicates are suppressed only
-# within this window. A very short TTL narrows the dedup window and increases
-# duplicate deliveries. Downstream consumers must be idempotent using eventID.
-# PROCESSED_EVENT_TTL=24h
 # Optional: only needed for the EventBridge sink. AWS_ACCESS_KEY_ID,
 # AWS_SECRET_ACCESS_KEY, and AWS_REGION (plus optional AWS_SESSION_TOKEN) are
 # resolved via the AWS SDK default credential chain.

@@ -11,13 +11,12 @@ import (
 
 // Config holds all application settings.
 type Config struct {
-	MongoDBURI        string
-	MongoDBDatabase   string
-	RedisURI          string
-	Port              string
-	APIKey            string
-	ShutdownTimeout   time.Duration
-	ProcessedEventTTL time.Duration
+	MongoDBURI      string
+	MongoDBDatabase string
+	RedisURI        string
+	Port            string
+	APIKey          string
+	ShutdownTimeout time.Duration
 }
 
 // Load is the API binary's loader. It reads the full application
@@ -43,11 +42,10 @@ func Load() Config {
 // at their zero values.
 func LoadWorker() Config {
 	return Config{
-		MongoDBURI:        requiredEnv("MONGODB_URI"),
-		MongoDBDatabase:   requiredEnv("MONGODB_DATABASE"),
-		RedisURI:          requiredEnv("REDIS_URI"),
-		ShutdownTimeout:   loadDuration("SHUTDOWN_TIMEOUT", getEnv("SHUTDOWN_TIMEOUT", "30s"), 30*time.Second),
-		ProcessedEventTTL: loadDuration("PROCESSED_EVENT_TTL", getEnv("PROCESSED_EVENT_TTL", "24h"), 24*time.Hour),
+		MongoDBURI:      requiredEnv("MONGODB_URI"),
+		MongoDBDatabase: requiredEnv("MONGODB_DATABASE"),
+		RedisURI:        requiredEnv("REDIS_URI"),
+		ShutdownTimeout: loadDuration("SHUTDOWN_TIMEOUT", getEnv("SHUTDOWN_TIMEOUT", "30s"), 30*time.Second),
 	}
 }
 
@@ -56,8 +54,7 @@ func LoadWorker() Config {
 // and falls back to the provided default rather than aborting the process:
 // these are optional tuning knobs, not required settings. Non-positive values
 // (e.g. "0s", "-1s") are rejected because they would otherwise disable or
-// invert operational behavior such as graceful shutdown or idempotency-key
-// expiry.
+// invert operational behavior such as graceful shutdown.
 func loadDuration(name, value string, fallback time.Duration) time.Duration {
 	if value == "" {
 		return fallback
