@@ -39,14 +39,29 @@ export default function NewCollectionRoute() {
       compositeKeys: false,
       partitionKey: "",
       sortKey: "",
-      deletionProtection: true,
     } as FormData,
   });
 
   const compositeKeys = watch("compositeKeys");
 
   const onSubmit = async (data: FormData) => {
-    await submit(data, {
+    // Build the exact payload the backend accepts: only collectionName plus
+    // optional partitionKey/sortKey. compositeKeys is purely a UI affordance.
+    const payload: {
+      collectionName: string;
+      partitionKey?: string;
+      sortKey?: string;
+    } = {
+      collectionName: data.collectionName,
+    };
+    if (data.compositeKeys) {
+      // Respect backend validation: a sort key requires a partition key and
+      // the two must differ. The schema already guards these rules.
+      if (data.partitionKey) payload.partitionKey = data.partitionKey;
+      if (data.sortKey) payload.sortKey = data.sortKey;
+    }
+
+    await submit(payload, {
       method: "post",
       action: ".",
       encType: "application/json",

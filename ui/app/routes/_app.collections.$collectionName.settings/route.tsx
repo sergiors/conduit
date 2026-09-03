@@ -16,7 +16,7 @@ import { Field, FieldLabel } from "~/components/ui/field";
 import { Input } from "~/components/ui/input";
 import { Switch } from "~/components/ui/switch";
 
-import type { CollectionConfig } from "~/routes/_app/loader.client";
+import type { CollectionConfig } from "~/lib/types";
 import type { Route } from "./+types/route";
 
 export { clientLoader } from "./loader.client";
@@ -118,7 +118,7 @@ function ProtectionCard({ collection }: { collection: CollectionConfig }) {
     fetcher.submit(
       {},
       {
-        method: enabled ? "delete" : "put",
+        method: enabled ? "delete" : "post",
         action: `/collections/${collection.collectionName}/protection`,
       },
     );
@@ -177,7 +177,7 @@ function TTLCard({ collection }: { collection: CollectionConfig }) {
     fetcher.submit(
       { attribute: attr },
       {
-        method: "put",
+        method: "post",
         action: `/collections/${collection.collectionName}/ttl`,
         encType: "application/json",
       },
@@ -270,7 +270,7 @@ function StreamCard({
     fetcher.submit(
       { oldImage: oldImageValue },
       {
-        method: "put",
+        method: "post",
         action: `/collections/${collection.collectionName}/stream`,
         encType: "application/json",
       },
@@ -324,19 +324,19 @@ function StreamCard({
             )}
           </div>
           {enabled ? (
-            <div className="flex items-center gap-3">
-              <label className="flex items-center gap-2 text-sm">
-                <Switch
-                  checked={oldImage}
-                  onCheckedChange={(v) => submitStream(v === true)}
-                  disabled={busy}
-                  aria-label="Include old image"
-                />
-                Old image
-              </label>
-              <Button variant="outline" size="sm" disabled={busy} onClick={turnOff}>
-                {busy ? "Saving..." : "Turn off"}
-              </Button>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-2 text-sm">
+                  <Switch checked={oldImage} disabled aria-label="Include old image" />
+                  Old image
+                </label>
+                <span className="text-xs text-muted-foreground">
+                  (read-only while stream is on)
+                </span>
+                <Button variant="outline" size="sm" disabled={busy} onClick={turnOff}>
+                  {busy ? "Saving..." : "Turn off"}
+                </Button>
+              </div>
             </div>
           ) : (
             <form onSubmit={turnOn} className="flex items-center gap-3">
@@ -354,16 +354,22 @@ function StreamCard({
           )}
         </div>
         {enabled && (
-          <p className="text-sm text-muted-foreground">
-            Configure sinks in the{" "}
-            <Link
-              to={`/collections/${collectionName}/sinks`}
-              className="underline"
-            >
-              Sinks page
-            </Link>
-            .
-          </p>
+          <div className="text-sm text-muted-foreground space-y-1">
+            <p>
+              Configure sinks in the{" "}
+              <Link
+                to={`/collections/${collectionName}/sinks`}
+                className="underline"
+              >
+                Sinks page
+              </Link>
+              .
+            </p>
+            <p>
+              <code className="rounded bg-muted px-1">oldImage</code> is immutable
+              while the stream is enabled. Turn the stream off to change it.
+            </p>
+          </div>
         )}
       </CardContent>
     </Card>

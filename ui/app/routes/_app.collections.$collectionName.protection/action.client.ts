@@ -1,9 +1,10 @@
 import type { Route } from "./+types/route";
+import { apiErrorMessage, apiFetch } from "~/lib/api";
 
 /**
  * Deletion protection toggle (mutation).
  *
- *   PUT    -> enable protection
+ *   POST   -> enable protection
  *   DELETE -> disable protection
  *
  * The submitted HTTP method is forwarded to the backend
@@ -12,17 +13,17 @@ import type { Route } from "./+types/route";
  * collections list (and the protection badge) refreshes automatically.
  */
 export async function clientAction({ request, params }: Route.ClientActionArgs) {
-  const response = await fetch(
+  const response = await apiFetch(
     `/api/collections/${params.collectionName}/protection`,
-    { method: request.method },
+    { method: request.method === "DELETE" ? "DELETE" : "POST" },
   );
 
   if (!response.ok) {
-    const error = (await response.json().catch(() => ({}))) as {
-      error?: string;
-    };
     return {
-      error: error.error || "Failed to update deletion protection",
+      error: await apiErrorMessage(
+        response,
+        "Failed to update deletion protection",
+      ),
     };
   }
 

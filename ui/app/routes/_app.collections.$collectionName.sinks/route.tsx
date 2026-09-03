@@ -1,12 +1,20 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { XIcon } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import { Controller, useFieldArray, useForm } from "react-hook-form";
-import { Link, useNavigate } from "react-router";
+import { AlertCircleIcon, PlusIcon, Trash2Icon } from "lucide-react";
+import { useState } from "react";
+import { Controller, useForm } from "react-hook-form";
 
+import { Alert, AlertDescription } from "~/components/ui/alert";
 import { Button } from "~/components/ui/button";
-import { Card, CardContent } from "~/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { Checkbox } from "~/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "~/components/ui/dialog";
 import {
   Field,
   FieldError,
@@ -23,18 +31,23 @@ import {
   SelectValue,
 } from "~/components/ui/select";
 import { Separator } from "~/components/ui/separator";
+import { apiDelete, apiErrorMessage, apiPatch, apiPost } from "~/lib/api";
+import type { SinkConfig } from "~/lib/types";
 
 import type { Route } from "./+types/route";
 import {
   conditionOptions,
-  sinksFormSchema,
+  createSinkSchema,
+  emptySpecFor,
+  filterToForm,
+  formToFilter,
   type Condition,
-  type SinksForm,
+  type CreateSinkForm,
   type FieldFilter,
-  type Filter,
 } from "./schema";
-export { clientAction } from "./action.client";
 export { clientLoader } from "./loader.client";
+
+const EVENT_TYPES = ["INSERT", "MODIFY", "REMOVE"] as const;
 
 export const handle = {
   breadcrumb: ({ params }: Route.LoaderArgs) => (
@@ -42,285 +55,181 @@ export const handle = {
   ),
 };
 
+const SINK_TYPE_LABEL: Record<SinkConfig["type"], string> = {
+  http: "HTTP",
+  eventbridge: "EventBridge",
+  meilisearch: "Meilisearch",
+};
+
+type ImageType = "oldImage" | "newImage";
+
 export default function Route({ params, loaderData }: Route.ComponentProps) {
   const { collectionName } = params;
   const { sinks } = loaderData;
 
+  const [showCreate, setShowCreate] = useState(false);
+
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Sinks: {collectionName}</h1>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Sinks: {collectionName}</h1>
+          <p className="text-sm text-muted-foreground">
+            Sink type and configuration are immutable after creation. Only event
+            types and filters can be edited.
+          </p>
+        </div>
+        <Button size="sm" onClick={() => setShowCreate(true)}>
+          <PlusIcon /> New Sink
+        </Button>
+      </div>
 
-      <Card>
-        <CardContent className="pt-6">
-          <SinksForm
-            initialData={sinks}
+      {sinks.length === 0 ? (
+        <Card>
+          <CardContent className="pt-6 text-sm text-muted-foreground">
+            No sinks configured. Create one to start delivering change events.
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-4">
+          {sinks.map((sink) => (
+            <ExistingSinkCard
+              key={sink.id}
+              sink={sink}
+              collectionName={collectionName}
+            />
+          ))}
+        </div>
+      )}
+
+      <Dialog open={showCreate} onOpenChange={setShowCreate}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>New Sink</DialogTitle>
+            <DialogDescription>
+              Create one sink at a time. The type and spec are fixed once saved.
+            </DialogDescription>
+          </DialogHeader>
+          <CreateSinkForm
             collectionName={collectionName}
+            onCreated={() => setShowCreate(false)}
           />
-        </CardContent>
-      </Card>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
 
-// --- Conversions (form ↔ API) ---
+// --- Self-managed filter builder (plain state, no RHF nesting) ---
 
-function formToAPICriteria(
-  form: ReturnType<typeof apiToFormCriteria> | undefined,
-): Filter {
-  if (!form) return {};
-  const criteria: Filter = {};
-  for (const image of ["oldImage", "newImage"] as const) {
-    const filters = form[image];
-    if (!filters?.length) continue;
-    const filter: Record<string, import("./schema").FilterCondition> = {};
-    for (const f of filters) {
-      if (!f.field) continue;
-      const cond: import("./schema").FilterCondition = {};
-      for (const condition of f.conditions || []) {
-        if (condition.type === "exists") {
-          cond.exists = condition.value === "true";
-        } else if (
-          condition.type === "in" ||
-          condition.type === "notIn"
-        ) {
-          const raw = condition.value?.trim();
-          if (raw) {
-            const parsed = raw.startsWith("[")
-              ? JSON.parse(raw)
-              : [raw];
-            cond[condition.type] = Array.isArray(parsed) ? parsed : [parsed];
-          }
-        } else if (condition.value !== undefined && condition.value !== "") {
-          cond[condition.type] = condition.value;
-        }
-      }
-      if (Object.keys(cond).length > 0) {
-        filter[f.field] = cond;
-      }
-    }
-    if (Object.keys(filter).length > 0) {
-      criteria[image] = filter;
-    }
-  }
-  return criteria;
-}
-
-function apiToFormCriteria(criteria: Filter | undefined): {
-  oldImage: FieldFilter[];
-  newImage: FieldFilter[];
-} {
-  const form: { oldImage: FieldFilter[]; newImage: FieldFilter[] } = {
-    oldImage: [],
-    newImage: [],
+/**
+ * Edits the oldImage/newImage filter trees for a single sink. Holds its own
+ * per-field condition lists and reports changes upward via `onChange`, so the
+ * parent form stays free of deep array-field paths.
+ */
+function FilterBuilder({
+  value,
+  onChange,
+}: {
+  value: { oldImage: FieldFilter[]; newImage: FieldFilter[] };
+  onChange: (next: {
+    oldImage: FieldFilter[];
+    newImage: FieldFilter[];
+  }) => void;
+}) {
+  const updateImage = (image: ImageType, next: FieldFilter[]) => {
+    onChange({ ...value, [image]: next });
   };
-  if (!criteria) return form;
-  for (const image of ["oldImage", "newImage"] as const) {
-    const filter = criteria[image];
-    if (!filter) continue;
-    const filters: FieldFilter[] = [];
-    for (const [field, cond] of Object.entries(filter)) {
-      const f: FieldFilter = { field, conditions: [] };
-      for (const op of conditionOptions) {
-        const type = op.value;
-        const value = cond[type];
-        if (value === undefined) continue;
-        if (type === "exists") {
-          f.conditions.push({ type, value: String(value) });
-        } else if (type === "in" || type === "notIn") {
-          f.conditions.push({
-            type,
-            value: Array.isArray(value) ? JSON.stringify(value) : String(value),
-          });
-        } else {
-          f.conditions.push({ type, value: String(value) });
-        }
-      }
-      filters.push(f);
-    }
-    form[image] = filters;
-  }
-  return form;
+
+  return (
+    <div className="space-y-4">
+      {(["oldImage", "newImage"] as const).map((image) => (
+        <ImageFilterEditor
+          key={image}
+          title={image === "oldImage" ? "old image" : "new image"}
+          filters={value[image]}
+          onChange={(next) => updateImage(image, next)}
+        />
+      ))}
+    </div>
+  );
 }
 
-// --- Filter Criteria Editor ---
-
-interface FilterEditorProps {
-  imageType: "oldImage" | "newImage";
-  destIndex: number;
-  control: ReturnType<typeof useForm<SinksForm>>["control"];
-}
-
-function FilterEditor({
-  imageType,
-  destIndex,
-  control,
-}: FilterEditorProps) {
-  const { fields, append, remove } = useFieldArray({
-    control,
-    name: `sinks.${destIndex}.filter.${imageType}` as const,
-  });
-
+function ImageFilterEditor({
+  title,
+  filters,
+  onChange,
+}: {
+  title: string;
+  filters: FieldFilter[];
+  onChange: (next: FieldFilter[]) => void;
+}) {
   const addField = () => {
-    append({ field: "", conditions: [] });
+    onChange([...filters, { field: "", conditions: [] }]);
+  };
+
+  const updateField = (index: number, next: FieldFilter) => {
+    onChange(filters.map((f, i) => (i === index ? next : f)));
+  };
+
+  const removeField = (index: number) => {
+    onChange(filters.filter((_, i) => i !== index));
   };
 
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-          {imageType === "oldImage" ? "old image" : "new image"}
+        <span className="text-xs font-medium uppercase text-muted-foreground">
+          {title}
         </span>
-        <Button type="button" variant="outline" size="sm" onClick={addField}>
-          <PlusIcon className="h-3.5 w-3.5 mr-1" />
-          Add Field
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-6 text-xs"
+          onClick={addField}
+        >
+          <PlusIcon className="h-3.5 w-3.5 mr-1" /> Add field
         </Button>
       </div>
 
-      {fields.length === 0 && (
-        <p className="text-xs text-muted-foreground italic">
-          No filters configured
+      {filters.length === 0 && (
+        <p className="text-xs italic text-muted-foreground">
+          No {title} filters configured
         </p>
       )}
 
-      {fields.map((field, fieldIndex) => (
+      {filters.map((fieldFilter, index) => (
         <div
-          key={field.id}
-          className="border border-border rounded-2xl p-6 space-y-6 bg-card"
+          key={index}
+          className="space-y-3 rounded-2xl border border-border bg-card p-4"
         >
           <div className="flex items-center gap-2">
-            <Controller
-              name={
-                `sinks.${destIndex}.filter.${imageType}.${fieldIndex}.field` as const
+            <Input
+              value={fieldFilter.field}
+              onChange={(e) =>
+                updateField(index, { ...fieldFilter, field: e.target.value })
               }
-              control={control}
-              render={({ field: fieldProps }) => (
-                <Input
-                  {...fieldProps}
-                  placeholder="Enter field name..."
-                  className="h-8 text-xs w-[180px]"
-                />
-              )}
+              placeholder="Field name"
+              className="h-8 w-[160px] text-xs"
             />
             <Button
               type="button"
               variant="ghost"
               size="icon-sm"
-              onClick={() => remove(fieldIndex)}
               className="ml-auto"
+              onClick={() => removeField(index)}
+              aria-label="Remove field"
             >
               <Trash2Icon className="h-3.5 w-3.5" />
             </Button>
           </div>
-
-          <Controller
-            name={
-              `sinks.${destIndex}.filter.${imageType}.${fieldIndex}.conditions` as const
+          <Separator />
+          <FieldConditionEditor
+            conditions={fieldFilter.conditions}
+            onChange={(conditions) =>
+              updateField(index, { ...fieldFilter, conditions })
             }
-            control={control}
-            render={({ field: conditionsProps }) => {
-              const conditions = conditionsProps.value || [];
-              const availableConditions = conditionOptions.filter(
-                (opt) => !conditions.some((c) => c.type === opt.value),
-              );
-
-              return (
-                <div className="space-y-2">
-                  <Separator />
-
-                  {conditions.map((condition, conditionIndex) => (
-                    <div
-                      key={conditionIndex}
-                      className="flex items-center gap-2"
-                    >
-                      <span className="text-xs font-medium px-2 py-0.5 rounded bg-secondary text-secondary-foreground min-w-[80px] text-center">
-                        {
-                          conditionOptions.find(
-                            (opt) => opt.value === condition.type,
-                          )?.label
-                        }
-                      </span>
-
-                      {condition.type === "exists" ? (
-                        <Controller
-                          name={
-                            `sinks.${destIndex}.filter.${imageType}.${fieldIndex}.conditions.${conditionIndex}.value` as const
-                          }
-                          control={control}
-                          render={({ field }) => (
-                            <Select
-                              value={field.value || "true"}
-                              onValueChange={field.onChange}
-                            >
-                              <SelectTrigger className="h-7 text-xs w-[100px]">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="true">true</SelectItem>
-                                <SelectItem value="false">false</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          )}
-                        />
-                      ) : (
-                        <Controller
-                          name={
-                            `sinks.${destIndex}.filter.${imageType}.${fieldIndex}.conditions.${conditionIndex}.value` as const
-                          }
-                          control={control}
-                          render={({ field }) => (
-                            <Input
-                              {...field}
-                              placeholder={`Enter ${condition.type} value`}
-                              className="h-7 text-xs flex-1"
-                            />
-                          )}
-                        />
-                      )}
-
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        onClick={() => {
-                          const updated = conditions.filter(
-                            (_, i) => i !== conditionIndex,
-                          );
-                          conditionsProps.onChange(updated);
-                        }}
-                      >
-                        <Trash2Icon className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  ))}
-
-                  {availableConditions.length > 0 && (
-                    <div className="flex flex-wrap gap-1">
-                      {availableConditions.map((opt) => (
-                        <Button
-                          key={opt.value}
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="h-6 text-xs"
-                          onClick={() => {
-                            const newCondition = {
-                              type: opt.value,
-                              value: opt.value === "exists" ? "true" : "",
-                            };
-                            conditionsProps.onChange([
-                              ...conditions,
-                              newCondition,
-                            ]);
-                          }}
-                        >
-                          + {opt.label}
-                        </Button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            }}
           />
         </div>
       ))}
@@ -328,343 +237,544 @@ function FilterEditor({
   );
 }
 
-import { PlusIcon, Trash2Icon } from "lucide-react";
+function FieldConditionEditor({
+  conditions,
+  onChange,
+}: {
+  conditions: Condition[];
+  onChange: (next: Condition[]) => void;
+}) {
+  const available = conditionOptions.filter(
+    (opt) => !conditions.some((c) => c.type === opt.value),
+  );
 
-// --- Sinks Form Component ---
+  const update = (index: number, next: Condition) =>
+    onChange(conditions.map((c, i) => (i === index ? next : c)));
 
-interface SinksFormProps {
-  initialData: any[];
-  collectionName: string;
+  return (
+    <div className="space-y-2">
+      {conditions.map((condition, index) => (
+        <div key={index} className="flex items-center gap-2">
+          <span className="min-w-[80px] rounded bg-secondary px-2 py-0.5 text-center text-xs font-medium">
+            {conditionOptions.find((o) => o.value === condition.type)?.label ??
+              condition.type}
+          </span>
+          {condition.type === "exists" ? (
+            <Select
+              value={condition.value || "true"}
+              onValueChange={(v) =>
+                update(index, { ...condition, value: v })
+              }
+            >
+              <SelectTrigger className="h-7 w-[100px] text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="true">true</SelectItem>
+                <SelectItem value="false">false</SelectItem>
+              </SelectContent>
+            </Select>
+          ) : (
+            <Input
+              value={condition.value ?? ""}
+              onChange={(e) =>
+                update(index, { ...condition, value: e.target.value })
+              }
+              placeholder={`Enter ${condition.type} value`}
+              className="h-7 flex-1 text-xs"
+            />
+          )}
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Remove condition"
+            onClick={() => onChange(conditions.filter((_, i) => i !== index))}
+          >
+            <Trash2Icon className="h-3 w-3" />
+          </Button>
+        </div>
+      ))}
+      {available.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {available.map((opt) => (
+            <Button
+              key={opt.value}
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-6 text-xs"
+              onClick={() =>
+                onChange([
+                  ...conditions,
+                  { type: opt.value, value: opt.value === "exists" ? "true" : "" },
+                ])
+              }
+            >
+              + {opt.label}
+            </Button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
-function SinksForm({
-  initialData,
+// --- Create one sink ---
+
+function CreateSinkForm({
   collectionName,
-}: SinksFormProps) {
-  const [submitError, setSubmitError] = useState<string | null>(null);
+  onCreated,
+}: {
+  collectionName: string;
+  onCreated: () => void;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<{
+    oldImage: FieldFilter[];
+    newImage: FieldFilter[];
+  }>({ oldImage: [], newImage: [] });
 
   const {
     control,
     handleSubmit,
-    formState: { errors, isSubmitting },
     watch,
     setValue,
-  } = useForm<SinksForm>({
-    resolver: zodResolver(sinksFormSchema),
+    formState: { errors, isSubmitting },
+  } = useForm<CreateSinkForm>({
+    resolver: zodResolver(createSinkSchema),
     defaultValues: {
-      sinks: initialData
-        ? initialData.map((d) => ({
-            type: d.type as "http" | "eventbridge" | "meilisearch",
-            endpoint: d.endpoint ?? "",
-            bearerToken: d.bearerToken ?? "",
-            eventTypes: d.eventTypes ?? [],
-            filter: apiToFormCriteria(d.filter),
-            eventBusName: d.eventBusName ?? "",
-            source: d.source ?? "",
-            indexName: d.indexName ?? "",
-          }))
-        : [
-            {
-              type: "http" as const,
-              endpoint: "",
-              bearerToken: "",
-              eventTypes: [],
-              filter: { oldImage: [], newImage: [] },
-            },
-          ],
+      type: "http",
+      spec: emptySpecFor("http"),
+      eventTypes: [],
     },
   });
 
-  const sinks = watch("sinks");
-  const addedInitialRef = useRef(false);
+  const type = watch("type");
 
-  useEffect(() => {
-    if (sinks.length === 0 && !addedInitialRef.current) {
-      setValue("sinks", [
-        {
-          type: "http" as const,
-          endpoint: "",
-          bearerToken: "",
-          eventTypes: [],
-          filter: { oldImage: [], newImage: [] },
-        },
-      ]);
-      addedInitialRef.current = true;
+  const changeType = (t: CreateSinkForm["type"]) => {
+    setValue("type", t);
+    setValue("spec", emptySpecFor(t) as never);
+  };
+
+  const onSubmit = async (data: CreateSinkForm) => {
+    setError(null);
+    if (data.eventTypes.length === 0) {
+      setError("Select at least one event type.");
+      return;
     }
-  }, [sinks.length, setValue]);
-
-  const submitHandler = async (data: SinksForm) => {
-    setSubmitError(null);
-
-    const payload = data.sinks.map((dest) => ({
-      type: dest.type,
-      endpoint: dest.endpoint,
-      bearerToken: dest.bearerToken,
-      eventTypes: dest.eventTypes,
-      filter: formToAPICriteria(dest.filter),
-      eventBusName: dest.eventBusName,
-      source: dest.source,
-      indexName: dest.indexName,
-    }));
+    const spec = (data.spec ?? {}) as Record<string, unknown>;
+    const payload = {
+      type: data.type,
+      spec: Object.fromEntries(Object.entries(spec).filter(([, v]) => v)),
+      eventTypes: [...data.eventTypes],
+      filter: formToFilter(filter),
+    };
 
     try {
-      const res = await fetch(
+      const res = await apiPost(
         `/api/collections/${collectionName}/sinks`,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        },
+        payload,
       );
-
-      if (res.ok) {
-        // Reload the page to show updated sinks
-        window.location.reload();
-      } else {
-        const error = await res.json();
-        setSubmitError(error.error || "Failed to update sinks");
+      if (!res.ok) {
+        setError(await apiErrorMessage(res, "Failed to create sink"));
+        return;
       }
+      onCreated();
+      window.location.reload();
     } catch (err) {
-      setSubmitError("Failed to update sinks");
-      console.error("Failed to update sinks:", err);
+      setError("Failed to create sink");
+      console.error(err);
     }
-  };
-
-  const addSink = () => {
-    setValue("sinks", [
-      ...sinks,
-      {
-        type: "http" as const,
-        endpoint: "",
-        bearerToken: "",
-        eventTypes: [],
-        filter: { oldImage: [], newImage: [] },
-        eventBusName: "",
-        source: "",
-        indexName: "",
-      },
-    ]);
-  };
-
-  const removeSink = (index: number) => {
-    setValue(
-      "sinks",
-      sinks.filter((_, i) => i !== index),
-    );
   };
 
   return (
-    <form onSubmit={handleSubmit(submitHandler)} className="space-y-6">
-      <FieldGroup>
-        <div className="space-y-6">
-          {sinks.map((dest, index) => (
-            <Card key={index} className="relative">
-              <CardContent className="space-y-6">
-                {sinks.length > 1 && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    onClick={() => removeSink(index)}
-                    className="absolute top-4 right-4"
-                  >
-                    <XIcon />
-                  </Button>
-                )}
+    <>
+      {error && (
+        <Alert variant="destructive" className="mb-4">
+          <AlertCircleIcon />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
 
-                <Field>
-                  <FieldLabel>Type</FieldLabel>
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+        <FieldGroup>
+          <Field>
+            <FieldLabel>Type</FieldLabel>
+            <Controller
+              name="type"
+              control={control}
+              render={({ field }) => (
+                <Select value={field.value} onValueChange={changeType}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectItem value="http">HTTP</SelectItem>
+                      <SelectItem value="meilisearch">Meilisearch</SelectItem>
+                      <SelectItem value="eventbridge">EventBridge</SelectItem>
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              )}
+            />
+          </Field>
+
+          {type === "http" && (
+            <div className="grid grid-cols-3 gap-4">
+              <Field className="col-span-2">
+                <FieldLabel>Endpoint *</FieldLabel>
+                <Controller
+                  name="spec.endpoint"
+                  control={control}
+                  render={({ field }) => <Input {...field} />}
+                />
+                <FieldError errors={[errors.spec?.endpoint]} />
+              </Field>
+              <Field>
+                <FieldLabel>Bearer Token</FieldLabel>
+                <Controller
+                  name="spec.bearerToken"
+                  control={control}
+                  render={({ field }) => (
+                    <Input {...field} type="password" autoComplete="off" />
+                  )}
+                />
+              </Field>
+            </div>
+          )}
+
+          {type === "eventbridge" && (
+            <div className="space-y-4">
+              <Field>
+                <FieldLabel>Event Bus Name *</FieldLabel>
+                <Controller
+                  name="spec.eventBusName"
+                  control={control}
+                  render={({ field }) => (
+                    <Input {...field} placeholder="my-event-bus" />
+                  )}
+                />
+                <FieldError errors={[errors.spec?.eventBusName]} />
+              </Field>
+              <Field>
+                <FieldLabel>Source</FieldLabel>
+                <Controller
+                  name="spec.source"
+                  control={control}
+                  render={({ field }) => (
+                    <Input {...field} placeholder="conduit-mongodb" />
+                  )}
+                />
+              </Field>
+            </div>
+          )}
+
+          {type === "meilisearch" && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-3 gap-4">
+                <Field className="col-span-2">
+                  <FieldLabel>Host *</FieldLabel>
                   <Controller
-                    name={`sinks.${index}.type` as const}
+                    name="spec.host"
                     control={control}
                     render={({ field }) => (
-                      <Select
-                        {...field}
-                        value={field.value}
-                        onValueChange={field.onChange}
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectGroup>
-                            <SelectItem value="http">HTTP</SelectItem>
-                            <SelectItem value="meilisearch">
-                              Meilisearch
-                            </SelectItem>
-                            <SelectItem value="eventbridge">
-                              EventBridge
-                            </SelectItem>
-                          </SelectGroup>
-                        </SelectContent>
-                      </Select>
+                      <Input {...field} placeholder="http://meilisearch.example.com" />
+                    )}
+                  />
+                  <FieldError errors={[errors.spec?.host]} />
+                </Field>
+                <Field>
+                  <FieldLabel>API Key</FieldLabel>
+                  <Controller
+                    name="spec.apiKey"
+                    control={control}
+                    render={({ field }) => (
+                      <Input {...field} type="password" autoComplete="off" />
                     )}
                   />
                 </Field>
+              </div>
+              <Field>
+                <FieldLabel>Index Name</FieldLabel>
+                <Controller
+                  name="spec.indexName"
+                  control={control}
+                  render={({ field }) => (
+                    <Input
+                      {...field}
+                      placeholder="Defaults to collection name"
+                    />
+                  )}
+                />
+              </Field>
+            </div>
+          )}
 
-                {dest.type === "http" && (
-                  <div className="grid grid-cols-3 gap-4">
-                    <Field className="col-span-2">
-                      <FieldLabel>Endpoint *</FieldLabel>
-                      <Controller
-                        name={`sinks.${index}.endpoint` as const}
-                        control={control}
-                        render={({ field }) => <Input {...field} />}
-                      />
-                      <FieldError
-                        errors={[errors.sinks?.[index]?.endpoint]}
-                      />
-                    </Field>
-                    <Field>
-                      <FieldLabel>Bearer Token</FieldLabel>
-                      <Controller
-                        name={`sinks.${index}.bearerToken` as const}
-                        control={control}
-                        render={({ field }) => (
-                          <Input {...field} type="password" />
-                        )}
-                      />
-                    </Field>
-                  </div>
-                )}
+          <EventTypesField
+            value={watch("eventTypes")}
+            onChange={(next) => setValue("eventTypes", next)}
+            error={errors.eventTypes}
+          />
 
-                {dest.type === "eventbridge" && (
-                  <div className="space-y-4">
-                    <Field>
-                      <FieldLabel>Event Bus Name *</FieldLabel>
-                      <Controller
-                        name={`sinks.${index}.eventBusName` as const}
-                        control={control}
-                        render={({ field }) => (
-                          <Input {...field} placeholder="my-event-bus" />
-                        )}
-                      />
-                    </Field>
-                    <Field>
-                      <FieldLabel>Source</FieldLabel>
-                      <Controller
-                        name={`sinks.${index}.source` as const}
-                        control={control}
-                        render={({ field }) => (
-                          <Input {...field} placeholder="conduit-mongodb" />
-                        )}
-                      />
-                    </Field>
-                  </div>
-                )}
+          <div className="space-y-2">
+            <div className="text-sm font-medium">Filter</div>
+            <FilterBuilder value={filter} onChange={setFilter} />
+          </div>
+        </FieldGroup>
 
-                {dest.type === "meilisearch" && (
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-3 gap-4">
-                      <Field className="col-span-2">
-                        <FieldLabel>Host *</FieldLabel>
-                        <Controller
-                          name={`sinks.${index}.endpoint` as const}
-                          control={control}
-                          render={({ field }) => (
-                            <Input
-                              {...field}
-                              placeholder="http://localhost:7700"
-                            />
-                          )}
-                        />
-                        <FieldError
-                          errors={[errors.sinks?.[index]?.endpoint]}
-                        />
-                      </Field>
-                      <Field>
-                        <FieldLabel>API Key</FieldLabel>
-                        <Controller
-                          name={`sinks.${index}.bearerToken` as const}
-                          control={control}
-                          render={({ field }) => (
-                            <Input {...field} type="password" />
-                          )}
-                        />
-                      </Field>
-                    </div>
-                    <Field>
-                      <FieldLabel>Index Name</FieldLabel>
-                      <Controller
-                        name={`sinks.${index}.indexName` as const}
-                        control={control}
-                        render={({ field }) => (
-                          <Input
-                            {...field}
-                            placeholder="Defaults to collection name"
-                          />
-                        )}
-                      />
-                    </Field>
-                  </div>
-                )}
+        <DialogFooter>
+          <Button type="submit" disabled={isSubmitting}>
+            {isSubmitting ? "Creating..." : "Create sink"}
+          </Button>
+        </DialogFooter>
+      </form>
+    </>
+  );
+}
 
-                <Field>
-                  <FieldLabel>Event Types *</FieldLabel>
-                  <Controller
-                    name={`sinks.${index}.eventTypes` as const}
-                    control={control}
-                    render={({ field }) => (
-                      <div className="flex flex-wrap gap-4">
-                        {["INSERT", "MODIFY", "REMOVE"].map((et) => (
-                          <label
-                            key={et}
-                            className="flex items-center gap-2 text-sm"
-                          >
-                            <Checkbox
-                              checked={field.value?.includes(et) || false}
-                              onCheckedChange={(checked) => {
-                                const next = checked
-                                  ? [...(field.value || []), et]
-                                  : (field.value || []).filter((t) => t !== et);
-                                field.onChange(next);
-                              }}
-                            />
-                            {et}
-                          </label>
-                        ))}
-                      </div>
-                    )}
-                  />
-                  <FieldError
-                    errors={[errors.sinks?.[index]?.eventTypes]}
-                  />
-                </Field>
+function EventTypesField({
+  value,
+  onChange,
+  error,
+}: {
+  value: string[];
+  onChange: (next: string[]) => void;
+  error?: unknown;
+}) {
+  return (
+    <Field>
+      <FieldLabel>Event Types *</FieldLabel>
+      <div className="flex flex-wrap gap-4">
+        {EVENT_TYPES.map((et) => (
+          <label key={et} className="flex items-center gap-2 text-sm">
+            <Checkbox
+              checked={value.includes(et)}
+              onCheckedChange={(checked) => {
+                const next = checked
+                  ? [...value, et]
+                  : value.filter((t) => t !== et);
+                onChange(next);
+              }}
+            />
+            {et}
+          </label>
+        ))}
+      </div>
+      <FieldError errors={error ? [error] : []} />
+    </Field>
+  );
+}
 
-                <div className="space-y-2">
-                  <div className="text-sm font-medium">Filter Criteria</div>
+// --- Existing sink (editable only eventTypes + filter) ---
 
-                  <FilterEditor
-                    imageType="oldImage"
-                    destIndex={index}
-                    control={control}
-                  />
+function ExistingSinkCard({
+  sink,
+  collectionName,
+}: {
+  sink: SinkConfig;
+  collectionName: string;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
-                  <FilterEditor
-                    imageType="newImage"
-                    destIndex={index}
-                    control={control}
-                  />
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+  const deleteSink = async () => {
+    setDeleting(true);
+    setError(null);
+    try {
+      const res = await apiDelete(
+        `/api/collections/${collectionName}/sinks/${sink.id}`,
+      );
+      if (!res.ok) {
+        setError(await apiErrorMessage(res, "Failed to delete sink"));
+        setDeleting(false);
+        return;
+      }
+      setConfirmingDelete(false);
+      window.location.reload();
+    } catch (err) {
+      setError("Failed to delete sink");
+      setDeleting(false);
+      console.error(err);
+    }
+  };
+
+  const typeKey = sink.type as SinkConfig["type"];
+  const label = SINK_TYPE_LABEL[typeKey] ?? sink.type;
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0">
+        <CardTitle className="text-base">{label}</CardTitle>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" onClick={() => setEditing(!editing)}>
+            {editing ? "Close" : "Edit"}
+          </Button>
+          <Button
+            size="sm"
+            variant="destructive"
+            onClick={() => setConfirmingDelete(true)}
+          >
+            Delete
+          </Button>
+        </div>
+      </CardHeader>
+
+      <CardContent className="space-y-4">
+        <div className="text-xs text-muted-foreground">
+          <p className="font-medium text-foreground">ID</p>
+          <p className="font-mono break-all">{sink.id}</p>
         </div>
 
-        <Button type="button" variant="outline" onClick={addSink}>
-          Add Sink
-        </Button>
-      </FieldGroup>
+        <div className="text-xs text-muted-foreground">
+          <p className="font-medium text-foreground">Specification (immutable)</p>
+          <pre className="mt-1 whitespace-pre-wrap break-all rounded bg-muted p-2 font-mono text-xs">
+            {JSON.stringify(sink.spec, null, 2)}
+          </pre>
+        </div>
 
-      {submitError && <p className="text-sm text-destructive">{submitError}</p>}
+        <div className="text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">Event types: </span>
+          {(sink.eventTypes ?? []).length === 0
+            ? "none"
+            : (sink.eventTypes ?? []).join(", ")}
+        </div>
 
-      <div className="flex justify-end gap-2">
-        <Button type="button" variant="outline" asChild>
-          <Link to="/">Cancel</Link>
-        </Button>
-        <Button type="submit" disabled={isSubmitting}>
-          {isSubmitting ? "Updating..." : "Update Sinks"}
-        </Button>
+        {hasFilter(sink.filter) && (
+          <div className="text-xs text-muted-foreground">
+            <span className="font-medium text-foreground">Filter: </span>
+            <pre className="mt-1 whitespace-pre-wrap break-all rounded bg-muted p-2 font-mono text-xs">
+              {JSON.stringify(sink.filter, null, 2)}
+            </pre>
+          </div>
+        )}
+
+        {editing && (
+          <EditSinkForm
+            sink={sink}
+            collectionName={collectionName}
+            onSaved={() => {
+              setEditing(false);
+              window.location.reload();
+            }}
+          />
+        )}
+      </CardContent>
+
+      {error && (
+        <CardContent className="pt-0">
+          <Alert variant="destructive">
+            <AlertCircleIcon />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        </CardContent>
+      )}
+
+      <Dialog open={confirmingDelete} onOpenChange={setConfirmingDelete}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete sink</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete this {label} sink ({sink.id})? This
+              cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmingDelete(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={deleteSink}
+              disabled={deleting}
+            >
+              {deleting ? "Deleting..." : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </Card>
+  );
+}
+
+function hasFilter(
+  filter: { oldImage?: Record<string, unknown>; newImage?: Record<string, unknown> } | undefined,
+): boolean {
+  if (!filter) return false;
+  const oldImage = filter.oldImage;
+  const newImage = filter.newImage;
+  return (
+    (!!oldImage && Object.keys(oldImage).length > 0) ||
+    (!!newImage && Object.keys(newImage).length > 0)
+  );
+}
+
+function EditSinkForm({
+  sink,
+  collectionName,
+  onSaved,
+}: {
+  sink: SinkConfig;
+  collectionName: string;
+  onSaved: () => void;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  const [eventTypes, setEventTypes] = useState<string[]>([
+    ...(sink.eventTypes ?? []),
+  ]);
+  const [filter, setFilter] = useState<{
+    oldImage: FieldFilter[];
+    newImage: FieldFilter[];
+  }>(() => filterToForm(sink.filter));
+
+  const onSubmit = async () => {
+    setError(null);
+    if (eventTypes.length === 0) {
+      setError("Select at least one event type.");
+      return;
+    }
+    const payload = {
+      eventTypes: [...eventTypes],
+      filter: formToFilter(filter),
+    };
+
+    try {
+      const res = await apiPatch(
+        `/api/collections/${collectionName}/sinks/${sink.id}`,
+        payload,
+      );
+      if (!res.ok) {
+        setError(await apiErrorMessage(res, "Failed to update sink"));
+        return;
+      }
+      onSaved();
+    } catch (err) {
+      setError("Failed to update sink");
+      console.error(err);
+    }
+  };
+
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); onSubmit(); }} className="space-y-4 border-t pt-4">
+      {error && (
+        <Alert variant="destructive">
+          <AlertCircleIcon />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+
+      <EventTypesField value={eventTypes} onChange={setEventTypes} />
+
+      <div className="space-y-2">
+        <div className="text-sm font-medium">Filter</div>
+        <FilterBuilder value={filter} onChange={setFilter} />
+      </div>
+
+      <div className="flex justify-end">
+        <Button type="submit">Save changes</Button>
       </div>
     </form>
   );

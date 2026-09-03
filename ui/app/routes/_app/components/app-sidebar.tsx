@@ -27,7 +27,7 @@ import {
   SidebarRail,
 } from "~/components/ui/sidebar";
 
-import type { CollectionConfig } from "~/routes/_app/loader.client";
+import type { CollectionConfig } from "~/lib/types";
 
 interface AppSidebarProps extends React.ComponentProps<typeof Sidebar> {
   collections?: CollectionConfig[];
@@ -56,7 +56,7 @@ export function AppSidebar({ collections = [], ...props }: AppSidebarProps) {
                   >
                     <SidebarMenuButton className="flex" asChild>
                       <Link
-                        to={`/documents/${collection.collectionName}`}
+                        to={`/collections/${collection.collectionName}/documents`}
                         className="flex items-center gap-2 flex-1 overflow-hidden"
                       >
                         <DatabaseIcon className="h-4 w-4 shrink-0" />

@@ -12,7 +12,6 @@ export const formSchema = z
     compositeKeys: z.boolean(),
     partitionKey: z.string().optional(),
     sortKey: z.string().optional(),
-    deletionProtection: z.boolean(),
   })
   .refine(
     (data) => {

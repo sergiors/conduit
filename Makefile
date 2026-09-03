@@ -69,7 +69,7 @@ deps: ## Download dependencies
 
 docker-up: ## Start full stack with Docker (MongoDB + Redis + API + Worker)
 	@echo "Starting full stack (MongoDB + Redis + API + Worker)..."
-	docker compose up -d --build
+	docker compose -f compose.dev.yaml up -d --build
 	@echo "Waiting for services to be ready..."
 	@sleep 5
 	@echo ""

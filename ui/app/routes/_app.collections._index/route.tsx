@@ -1,8 +1,4 @@
-import {
-  DatabaseIcon,
-  MoreHorizontalIcon,
-  PlusIcon,
-} from "lucide-react";
+import { DatabaseIcon, MoreHorizontalIcon, PlusIcon } from "lucide-react";
 import { useState } from "react";
 import { Link, useRevalidator, useRouteLoaderData } from "react-router";
 
@@ -33,7 +29,8 @@ import {
   DropdownMenuTrigger,
 } from "~/components/ui/dropdown-menu";
 
-import type { CollectionConfig } from "../_app/loader.client";
+import type { CollectionConfig } from "~/lib/types";
+import { apiDelete, apiErrorMessage } from "~/lib/api";
 import type { Route } from "./+types/route";
 
 // Tipo do loader do _app/route.tsx
@@ -64,28 +61,31 @@ export default function Route() {
       // If the collection is protected, disable protection first via the
       // dedicated endpoint. The dialog already confirmed this intent.
       if (deletingCollection.deletionProtection) {
-        const disableRes = await fetch(`/api/collections/${name}/protection`, {
-          method: "DELETE",
-        });
+        const disableRes = await apiDelete(
+          `/api/collections/${name}/protection`,
+        );
         if (!disableRes.ok) {
-          const error = await disableRes.json().catch(() => ({}));
-          setDeleteError(error.error || "Failed to disable deletion protection");
+          setDeleteError(
+            await apiErrorMessage(
+              disableRes,
+              "Failed to disable deletion protection",
+            ),
+          );
           revalidator.revalidate();
           return;
         }
       }
 
-      const res = await fetch(`/api/collections/${name}`, {
-        method: "DELETE",
-      });
+      const res = await apiDelete(`/api/collections/${name}`);
 
       if (res.ok) {
         setDeletingCollection(null);
         setConfirmDelete(false);
         revalidator.revalidate();
       } else {
-        const error = await res.json();
-        setDeleteError(error.error || "Failed to delete collection");
+        setDeleteError(
+          await apiErrorMessage(res, "Failed to delete collection"),
+        );
         revalidator.revalidate();
       }
     } catch (err) {
@@ -314,17 +314,15 @@ export default function Route() {
                     </span>
                   </div>
                 </div>
-                {(collection.sinks || []).length > 0 && (
+                {collection.streamEnabled && (
                   <div className="mt-3 pt-3 border-t">
                     <div className="flex items-center gap-1 flex-wrap">
-                      {(collection.sinks || []).map((dest, idx) => (
-                        <span
-                          key={idx}
-                          className="text-xs bg-secondary text-secondary-foreground px-2 py-0.5 rounded-full"
-                        >
-                          {dest.type}
-                        </span>
-                      ))}
+                      <Link
+                        to={`/collections/${collection.collectionName}/sinks`}
+                        className="text-xs text-muted-foreground underline hover:text-foreground"
+                      >
+                        Manage sinks
+                      </Link>
                     </div>
                   </div>
                 )}

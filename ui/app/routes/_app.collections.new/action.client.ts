@@ -1,15 +1,14 @@
+import { apiErrorMessage, apiPost } from "~/lib/api";
+
 export async function clientAction({ request }: { request: Request }) {
   const body = await request.json();
 
-  const response = await fetch("/api/collections", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  const response = await apiPost("/api/collections", body);
 
   if (!response.ok) {
-    const error = await response.json();
-    return { error: error.error || "Failed to create collection" };
+    return {
+      error: await apiErrorMessage(response, "Failed to create collection"),
+    };
   }
 
   return { success: true };

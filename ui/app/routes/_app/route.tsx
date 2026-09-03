@@ -1,69 +1,103 @@
-import { Link, Outlet } from "react-router";
+import { Link, Outlet, useNavigate } from "react-router";
+import { LogOutIcon } from "lucide-react";
 import { Separator } from "~/components/ui/separator";
 import {
-    SidebarInset,
-    SidebarProvider,
-    SidebarTrigger,
+  SidebarInset,
+  SidebarProvider,
+  SidebarTrigger,
 } from "~/components/ui/sidebar";
 
 import { useMatches } from "react-router";
 import {
-    Breadcrumb,
-    BreadcrumbItem,
-    BreadcrumbLink,
-    BreadcrumbList,
-    BreadcrumbPage,
-    BreadcrumbSeparator,
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
 } from "~/components/ui/breadcrumb";
+import { Button } from "~/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "~/components/ui/dropdown-menu";
+import { useAuth } from "~/components/auth-provider";
 import type { Route } from "./+types/route";
 import { AppSidebar } from "./components/app-sidebar";
 export { clientLoader } from "./loader.client";
 
 interface HandleWithBreadcrumb {
-    breadcrumb?: (match: any) => React.ReactNode;
+  breadcrumb?: (match: any) => React.ReactNode;
 }
 
 export default function Route({ loaderData }: Route.ComponentProps) {
-    const matches = useMatches() as unknown as Array<{
-        handle?: HandleWithBreadcrumb;
-    }>;
+  const matches = useMatches() as unknown as Array<{
+    handle?: HandleWithBreadcrumb;
+  }>;
 
-    const collections = loaderData?.collections || [];
+  const collections = loaderData?.collections || [];
 
-    return (
-        <SidebarProvider>
-            <AppSidebar collections={collections} />
+  const { clearToken, setAuthState } = useAuth();
+  const navigate = useNavigate();
 
-            <SidebarInset>
-                <header className="flex h-16 shrink-0 items-center gap-2 border-b px-6">
-                    <SidebarTrigger className="-ml-1" />
-                    <Separator orientation="vertical" className="mx-2" />
-                    <Breadcrumb>
-                        <BreadcrumbList>
-                            <BreadcrumbItem>
-                                <BreadcrumbLink asChild>
-                                    <Link to="/collections">Collections</Link>
-                                </BreadcrumbLink>
-                            </BreadcrumbItem>
+  const disconnect = () => {
+    clearToken();
+    setAuthState("none");
+    navigate("/auth", { replace: true });
+  };
 
-                            {matches
-                                .filter((match) => match.handle?.breadcrumb)
-                                .map((match, index) => (
-                                    <>
-                                        <BreadcrumbSeparator key={`sep-${index}`} />
-                                        <BreadcrumbItem key={index}>
-                                            {match.handle?.breadcrumb?.(match)}
-                                        </BreadcrumbItem>
-                                    </>
-                                ))}
-                        </BreadcrumbList>
-                    </Breadcrumb>
-                </header>
+  return (
+    <SidebarProvider>
+      <AppSidebar collections={collections} />
 
-                <main className="p-6">
-                    <Outlet />
-                </main>
-            </SidebarInset>
-        </SidebarProvider>
-    );
+      <SidebarInset>
+        <header className="flex h-16 shrink-0 items-center gap-2 border-b px-6">
+          <SidebarTrigger className="-ml-1" />
+          <Separator orientation="vertical" className="mx-2" />
+          <Breadcrumb>
+            <BreadcrumbList>
+              <BreadcrumbItem>
+                <BreadcrumbLink asChild>
+                  <Link to="/collections">Collections</Link>
+                </BreadcrumbLink>
+              </BreadcrumbItem>
+
+              {matches
+                .filter((match) => match.handle?.breadcrumb)
+                .map((match, index) => (
+                  <>
+                    <BreadcrumbSeparator key={`sep-${index}`} />
+                    <BreadcrumbItem key={index}>
+                      {match.handle?.breadcrumb?.(match)}
+                    </BreadcrumbItem>
+                  </>
+                ))}
+            </BreadcrumbList>
+          </Breadcrumb>
+
+          <div className="ml-auto">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" aria-label="Account">
+                  <LogOutIcon className="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem variant="destructive" onClick={disconnect}>
+                  <LogOutIcon className="size-4" />
+                  Disconnect
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </header>
+
+        <main className="p-6">
+          <Outlet />
+        </main>
+      </SidebarInset>
+    </SidebarProvider>
+  );
 }

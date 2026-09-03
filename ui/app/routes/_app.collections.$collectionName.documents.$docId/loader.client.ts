@@ -1,27 +1,31 @@
 import type { Route } from "./+types/route";
 import { apiFetch, isAuthOrConnectivityFailure } from "~/lib/api";
-import type { SinkConfig } from "~/lib/types";
+
+export interface DocumentConfig {
+  _id: string;
+  [key: string]: unknown;
+}
 
 export async function clientLoader({ params }: Route.ClientLoaderArgs) {
-  const collectionName = params.collectionName;
+  const { collectionName, docId } = params;
 
   try {
     const response = await apiFetch(
-      `/api/collections/${collectionName}/sinks`,
+      `/api/collections/${collectionName}/documents/${docId}`,
     );
 
     if (!response.ok) {
       if (isAuthOrConnectivityFailure(response, null)) {
-        return { sinks: [] as SinkConfig[] };
+        return { document: null };
       }
-      throw new Error("Failed to fetch sinks");
+      throw new Error("Failed to fetch document");
     }
 
-    const sinks = (await response.json()) as SinkConfig[];
-    return { sinks };
+    const document: DocumentConfig = await response.json();
+    return { document };
   } catch (error) {
     if (isAuthOrConnectivityFailure(null, error)) {
-      return { sinks: [] as SinkConfig[] };
+      return { document: null };
     }
     throw error;
   }

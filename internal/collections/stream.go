@@ -34,10 +34,10 @@ func (m *Manager) EnableStream(ctx context.Context, name string, oldImage bool) 
 
 	update := bson.M{
 		"$set": bson.M{
-			"streamEnabled":    true,
-			"oldImage":         oldImage,
+			"streamEnabled":   true,
+			"oldImage":        oldImage,
 			"streamStartedAt": checkpoint,
-			"updatedAt":        time.Now(),
+			"updatedAt":       time.Now(),
 		},
 	}
 

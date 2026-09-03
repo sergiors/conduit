@@ -5,10 +5,13 @@ import {
   Outlet,
   Scripts,
   ScrollRestoration,
+  useNavigate,
 } from "react-router";
 
 import type { Route } from "./+types/root";
 import "./app.css";
+import { useEffect } from "react";
+import { AuthProvider } from "./components/auth-provider";
 import { ThemeProvider } from "./components/theme-provider";
 import { TooltipProvider } from "./components/ui/tooltip";
 
@@ -42,7 +45,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
             enableSystem
             disableTransitionOnChange
           >
-            {children}
+            <AuthProvider>{children}</AuthProvider>
           </ThemeProvider>
         </TooltipProvider>
         <ScrollRestoration />
@@ -53,7 +56,33 @@ export function Layout({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
-  return <Outlet />;
+  return (
+    <>
+      <SessionExpiryRedirect />
+      <Outlet />
+    </>
+  );
+}
+
+/**
+ * Listens for the `conduit:unauthorized` event dispatched by the API client
+ * when an authenticated request returns 401 mid-session (e.g. a stale token).
+ * Since the protected shell is no longer render-gated, the only way to get the
+ * user back to the token screen is to navigate there explicitly.
+ */
+function SessionExpiryRedirect() {
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const onUnauthorized = () => {
+      navigate("/auth", { replace: true });
+    };
+    window.addEventListener("conduit:unauthorized", onUnauthorized);
+    return () =>
+      window.removeEventListener("conduit:unauthorized", onUnauthorized);
+  }, [navigate]);
+
+  return null;
 }
 
 export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
