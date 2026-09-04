@@ -282,7 +282,8 @@ func (m *Manager) ensureKeyIndex(
 
 	indexModel := mongo.IndexModel{
 		Keys: keys,
-		Options: options.Index().
+		Options: options.
+			Index().
 			SetName(indexName).
 			SetUnique(true),
 	}

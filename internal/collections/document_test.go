@@ -170,23 +170,15 @@ func TestItem_Get(t *testing.T) {
 		assert.Equal(t, int32(123), item["value"])
 	})
 
-	t.Run("get item by string id", func(t *testing.T) {
+	t.Run("get with non-objectid id fails immediately", func(t *testing.T) {
 		store, cleanup := setupTestDocument(t)
 		defer cleanup()
 
 		ctx := context.Background()
 
-		// Insert with custom string ID
-		coll := store.client.Database(store.database).Collection(store.collection)
-		coll.InsertOne(ctx, bson.M{
-			"_id":   "custom-id-123",
-			"name":  "Custom Item",
-			"value": 456,
-		})
-
-		item, err := store.Get(ctx, "custom-id-123")
-		require.NoError(t, err)
-		assert.Equal(t, "Custom Item", item["name"])
+		// A non-ObjectID id is rejected without touching the database.
+		_, err := store.Get(ctx, "custom-id-123")
+		require.ErrorIs(t, err, ErrDocumentNotFound)
 	})
 
 	t.Run("get not found returns error", func(t *testing.T) {
@@ -195,8 +187,8 @@ func TestItem_Get(t *testing.T) {
 
 		ctx := context.Background()
 
-		_, err := store.Get(ctx, "nonexistent")
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "not found")
+		// A well-formed ObjectID that does not exist in the collection.
+		_, err := store.Get(ctx, primitive.NewObjectID().Hex())
+		require.ErrorIs(t, err, ErrDocumentNotFound)
 	})
 }

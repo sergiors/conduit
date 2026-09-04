@@ -68,23 +68,12 @@ func (d *Document) List(ctx context.Context, opts DocumentListOptions) ([]bson.M
 	return documents, nil
 }
 
-// Get retrieves a document by ID. It first tries to parse the ID as an
-// ObjectID and falls back to a string ID.
 func (d *Document) Get(ctx context.Context, id string) (bson.M, error) {
 	coll := d.client.Database(d.database).Collection(d.collection)
 
 	objectID, err := primitive.ObjectIDFromHex(id)
 	if err != nil {
-		// Try querying by string ID (pk/sk composite)
-		result := coll.FindOne(ctx, bson.M{"_id": id})
-		var doc bson.M
-		if err := result.Decode(&doc); err != nil {
-			if errors.Is(err, mongo.ErrNoDocuments) {
-				return nil, ErrDocumentNotFound
-			}
-			return nil, fmt.Errorf("find document: %w", err)
-		}
-		return doc, nil
+		return nil, ErrDocumentNotFound
 	}
 
 	result := coll.FindOne(ctx, bson.M{"_id": objectID})

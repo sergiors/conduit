@@ -69,7 +69,11 @@ func (m *Manager) CreateDLQEntry(ctx context.Context, entry DLQEntry) error {
 // empty result set is returned as an empty (non-nil) slice. The collection is
 // validated through Get before the DLQ is queried, so unmanaged collections
 // never touch config.dlq.
-func (m *Manager) ListDLQEntries(ctx context.Context, collectionName string, opts DLQListOptions) ([]DLQEntry, error) {
+func (m *Manager) ListDLQEntries(
+	ctx context.Context,
+	collectionName string,
+	opts DLQListOptions,
+) ([]DLQEntry, error) {
 	if _, err := m.Get(ctx, collectionName); err != nil {
 		return nil, err
 	}
