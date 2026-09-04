@@ -34,7 +34,7 @@ services:
       context: .
       dockerfile: Dockerfile
     command: ["./bin/worker"]
-    env_file: .env
+    env_file: .env.dev
     depends_on:
       mongo:
         condition: service_healthy
@@ -49,7 +49,7 @@ services:
     command: ["./bin/api"]
     ports:
       - 8080:8080
-    env_file: .env
+    env_file: .env.dev
     depends_on:
       mongo:
         condition: service_healthy

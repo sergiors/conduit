@@ -16,8 +16,6 @@ services:
     command: ["./bin/worker"]
     env_file: .env
     depends_on:
-      mongo:
-        condition: service_healthy
       redis:
         condition: service_healthy
     restart: unless-stopped
@@ -31,8 +29,6 @@ services:
       - 8080:8080
     env_file: .env
     depends_on:
-      mongo:
-        condition: service_healthy
       redis:
         condition: service_healthy
     restart: unless-stopped

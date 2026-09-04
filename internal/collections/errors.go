@@ -10,6 +10,7 @@ import (
 // does not depend on fragile string matching.
 var (
 	ErrCollectionNotFound        = errors.New("collection not found")
+	ErrCollectionAlreadyExists   = errors.New("collection already exists")
 	ErrDeletionProtectionEnabled = errors.New("deletion protection is enabled")
 	ErrDocumentNotFound          = errors.New("document not found")
 	ErrStreamAlreadyExists       = errors.New("stream is already enabled")

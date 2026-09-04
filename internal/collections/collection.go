@@ -152,18 +152,26 @@ func (m *Manager) createCollection(ctx context.Context, collection *Collection) 
 	db := m.client.Database(m.database)
 	collectionName := collection.CollectionName
 
-	// Check if collection already exists
 	collections, err := db.ListCollectionNames(ctx, bson.M{"name": collectionName})
 	if err != nil {
 		return fmt.Errorf("list collections: %w", err)
 	}
 
 	if len(collections) > 0 {
-		// Collection already exists, just ensure the key index
-		if err := m.ensureKeyIndex(ctx, collectionName, collection.PartitionKey, collection.SortKey); err != nil {
-			return fmt.Errorf("ensure key index: %w", err)
-		}
-		return nil
+		return ErrCollectionAlreadyExists
+	}
+
+	opts := options.
+		CreateCollection().
+		SetChangeStreamPreAndPostImages(
+			bson.M{"enabled": true},
+		)
+
+	if validator := buildKeyValidator(
+		collection.PartitionKey,
+		collection.SortKey,
+	); validator != nil {
+		opts.SetValidator(validator)
 	}
 
 	// Create the collection with pre- and post-image support enabled. This is a
@@ -172,32 +180,8 @@ func (m *Manager) createCollection(ctx context.Context, collection *Collection) 
 	// always capable of producing pre-images, and Conduit decides at runtime
 	// whether to request and forward them. EnableStream additionally ensures
 	// the capability for collections created outside this path.
-	if err := db.CreateCollection(
-		ctx,
-		collectionName,
-		options.
-			CreateCollection().
-			SetChangeStreamPreAndPostImages(bson.M{"enabled": true}),
-	); err != nil {
+	if err := db.CreateCollection(ctx, collectionName, opts); err != nil {
 		return fmt.Errorf("create collection: %w", err)
-	}
-
-	// Insert a dummy document to ensure the collection is not empty
-	// (empty collections can cause issues with change streams)
-	if _, err := db.Collection(collectionName).
-		InsertOne(ctx, bson.M{
-			"_id":          "init",
-			"_placeholder": true,
-			"_created_at":  time.Now(),
-		}); err != nil {
-		return fmt.Errorf("insert placeholder: %w", err)
-	}
-
-	// Remove the placeholder document
-	if _, err := db.
-		Collection(collectionName).
-		DeleteOne(ctx, bson.M{"_id": "init"}); err != nil {
-		return fmt.Errorf("delete placeholder: %w", err)
 	}
 
 	if err := m.ensureKeyIndex(
@@ -209,54 +193,26 @@ func (m *Manager) createCollection(ctx context.Context, collection *Collection) 
 		return fmt.Errorf("ensure key index: %w", err)
 	}
 
-	if err := m.applyValidator(
-		ctx,
-		collectionName,
-		collection.PartitionKey,
-		collection.SortKey,
-	); err != nil {
-		return fmt.Errorf("apply validator: %w", err)
-	}
-
 	return nil
 }
 
-func (m *Manager) applyValidator(
-	ctx context.Context,
-	collectionName, partitionKey,
-	sortKey string,
-) error {
-	required := make([]string, 0, 2)
-
-	if partitionKey != "" {
-		required = append(required, partitionKey)
+func buildKeyValidator(partitionKey, sortKey string) bson.M {
+	if partitionKey == "" {
+		return nil
 	}
+
+	required := []string{partitionKey}
 
 	if sortKey != "" {
 		required = append(required, sortKey)
 	}
 
-	if len(required) == 0 {
-		return nil
-	}
-
-	cmd := bson.D{
-		{Key: "collMod", Value: collectionName},
-		{
-			Key: "validator",
-			Value: bson.M{
-				"$jsonSchema": bson.M{
-					"bsonType": "object",
-					"required": required,
-				},
-			},
+	return bson.M{
+		"$jsonSchema": bson.M{
+			"bsonType": "object",
+			"required": required,
 		},
 	}
-
-	return m.client.
-		Database(m.database).
-		RunCommand(ctx, cmd).
-		Err()
 }
 
 func (m *Manager) ensureKeyIndex(
