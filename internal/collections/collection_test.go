@@ -221,6 +221,89 @@ func TestManagerCRUD(t *testing.T) {
 	})
 }
 
+func TestManagerValidator(t *testing.T) {
+	manager, client, ctx := newTestManager(t)
+
+	// Cleanup before test - remove any leftover test collections
+	for _, name := range []string{"validator_no_keys", "validator_pk", "validator_pk_sk", "validator_preexisting"} {
+		if table, err := manager.Get(ctx, name); err == nil {
+			if table.DeletionProtection {
+				_ = manager.DisableDeletionProtection(ctx, name)
+			}
+			_ = manager.Delete(ctx, name)
+		}
+	}
+
+	// validatorRequired returns the "required" array of the collection's
+	// $jsonSchema validator, or nil if no validator is set.
+	validatorRequired := func(name string) []string {
+		db := client.Database("conduit_test")
+		var spec struct {
+			Options struct {
+				Validator bson.M `bson:"validator"`
+			} `bson:"options"`
+		}
+		cursor, err := db.ListCollections(ctx, bson.M{"name": name})
+		require.NoError(t, err)
+		defer cursor.Close(ctx)
+		require.True(t, cursor.Next(ctx))
+		require.NoError(t, cursor.Decode(&spec))
+		if spec.Options.Validator == nil {
+			return nil
+		}
+		schema, ok := spec.Options.Validator["$jsonSchema"].(bson.M)
+		if !ok {
+			return nil
+		}
+		required, _ := schema["required"].(bson.A)
+		out := make([]string, 0, len(required))
+		for _, r := range required {
+			out = append(out, r.(string))
+		}
+		return out
+	}
+
+	t.Run("no keys requires nothing", func(t *testing.T) {
+		table := &Collection{CollectionName: "validator_no_keys"}
+		require.NoError(t, manager.Create(ctx, table))
+		assert.Nil(t, validatorRequired("validator_no_keys"))
+	})
+
+	t.Run("partition key only requires partition key", func(t *testing.T) {
+		table := &Collection{CollectionName: "validator_pk", PartitionKey: "pk"}
+		require.NoError(t, manager.Create(ctx, table))
+		assert.Equal(t, []string{"pk"}, validatorRequired("validator_pk"))
+	})
+
+	t.Run("partition and sort key require both", func(t *testing.T) {
+		table := &Collection{CollectionName: "validator_pk_sk", PartitionKey: "pk", SortKey: "sk"}
+		require.NoError(t, manager.Create(ctx, table))
+		assert.Equal(t, []string{"pk", "sk"}, validatorRequired("validator_pk_sk"))
+	})
+
+	t.Run("validator rejects documents missing required keys", func(t *testing.T) {
+		// pk+sk collection: a document missing the sort key must be rejected.
+		_, err := client.Database("conduit_test").Collection("validator_pk_sk").InsertOne(ctx, bson.M{"pk": "x"})
+		assert.Error(t, err, "document missing sort key should be rejected by validator")
+
+		// A document with both keys must be accepted.
+		_, err = client.Database("conduit_test").Collection("validator_pk_sk").InsertOne(ctx, bson.M{"pk": "x", "sk": "y"})
+		assert.NoError(t, err, "document with both keys should be accepted by validator")
+	})
+
+	t.Run("validator not applied to pre-existing collection", func(t *testing.T) {
+		// Create the physical collection directly (no validator), then create the
+		// config through the manager. Conduit must NOT adopt a pre-existing
+		// physical collection by applying validator changes to it.
+		db := client.Database("conduit_test")
+		_ = db.Collection("validator_preexisting").Drop(ctx)
+		require.NoError(t, db.CreateCollection(ctx, "validator_preexisting"))
+		table := &Collection{CollectionName: "validator_preexisting", PartitionKey: "pk"}
+		require.NoError(t, manager.Create(ctx, table))
+		assert.Nil(t, validatorRequired("validator_preexisting"))
+	})
+}
+
 func TestTableBSONTags(t *testing.T) {
 	t.Run("BSON tags are correctly defined", func(t *testing.T) {
 		table := Collection{

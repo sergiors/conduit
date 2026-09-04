@@ -172,57 +172,127 @@ func (m *Manager) createCollection(ctx context.Context, collection *Collection) 
 	// always capable of producing pre-images, and Conduit decides at runtime
 	// whether to request and forward them. EnableStream additionally ensures
 	// the capability for collections created outside this path.
-	createOpts := options.CreateCollection().SetChangeStreamPreAndPostImages(bson.M{"enabled": true})
-	err = db.CreateCollection(ctx, collectionName, createOpts)
-	if err != nil {
+	if err := db.CreateCollection(
+		ctx,
+		collectionName,
+		options.
+			CreateCollection().
+			SetChangeStreamPreAndPostImages(bson.M{"enabled": true}),
+	); err != nil {
 		return fmt.Errorf("create collection: %w", err)
 	}
 
 	// Insert a dummy document to ensure the collection is not empty
 	// (empty collections can cause issues with change streams)
-	_, err = db.Collection(collectionName).InsertOne(ctx, bson.M{
-		"_id":          "init",
-		"_placeholder": true,
-		"_created_at":  time.Now(),
-	})
-	if err != nil {
+	if _, err := db.Collection(collectionName).
+		InsertOne(ctx, bson.M{
+			"_id":          "init",
+			"_placeholder": true,
+			"_created_at":  time.Now(),
+		}); err != nil {
 		return fmt.Errorf("insert placeholder: %w", err)
 	}
 
 	// Remove the placeholder document
-	_, err = db.Collection(collectionName).DeleteOne(ctx, bson.M{"_id": "init"})
-	if err != nil {
+	if _, err := db.
+		Collection(collectionName).
+		DeleteOne(ctx, bson.M{"_id": "init"}); err != nil {
 		return fmt.Errorf("delete placeholder: %w", err)
 	}
 
-	if err := m.ensureKeyIndex(ctx, collectionName, collection.PartitionKey, collection.SortKey); err != nil {
+	if err := m.ensureKeyIndex(
+		ctx,
+		collectionName,
+		collection.PartitionKey,
+		collection.SortKey,
+	); err != nil {
 		return fmt.Errorf("ensure key index: %w", err)
+	}
+
+	if err := m.applyValidator(
+		ctx,
+		collectionName,
+		collection.PartitionKey,
+		collection.SortKey,
+	); err != nil {
+		return fmt.Errorf("apply validator: %w", err)
 	}
 
 	return nil
 }
 
-func (m *Manager) ensureKeyIndex(ctx context.Context, collectionName, primaryKey, sortKey string) error {
+func (m *Manager) applyValidator(
+	ctx context.Context,
+	collectionName, partitionKey,
+	sortKey string,
+) error {
+	required := make([]string, 0, 2)
+
+	if partitionKey != "" {
+		required = append(required, partitionKey)
+	}
+
+	if sortKey != "" {
+		required = append(required, sortKey)
+	}
+
+	if len(required) == 0 {
+		return nil
+	}
+
+	cmd := bson.D{
+		{Key: "collMod", Value: collectionName},
+		{
+			Key: "validator",
+			Value: bson.M{
+				"$jsonSchema": bson.M{
+					"bsonType": "object",
+					"required": required,
+				},
+			},
+		},
+	}
+
+	return m.client.
+		Database(m.database).
+		RunCommand(ctx, cmd).
+		Err()
+}
+
+func (m *Manager) ensureKeyIndex(
+	ctx context.Context,
+	collectionName, primaryKey,
+	sortKey string,
+) error {
 	if primaryKey == "" {
 		return nil
 	}
+
 	if sortKey != "" && sortKey == primaryKey {
 		return fmt.Errorf("sort key cannot be the same as primary key")
 	}
 
 	keys := bson.D{{Key: primaryKey, Value: 1}}
-	indexName := "primary_key_idx"
+	indexName := "primaryKeyIdx"
+
 	if sortKey != "" {
 		keys = append(keys, bson.E{Key: sortKey, Value: 1})
-		indexName = "primary_sort_key_idx"
+		indexName = "primarySortKeyIdx"
 	}
 
 	indexModel := mongo.IndexModel{
-		Keys:    keys,
-		Options: options.Index().SetName(indexName).SetUnique(true),
+		Keys: keys,
+		Options: options.Index().
+			SetName(indexName).
+			SetUnique(true),
 	}
 
-	_, err := m.client.Database(m.database).Collection(collectionName).Indexes().CreateOne(ctx, indexModel)
+	_, err := m.client.
+		Database(m.database).
+		Collection(collectionName).
+		Indexes().
+		CreateOne(ctx, indexModel)
+
 	return err
 }
 
@@ -262,19 +332,24 @@ func (m *Manager) Create(ctx context.Context, collection *Collection) error {
 	if err != nil {
 		return err
 	}
+
 	// Set the ID on the collection so it can be returned to the client
 	if objectID, ok := result.InsertedID.(primitive.ObjectID); ok {
 		collection.ID = objectID.Hex()
 	}
+
 	m.notifyPublish(ctx, name)
+
 	return nil
 }
 
 // Get retrieves a collection by name
 func (m *Manager) Get(ctx context.Context, name string) (*Collection, error) {
 	var collection Collection
-	err := m.collection.FindOne(ctx, bson.M{"collectionName": name}).Decode(&collection)
-	if err != nil {
+
+	if err := m.collection.
+		FindOne(ctx, bson.M{"collectionName": name}).
+		Decode(&collection); err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			return nil, ErrCollectionNotFound
 		}
@@ -353,8 +428,7 @@ func (m *Manager) Delete(ctx context.Context, name string) error {
 	}
 
 	// Delete the configuration
-	_, err = m.collection.DeleteOne(ctx, bson.M{"collectionName": name})
-	if err != nil {
+	if _, err = m.collection.DeleteOne(ctx, bson.M{"collectionName": name}); err != nil {
 		return err
 	}
 
