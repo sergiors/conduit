@@ -34,18 +34,19 @@ func (m *Manager) SetTTL(ctx context.Context, name, attribute string) error {
 		return fmt.Errorf("create ttl index: %w", err)
 	}
 
-	_, err = m.collection.UpdateOne(
+	if _, err = m.collection.UpdateOne(
 		ctx,
 		bson.M{"collectionName": name},
 		bson.M{"$set": bson.M{
 			"ttlAttribute": attribute,
 			"updatedAt":    time.Now(),
 		}},
-	)
-	if err != nil {
+	); err != nil {
 		return fmt.Errorf("set ttl attribute: %w", err)
 	}
+
 	m.notifyPublish(ctx, name)
+
 	return nil
 }
 
@@ -66,19 +67,22 @@ func (m *Manager) DisableTTL(ctx context.Context, name string) error {
 		return fmt.Errorf("drop ttl index: %w", err)
 	}
 
-	_, err = m.collection.UpdateOne(
+	if _, err = m.collection.UpdateOne(
 		ctx,
 		bson.M{"collectionName": name},
-		bson.M{"$set": bson.M{
-			"ttlAttribute": "",
-			"updatedAt":    time.Now(),
-		}},
-	)
-	if err != nil {
+		bson.M{
+			"$set": bson.M{
+				"updatedAt": time.Now(),
+			},
+			"$unset": bson.M{
+				"ttlAttribute": "",
+			}},
+	); err != nil {
 		return err
 	}
 
 	m.notifyPublish(ctx, name)
+
 	return nil
 }
 
@@ -88,7 +92,11 @@ func (m *Manager) createTTLIndex(ctx context.Context, collection, field string) 
 		Keys:    bson.D{{Key: field, Value: 1}},
 		Options: options.Index().SetExpireAfterSeconds(0),
 	}
-	_, err := m.client.Database(m.database).Collection(collection).Indexes().CreateOne(ctx, indexModel)
+	_, err := m.client.
+		Database(m.database).
+		Collection(collection).
+		Indexes().
+		CreateOne(ctx, indexModel)
 	return err
 }
 
@@ -96,13 +104,22 @@ func (m *Manager) createTTLIndex(ctx context.Context, collection, field string) 
 // from a collection. Tolerant: a missing index is not an error (idempotent).
 func (m *Manager) dropTTLIndex(ctx context.Context, collection, field string) error {
 	name := field + "_1"
-	idxs, err := m.client.Database(m.database).Collection(collection).Indexes().ListSpecifications(ctx)
+	idxs, err := m.client.
+		Database(m.database).
+		Collection(collection).
+		Indexes().
+		ListSpecifications(ctx)
 	if err != nil {
 		return fmt.Errorf("list indexes: %w", err)
 	}
+
 	for _, idx := range idxs {
 		if idx.Name == name {
-			if _, err := m.client.Database(m.database).Collection(collection).Indexes().DropOne(ctx, name); err != nil {
+			if _, err := m.client.
+				Database(m.database).
+				Collection(collection).
+				Indexes().
+				DropOne(ctx, name); err != nil {
 				return fmt.Errorf("drop ttl index: %w", err)
 			}
 			return nil

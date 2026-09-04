@@ -189,7 +189,9 @@ func (m *Manager) GetSink(ctx context.Context, collectionName, sinkID string) (*
 	}
 
 	var sink Sink
-	err = m.sinks.FindOne(ctx, bson.M{"_id": objectID, "collectionId": collection.ID}).Decode(&sink)
+	err = m.sinks.
+		FindOne(ctx, bson.M{"_id": objectID, "collectionId": collection.ID}).
+		Decode(&sink)
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			return nil, ErrSinkNotFound
@@ -324,7 +326,11 @@ func specsEqual(a, b map[string]interface{}) bool {
 // UpdateSink updates the mutable fields of an existing sink (filter,
 // eventTypes). type and spec are immutable — changing them returns
 // ErrSinkIdentityImmutable (create a new sink instead).
-func (m *Manager) UpdateSink(ctx context.Context, collectionName, sinkID string, update SinkUpdate) (*Sink, error) {
+func (m *Manager) UpdateSink(
+	ctx context.Context,
+	collectionName, sinkID string,
+	update SinkUpdate,
+) (*Sink, error) {
 	current, err := m.GetSink(ctx, collectionName, sinkID)
 	if err != nil {
 		return nil, err
@@ -353,16 +359,24 @@ func (m *Manager) UpdateSink(ctx context.Context, collectionName, sinkID string,
 		return nil, err
 	}
 
-	updated.UpdatedAt = time.Now()
+	objectID, err := primitive.ObjectIDFromHex(sinkID)
+	if err != nil {
+		return nil, ErrSinkNotFound
+	}
 
 	result, err := m.sinks.UpdateOne(
 		ctx,
-		bson.M{"_id": mustObjectID(sinkID), "collectionId": current.CollectionID},
-		bson.M{"$set": bson.M{
-			"filter":     updated.Filter,
-			"eventTypes": updated.EventTypes,
-			"updatedAt":  updated.UpdatedAt,
-		}},
+		bson.M{
+			"_id":          objectID,
+			"collectionId": current.CollectionID,
+		},
+		bson.M{
+			"$set": bson.M{
+				"filter":     updated.Filter,
+				"eventTypes": updated.EventTypes,
+				"updatedAt":  time.Now(),
+			},
+		},
 	)
 	if err != nil {
 		return nil, fmt.Errorf("update sink: %w", err)
@@ -372,11 +386,6 @@ func (m *Manager) UpdateSink(ctx context.Context, collectionName, sinkID string,
 	}
 
 	m.notifyPublish(ctx, collectionName)
-	return &updated, nil
-}
 
-// mustObjectID converts a hex string to an ObjectID, or returns primitive.NilObjectID.
-func mustObjectID(hex string) primitive.ObjectID {
-	objectID, _ := primitive.ObjectIDFromHex(hex)
-	return objectID
+	return &updated, nil
 }

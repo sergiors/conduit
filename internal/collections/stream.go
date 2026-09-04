@@ -73,14 +73,16 @@ func (m *Manager) rollbackStream(ctx context.Context, name string) error {
 	_, err := m.collection.UpdateOne(
 		ctx,
 		bson.M{"collectionName": name},
-		bson.M{"$set": bson.M{
-			"streamEnabled": false,
-			"oldImage":      false,
-			"updatedAt":     time.Now(),
-		},
+		bson.M{
+			"$set": bson.M{
+				"streamEnabled": false,
+				"oldImage":      false,
+				"updatedAt":     time.Now(),
+			},
 			"$unset": bson.M{
 				"streamStartedAt": "",
-			}},
+			},
+		},
 	)
 	if err != nil {
 		return fmt.Errorf("rollback stream for %s: %w", name, err)
@@ -100,14 +102,16 @@ func (m *Manager) DisableStream(ctx context.Context, name string) error {
 	_, err := m.collection.UpdateOne(
 		ctx,
 		bson.M{"collectionName": name},
-		bson.M{"$set": bson.M{
-			"streamEnabled": false,
-			"oldImage":      false,
-			"updatedAt":     time.Now(),
-		},
+		bson.M{
+			"$set": bson.M{
+				"streamEnabled": false,
+				"oldImage":      false,
+				"updatedAt":     time.Now(),
+			},
 			"$unset": bson.M{
 				"streamStartedAt": "",
-			}},
+			},
+		},
 	)
 	if err != nil {
 		return err
@@ -140,8 +144,13 @@ func (m *Manager) ListStreamEnabled(ctx context.Context) ([]Collection, error) {
 // breach the event contract.
 func (m *Manager) ensureChangeStreamPreAndPostImages(ctx context.Context, name string) error {
 	cmd := bson.D{
-		{Key: "collMod", Value: name},
-		{Key: "changeStreamPreAndPostImages", Value: bson.M{"enabled": true}},
+		{
+			Key:   "collMod",
+			Value: name},
+		{
+			Key:   "changeStreamPreAndPostImages",
+			Value: bson.M{"enabled": true},
+		},
 	}
 	if err := m.client.Database(m.database).RunCommand(ctx, cmd).Err(); err != nil {
 		return fmt.Errorf("enable changeStreamPreAndPostImages for %s: %w", name, err)

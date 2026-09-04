@@ -90,7 +90,11 @@ func (s *Server) getDocument(c *gin.Context) {
 		return
 	}
 
-	store := collections.NewDocument(s.deps.MongoClient.Client, s.deps.MongoClient.Database(), collectionName)
+	store := collections.NewDocument(
+		s.deps.MongoClient.Client,
+		s.deps.MongoClient.Database(),
+		collectionName,
+	)
 
 	doc, err := store.Get(ctx, id)
 	if err != nil {
