@@ -258,6 +258,64 @@ func TestSinkValidateTypeSpecific(t *testing.T) {
 		s := Sink{Type: SinkTypeMeilisearch, Spec: map[string]interface{}{"host": "http://localhost:7700"}}
 		require.NoError(t, s.Validate())
 	})
+
+	t.Run("redis requires url", func(t *testing.T) {
+		s := Sink{Type: SinkTypeRedis, Spec: map[string]interface{}{"stream": "events"}}
+		err := s.Validate()
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrValidation)
+		assert.Contains(t, err.Error(), "url")
+	})
+
+	t.Run("redis empty url rejected", func(t *testing.T) {
+		s := Sink{Type: SinkTypeRedis, Spec: map[string]interface{}{"url": "", "stream": "events"}}
+		err := s.Validate()
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrValidation)
+	})
+
+	t.Run("redis malformed url rejected", func(t *testing.T) {
+		s := Sink{Type: SinkTypeRedis, Spec: map[string]interface{}{"url": "not-a-redis-url", "stream": "events"}}
+		err := s.Validate()
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrValidation)
+	})
+
+	t.Run("redis requires stream", func(t *testing.T) {
+		s := Sink{Type: SinkTypeRedis, Spec: map[string]interface{}{"url": "redis://localhost:6379/0"}}
+		err := s.Validate()
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrValidation)
+		assert.Contains(t, err.Error(), "stream")
+	})
+
+	t.Run("redis empty stream rejected", func(t *testing.T) {
+		s := Sink{Type: SinkTypeRedis, Spec: map[string]interface{}{"url": "redis://localhost:6379/0", "stream": ""}}
+		err := s.Validate()
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrValidation)
+	})
+
+	t.Run("redis valid spec accepted", func(t *testing.T) {
+		s := Sink{Type: SinkTypeRedis, Spec: map[string]interface{}{"url": "redis://redis:6379/0", "stream": "events"}}
+		require.NoError(t, s.Validate())
+	})
+
+	t.Run("redis rediss scheme accepted", func(t *testing.T) {
+		s := Sink{Type: SinkTypeRedis, Spec: map[string]interface{}{"url": "rediss://redis:6379/0", "stream": "events"}}
+		require.NoError(t, s.Validate())
+	})
+}
+
+func TestValidSinkTypesIncludesRedis(t *testing.T) {
+	found := false
+	for _, t := range ValidSinkTypes {
+		if t == SinkTypeRedis {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "ValidSinkTypes must include redis")
 }
 
 func TestManagerSinkCRUD(t *testing.T) {

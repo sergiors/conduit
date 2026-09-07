@@ -43,10 +43,11 @@ export interface Filter {
  *   - http:        { endpoint, bearerToken? }
  *   - eventbridge: { eventBusName, source? }
  *   - meilisearch: { host, apiKey?, indexName? }
+ *   - redis:       { url, stream }
  */
 export interface SinkConfig {
   id: string;
-  type: "http" | "eventbridge" | "meilisearch";
+  type: "http" | "eventbridge" | "meilisearch" | "redis";
   spec: Record<string, unknown>;
   eventTypes: string[];
   filter?: Filter;

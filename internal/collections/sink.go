@@ -15,6 +15,8 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+
+	"github.com/redis/go-redis/v9"
 )
 
 // ValidEventTypes are the allowed event types for sinks.
@@ -23,7 +25,7 @@ var ValidEventTypes = []string{"INSERT", "MODIFY", "REMOVE"}
 // ValidSinkTypes are sink types with a registered runtime transport. A persisted
 // sink must use one of these; an unknown type can never become a runtime delivery
 // lane and is rejected before persistence.
-var ValidSinkTypes = []Type{SinkTypeHTTP, SinkTypeEventBridge, SinkTypeMeilisearch}
+var ValidSinkTypes = []Type{SinkTypeHTTP, SinkTypeEventBridge, SinkTypeMeilisearch, SinkTypeRedis}
 
 // Sink is a persisted sink configuration stored in config.sinks.
 // The CollectionID references the _id of the owning collection in
@@ -90,6 +92,8 @@ func (s *Sink) validateType() error {
 		return s.validateEventBridgeSpec()
 	case SinkTypeMeilisearch:
 		return s.validateMeilisearchSpec()
+	case SinkTypeRedis:
+		return s.validateRedisSpec()
 	default:
 		return NewValidationError("unknown sink type %q: must be one of %s", s.Type, validSinkTypesString())
 	}
@@ -131,6 +135,26 @@ func (s *Sink) validateMeilisearchSpec() error {
 	}
 	if u, err := url.Parse(host); err != nil || u.Scheme == "" || u.Host == "" {
 		return NewValidationError("meilisearch sink spec.host must be a valid URL with a scheme and host")
+	}
+	return nil
+}
+
+// validateRedisSpec requires a valid Redis URL and a stream name. The URL is
+// validated for syntax only (redis.ParseURL accepts redis://, rediss:// and
+// unix:// schemes); reachability is resolved at runtime by the transport
+// builder, consistent with the other transports that do not require external
+// connectivity at validation time.
+func (s *Sink) validateRedisSpec() error {
+	urlStr, _ := s.Spec["url"].(string)
+	if urlStr == "" {
+		return NewValidationError("redis sink requires spec.url")
+	}
+	if _, err := redis.ParseURL(urlStr); err != nil {
+		return NewValidationError("redis sink spec.url must be a valid Redis URL: %v", err)
+	}
+	stream, _ := s.Spec["stream"].(string)
+	if stream == "" {
+		return NewValidationError("redis sink requires spec.stream")
 	}
 	return nil
 }
@@ -226,7 +250,11 @@ func (m *Manager) GetSinks(ctx context.Context, collectionName string) ([]Sink, 
 
 // CreateSink creates a sink for a collection identified by name.
 // On success, fires OnPublish (best-effort).
-func (m *Manager) CreateSink(ctx context.Context, collectionName string, sink Sink) (*Sink, error) {
+func (m *Manager) CreateSink(
+	ctx context.Context,
+	collectionName string,
+	sink Sink,
+) (*Sink, error) {
 	collection, err := m.Get(ctx, collectionName)
 	if err != nil {
 		return nil, err
@@ -247,7 +275,10 @@ func (m *Manager) CreateSink(ctx context.Context, collectionName string, sink Si
 
 	// Reject an equivalent sink before inserting; the unique compound
 	// index (collectionId, fingerprint) covers concurrent creations.
-	existing := m.sinks.FindOne(ctx, bson.M{"collectionId": collection.ID, "fingerprint": fp})
+	existing := m.sinks.FindOne(ctx, bson.M{
+		"collectionId": collection.ID,
+		"fingerprint":  fp,
+	})
 	if err := existing.Err(); err == nil {
 		return nil, ErrSinkAlreadyExists
 	} else if !errors.Is(err, mongo.ErrNoDocuments) {
@@ -271,14 +302,19 @@ func (m *Manager) CreateSink(ctx context.Context, collectionName string, sink Si
 	if objectID, ok := result.InsertedID.(primitive.ObjectID); ok {
 		sink.ID = objectID.Hex()
 	}
+
 	m.notifyPublish(ctx, collectionName)
+
 	return &sink, nil
 }
 
 // DeleteSink deletes a sink by its ID, scoped to the collection identified by
 // name so a sink cannot be removed from a different collection.
 // On success, fires OnPublish (best-effort).
-func (m *Manager) DeleteSink(ctx context.Context, collectionName, sinkID string) error {
+func (m *Manager) DeleteSink(
+	ctx context.Context,
+	collectionName, sinkID string,
+) error {
 	collection, err := m.Get(ctx, collectionName)
 	if err != nil {
 		return err
@@ -289,14 +325,19 @@ func (m *Manager) DeleteSink(ctx context.Context, collectionName, sinkID string)
 		return ErrSinkNotFound
 	}
 
-	result, err := m.sinks.DeleteOne(ctx, bson.M{"_id": objectID, "collectionId": collection.ID})
+	result, err := m.sinks.DeleteOne(ctx, bson.M{
+		"_id":          objectID,
+		"collectionId": collection.ID,
+	})
 	if err != nil {
 		return fmt.Errorf("delete sink: %w", err)
 	}
 	if result.DeletedCount == 0 {
 		return ErrSinkNotFound
 	}
+
 	m.notifyPublish(ctx, collectionName)
+
 	return nil
 }
 

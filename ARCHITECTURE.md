@@ -598,7 +598,7 @@ Stored in MongoDB as `config.sinks`.
 | -------------- | --------------------- | --------------------------------------------------------------------------------------------- |
 | `_id`          | ObjectID              | Sink identifier, exposed as `id`.                                                             |
 | `collectionId` | string (ObjectID hex) | Reference to `config.collections._id`. Not exposed.                                           |
-| `type`         | string                | Sink type: `http`, `eventbridge`, `meilisearch`. **Immutable** (set at creation).             |
+| `type`         | string                | Sink type: `http`, `eventbridge`, `meilisearch`, `redis`. **Immutable** (set at creation).             |
 | `spec`         | object                | Opaque, type-specific spec. Interpreted by the sink package. **Immutable** (set at creation). |
 | `eventTypes`   | []string              | Subset of `INSERT`, `MODIFY`, `REMOVE`. Empty means all. **Mutable** via PATCH.               |
 | `filter`       | object                | Per-image filters (`oldImage`, `newImage`). **Mutable** via PATCH.                            |
@@ -965,6 +965,7 @@ Event routing and sink registry.
 - `sinks/http.go`: Fully implemented HTTP webhook sink with its own `HTTPSpec`.
 - `transports/eventbridge.go`: Fully implemented EventBridge sink with its own `EventBridgeSpec` (AWS SDK v2 PutEvents, SDK-resolved region). The region comes from the AWS SDK default region chain (`AWS_REGION`, shared config, or the compute environment) — never the spec. Credentials come from the AWS SDK default credential chain — never the spec — and construction fails fast if none resolve.
 - `sinks/meilisearch.go`: Fully implemented Meilisearch sink with its own `MeilisearchSpec` (official meilisearch-go SDK; awaits task completion). Documents are keyed by their MongoDB `_id` (the index primary key).
+- `transports/redis.go`: Fully implemented Redis Streams sink with its own `RedisSpec` (go-redis XADD). The canonical event JSON is stored in a single `event` field and Redis generates the stream entry ID; consumer groups belong to downstream consumers.
 - `sinks/doc.go`: Sink package overview.
 
 ## `internal/retry/`
@@ -1023,7 +1024,7 @@ Adding a sink requires:
 
 Because the shared `Sink` model stores type-specific settings as an opaque `spec` object, adding a new sink type never requires modifying the shared schema or existing sink implementations. The builder decodes and validates its own `spec` payload.
 
-The HTTP sink is the reference implementation. EventBridge and Meilisearch are fully implemented with their official SDKs (AWS SDK v2 and meilisearch-go respectively).
+The HTTP sink is the reference implementation. EventBridge, Meilisearch and Redis Streams are fully implemented with their official SDKs (AWS SDK v2, meilisearch-go and go-redis respectively).
 
 ## Additional Dispatchers
 

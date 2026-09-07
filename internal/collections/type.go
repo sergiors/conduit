@@ -7,4 +7,5 @@ const (
 	SinkTypeHTTP        Type = "http"
 	SinkTypeEventBridge Type = "eventbridge"
 	SinkTypeMeilisearch Type = "meilisearch"
+	SinkTypeRedis       Type = "redis"
 )

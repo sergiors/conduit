@@ -303,6 +303,38 @@ timed-out delivery is retried by the pipeline's retry queue.
 }
 ```
 
+### Redis Streams
+
+Producer-only sink that appends stream records to a Redis Stream via `XADD`.
+Conduit performs only `XADD <stream> * event '<json>'` — consumer groups,
+`XREAD`/`XREADGROUP`, `XACK` and `XPENDING` are owned by downstream consumers;
+Conduit never creates or manages consumer groups.
+
+```json
+{
+  "type": "redis",
+  "spec": {
+    "url": "redis://redis:6379/0",
+    "stream": "events"
+  }
+}
+```
+
+Each stream entry has a single field named `event` containing the canonical
+`StreamRecord` JSON (nested `newImage`/`oldImage` preserved). Redis generates
+the stream entry ID (`*`); the Conduit `eventID` stays inside the payload as
+the logical CDC identity — consumers must use `eventID` for idempotency.
+
+Delivery is **at-least-once**: duplicates are possible (a crash after `XADD`
+but before checkpoint, or a retry), so there is no exactly-once guarantee.
+There is no automatic trimming (no `MAXLEN`) — retention can be a future
+`maxLen` extension.
+
+`rediss://` (TLS) URLs are supported via the go-redis URL parser; credentials
+belong in the URL per Redis URL conventions (e.g.
+`redis://user:pass@host:port/db`). The spec holds the connection URL, like
+HTTP's `endpoint`.
+
 New sinks can be added by implementing the `Sink` interface and registering a builder in `internal/dispatch/sinks`.
 
 ---

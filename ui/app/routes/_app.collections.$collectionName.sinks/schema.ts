@@ -60,7 +60,7 @@ export const conditionOptions: { value: Condition["type"]; label: string }[] = [
  */
 export const createSinkSchema = z
   .object({
-    type: z.enum(["http", "eventbridge", "meilisearch"]),
+    type: z.enum(["http", "eventbridge", "meilisearch", "redis"]),
     spec: z
       .object({
         endpoint: z.string().optional(),
@@ -70,6 +70,8 @@ export const createSinkSchema = z
         host: z.string().optional(),
         apiKey: z.string().optional(),
         indexName: z.string().optional(),
+        url: z.string().optional(),
+        stream: z.string().optional(),
       })
       .optional(),
     eventTypes: z
@@ -109,6 +111,20 @@ export const createSinkSchema = z
         message: "Host is required for Meilisearch sinks",
       });
     }
+    if (data.type === "redis" && !spec.url) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["spec", "url"],
+        message: "Redis URL is required for Redis sinks",
+      });
+    }
+    if (data.type === "redis" && !spec.stream) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["spec", "stream"],
+        message: "Stream is required for Redis sinks",
+      });
+    }
   });
 
 /** The form shape for creating a sink. */
@@ -118,6 +134,7 @@ export type CreateSinkForm = z.infer<typeof createSinkSchema>;
 export function emptySpecFor(type: SinkConfig["type"]): Record<string, string> {
   if (type === "http") return { endpoint: "", bearerToken: "" };
   if (type === "eventbridge") return { eventBusName: "", source: "" };
+  if (type === "redis") return { url: "", stream: "" };
   return { host: "", apiKey: "", indexName: "" };
 }
 

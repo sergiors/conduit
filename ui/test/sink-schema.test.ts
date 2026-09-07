@@ -104,5 +104,6 @@ describe("emptySpecFor", () => {
       apiKey: "",
       indexName: "",
     });
+    expect(emptySpecFor("redis")).toEqual({ url: "", stream: "" });
   });
 });

@@ -21,6 +21,11 @@
 //     the AWS SDK default region chain (AWS_REGION / shared config), never the
 //     spec. Credentials are resolved via the AWS SDK v2 default credential chain
 //     (never stored in the spec) and construction fails fast if none resolve.
+//   - redis: XADD stream records to a Redis Stream (fully implemented via the
+//     go-redis client). The canonical event JSON is stored in a single "event"
+//     field and Redis generates the stream entry ID. Delivery is at-least-once;
+//     consumer groups (XREADGROUP/XACK/XPENDING) belong to downstream consumers,
+//     not Conduit.
 //
 // To add a new transport, create a new file in this package, define its own
 // Spec struct, and call RegisterTransport in an init() function.

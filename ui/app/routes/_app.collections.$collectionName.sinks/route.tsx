@@ -59,6 +59,7 @@ const SINK_TYPE_LABEL: Record<SinkConfig["type"], string> = {
   http: "HTTP",
   eventbridge: "EventBridge",
   meilisearch: "Meilisearch",
+  redis: "Redis Streams",
 };
 
 type ImageType = "oldImage" | "newImage";
@@ -414,6 +415,7 @@ function CreateSinkForm({
                       <SelectItem value="http">HTTP</SelectItem>
                       <SelectItem value="meilisearch">Meilisearch</SelectItem>
                       <SelectItem value="eventbridge">EventBridge</SelectItem>
+                      <SelectItem value="redis">Redis Streams</SelectItem>
                     </SelectGroup>
                   </SelectContent>
                 </Select>
@@ -508,6 +510,33 @@ function CreateSinkForm({
                     />
                   )}
                 />
+              </Field>
+            </div>
+          )}
+
+          {type === "redis" && (
+            <div className="space-y-4">
+              <Field>
+                <FieldLabel>Redis URL *</FieldLabel>
+                <Controller
+                  name="spec.url"
+                  control={control}
+                  render={({ field }) => (
+                    <Input {...field} placeholder="redis://redis:6379/0" />
+                  )}
+                />
+                <FieldError errors={[errors.spec?.url]} />
+              </Field>
+              <Field>
+                <FieldLabel>Stream *</FieldLabel>
+                <Controller
+                  name="spec.stream"
+                  control={control}
+                  render={({ field }) => (
+                    <Input {...field} placeholder="events" />
+                  )}
+                />
+                <FieldError errors={[errors.spec?.stream]} />
               </Field>
             </div>
           )}
