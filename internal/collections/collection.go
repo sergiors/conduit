@@ -120,7 +120,10 @@ func (m *Manager) CreateIndex(ctx context.Context) error {
 	// with the same fingerprint (functional identity) for the same collection
 	// cannot coexist. This makes the CreateSink pre-check race-safe.
 	sinkFingerprintIndex := mongo.IndexModel{
-		Keys:    bson.D{{Key: "collectionId", Value: 1}, {Key: "fingerprint", Value: 1}},
+		Keys: bson.D{
+			{Key: "collectionId", Value: 1},
+			{Key: "fingerprint", Value: 1},
+		},
 		Options: options.Index().SetUnique(true),
 	}
 	if _, err := m.sinks.Indexes().CreateOne(ctx, sinkFingerprintIndex); err != nil {
@@ -141,7 +144,10 @@ func (m *Manager) CreateIndex(ctx context.Context) error {
 	// Compound index backing the collection-scoped DLQ list query, sorted by
 	// failedAt descending for deterministic pagination.
 	dlqListIndex := mongo.IndexModel{
-		Keys: bson.D{{Key: "collectionName", Value: 1}, {Key: "failedAt", Value: -1}},
+		Keys: bson.D{
+			{Key: "collectionName", Value: 1},
+			{Key: "failedAt", Value: -1},
+		},
 	}
 	_, err := m.dlq.Indexes().CreateOne(ctx, dlqListIndex)
 	return err

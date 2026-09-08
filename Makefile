@@ -80,11 +80,11 @@ docker-up: ## Start full stack with Docker (MongoDB + Redis + API + Worker)
 
 docker-down: ## Stop all services
 	@echo "Stopping all services..."
-	docker compose down
+	docker compose -f compose.dev.yaml down
 
 docker-clean: ## Clean containers and volumes
 	@echo "Cleaning containers and volumes..."
-	docker compose down -v
+	docker compose -f compose.dev.yaml down -v
 	docker system prune -f
 
 clean: ## Clean build artifacts
