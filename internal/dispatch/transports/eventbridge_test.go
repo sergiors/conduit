@@ -29,7 +29,7 @@ func TestNewEventBridgeValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			transport := NewEventBridge(context.Background(), tt.spec)
+			transport := NewEventBridge(context.Background(), tt.spec, discardLogger)
 			if tt.wantNil {
 				assert.Nil(t, transport)
 			} else {
@@ -40,8 +40,8 @@ func TestNewEventBridgeValidation(t *testing.T) {
 }
 
 func TestNewEventBridgeRejectsMissingBus(t *testing.T) {
-	assert.Nil(t, NewEventBridge(context.Background(), EventBridgeSpec{}))
-	assert.Nil(t, NewEventBridge(context.Background(), EventBridgeSpec{Source: "conduit"}))
+	assert.Nil(t, NewEventBridge(context.Background(), EventBridgeSpec{}, discardLogger))
+	assert.Nil(t, NewEventBridge(context.Background(), EventBridgeSpec{Source: "conduit"}, discardLogger))
 }
 
 // isolateAWSCredentials pins the AWS SDK credential chain to a known-empty
@@ -90,7 +90,7 @@ func TestNewEventBridgeWithoutCredentialsFails(t *testing.T) {
 	isolateAWSCredentials(t)
 	isolateAWSRegion(t)
 	t.Setenv("AWS_REGION", "us-east-1")
-	assert.Nil(t, NewEventBridge(context.Background(), EventBridgeSpec{EventBusName: "default"}))
+	assert.Nil(t, NewEventBridge(context.Background(), EventBridgeSpec{EventBusName: "default"}, discardLogger))
 }
 
 func TestNewEventBridgeWithEnvCredentials(t *testing.T) {
@@ -99,7 +99,7 @@ func TestNewEventBridgeWithEnvCredentials(t *testing.T) {
 	t.Setenv("AWS_REGION", "us-east-1")
 	t.Setenv("AWS_ACCESS_KEY_ID", "test")
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "test")
-	assert.NotNil(t, NewEventBridge(context.Background(), EventBridgeSpec{EventBusName: "default"}))
+	assert.NotNil(t, NewEventBridge(context.Background(), EventBridgeSpec{EventBusName: "default"}, discardLogger))
 }
 
 func TestNewEventBridgeWithoutRegionFails(t *testing.T) {
@@ -109,7 +109,7 @@ func TestNewEventBridgeWithoutRegionFails(t *testing.T) {
 	isolateAWSCredentials(t)
 	t.Setenv("AWS_ACCESS_KEY_ID", "test")
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "test")
-	assert.Nil(t, NewEventBridge(context.Background(), EventBridgeSpec{EventBusName: "default"}))
+	assert.Nil(t, NewEventBridge(context.Background(), EventBridgeSpec{EventBusName: "default"}, discardLogger))
 }
 
 func TestNewEventBridgeWithRegionFromEnv(t *testing.T) {
@@ -119,7 +119,7 @@ func TestNewEventBridgeWithRegionFromEnv(t *testing.T) {
 	t.Setenv("AWS_REGION", "us-east-1")
 	t.Setenv("AWS_ACCESS_KEY_ID", "test")
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "test")
-	assert.NotNil(t, NewEventBridge(context.Background(), EventBridgeSpec{EventBusName: "default"}))
+	assert.NotNil(t, NewEventBridge(context.Background(), EventBridgeSpec{EventBusName: "default"}, discardLogger))
 }
 
 func TestBuildEventDetail(t *testing.T) {
@@ -188,9 +188,9 @@ func TestBuildEventBridgeValidation(t *testing.T) {
 	// A spec missing required fields is rejected by NewEventBridge.
 	assert.Nil(t, buildEventBridge(context.Background(), "events", collections.SinkTypeEventBridge, map[string]interface{}{
 		"source": "conduit",
-	}))
+	}, discardLogger))
 	// A nil spec fails decode.
-	assert.Nil(t, buildEventBridge(context.Background(), "events", collections.SinkTypeEventBridge, nil))
+	assert.Nil(t, buildEventBridge(context.Background(), "events", collections.SinkTypeEventBridge, nil, discardLogger))
 }
 
 // fakePutEvents is a test double for the PutEventsAPI seam. It records the last

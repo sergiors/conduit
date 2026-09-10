@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"sync"
 	"time"
@@ -40,6 +41,7 @@ type Manager struct {
 	syncInterval       time.Duration
 	pubsub             *redis.PubSub
 	configChan         <-chan *redis.Message
+	logger             *log.Logger
 
 	// Runtime state
 	runCtx    context.Context
@@ -99,7 +101,9 @@ func NewManager(
 	dispatcher Dispatcher,
 	retryProcessor *retry.Processor,
 	cfg Config,
+	logger *log.Logger,
 ) *Manager {
+	logger = nilGuard(logger)
 	// Apply safe defaults so a zero-value Config still behaves correctly.
 	if cfg.SyncInterval == 0 {
 		cfg.SyncInterval = 30 * time.Second
@@ -114,6 +118,7 @@ func NewManager(
 		watchers:           make(map[string]*Watcher),
 		currentSinks:       make(map[string][]collections.Sink),
 		syncInterval:       cfg.SyncInterval,
+		logger:             logger,
 	}
 }
 
@@ -126,7 +131,7 @@ func (m *Manager) Start(ctx context.Context) error {
 		return fmt.Errorf("manager already stopped")
 	}
 
-	log.Printf("Watcher manager starting with syncInterval=%s", m.syncInterval)
+	m.logger.Printf("Watcher manager starting with syncInterval=%s", m.syncInterval)
 
 	// Derive a cancellable context owned by the manager so Stop can cancel the
 	// sync/config-change loops independently of the parent context.
@@ -138,26 +143,26 @@ func (m *Manager) Start(ctx context.Context) error {
 		return fmt.Errorf("load collections: %w", err)
 	}
 
-	log.Printf("Found %d stream-enabled collections", len(collections))
+	m.logger.Printf("Found %d stream-enabled collections", len(collections))
 
 	// Start watcher for each enabled collection
 	for _, collection := range collections {
 		if err := m.startWatcher(m.runCtx, collection); err != nil {
-			log.Printf("Failed to start watcher for %s: %v", collection.CollectionName, err)
+			m.logger.Printf("Failed to start watcher for %s: %v", collection.CollectionName, err)
 		}
 	}
 
 	// Subscribe to config change notifications
 	pubsub, err := m.redisClient.SubscribeConfigChanges(ctx)
 	if err != nil {
-		log.Printf("Failed to subscribe to config changes: %v", err)
+		m.logger.Printf("Failed to subscribe to config changes: %v", err)
 	} else {
 		m.pubsub = pubsub
 		m.configChan = pubsub.Channel()
 		m.wg.Add(1)
 		go func() {
 			defer m.wg.Done()
-			recover.Protect("manager:configChange", func() {
+			recover.Protect(m.logger, "manager:configChange", func() {
 				m.configChangeLoop(m.runCtx)
 			})
 		}()
@@ -167,7 +172,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.wg.Add(1)
 	go func() {
 		defer m.wg.Done()
-		recover.Protect("manager:sync", func() {
+		recover.Protect(m.logger, "manager:sync", func() {
 			m.syncLoop(m.runCtx)
 		})
 	}()
@@ -191,7 +196,7 @@ func (m *Manager) Stop(ctx context.Context) error {
 	}
 	m.startMu.Unlock()
 
-	log.Println("Watcher manager stopping...")
+	m.logger.Println("Watcher manager stopping...")
 
 	var lastErr error
 
@@ -213,7 +218,7 @@ func (m *Manager) Stop(ctx context.Context) error {
 	m.mu.Lock()
 	for collectionName, watcher := range m.watchers {
 		if err := watcher.Stop(ctx); err != nil {
-			log.Printf("Failed to stop watcher for %s: %v", collectionName, err)
+			m.logger.Printf("Failed to stop watcher for %s: %v", collectionName, err)
 			lastErr = err
 		}
 		delete(m.watchers, collectionName)
@@ -223,7 +228,7 @@ func (m *Manager) Stop(ctx context.Context) error {
 	// Close Pub/Sub subscription
 	if m.pubsub != nil {
 		if err := m.pubsub.Close(); err != nil {
-			log.Printf("Failed to close Pub/Sub: %v", err)
+			m.logger.Printf("Failed to close Pub/Sub: %v", err)
 			lastErr = err
 		}
 	}
@@ -254,11 +259,11 @@ func (m *Manager) startWatcher(ctx context.Context, collection collections.Colle
 
 	// Check if already running
 	if _, exists := m.watchers[collection.CollectionName]; exists {
-		log.Printf("Watcher for %s already running", collection.CollectionName)
+		m.logger.Printf("Watcher for %s already running", collection.CollectionName)
 		return nil
 	}
 
-	log.Printf("Starting watcher for collection: %s", collection.CollectionName)
+	m.logger.Printf("Starting watcher for collection: %s", collection.CollectionName)
 
 	// Read the resume token BEFORE registering sinks/writing state: a read
 	// failure must abort with no side effects (see doc comment), and starting
@@ -286,7 +291,7 @@ func (m *Manager) startWatcher(ctx context.Context, collection collections.Colle
 	}
 
 	if err := m.registerSinks(ctx, collection.CollectionName, sinkConfigs); err != nil {
-		log.Printf("Failed to register sinks for %s: %v", collection.CollectionName, err)
+		m.logger.Printf("Failed to register sinks for %s: %v", collection.CollectionName, err)
 	}
 	m.currentSinks[collection.CollectionName] = sinkConfigs
 
@@ -302,6 +307,7 @@ func (m *Manager) startWatcher(ctx context.Context, collection collections.Colle
 		resumeToken,
 		collection.StreamStartedAt,
 		m.redisClient,
+		m.logger,
 	)
 
 	if err := watcher.Start(m.runCtx, func(record streams.StreamRecord) error {
@@ -370,17 +376,17 @@ func (m *Manager) handleEvent(ctx context.Context, collectionName string, record
 	// Check idempotency
 	processed, err := m.redisClient.IsProcessed(ctx, eventID)
 	if err != nil {
-		log.Printf("Failed to check idempotency: %v", err)
+		m.logger.Printf("Failed to check idempotency: %v", err)
 		// Continue processing - better duplicate than lost
 	}
 	if processed {
-		log.Printf("Event %s already processed (idempotent skip)", eventID)
+		m.logger.Printf("Event %s already processed (idempotent skip)", eventID)
 		return nil
 	}
 
 	// Dispatch to sinks
 	if err := m.dispatcher.Dispatch(ctx, collectionName, record); err != nil {
-		log.Printf("Dispatch failed for %s: %v", eventID, err)
+		m.logger.Printf("Dispatch failed for %s: %v", eventID, err)
 		// Settled only if the retry enqueue persists it, else unsettled.
 		if enqErr := m.queueRetry(ctx, collectionName, record, eventID); enqErr != nil {
 			return fmt.Errorf("%w: dispatch %v; enqueue retry: %w", ErrEventUnsettled, err, enqErr)
@@ -395,7 +401,7 @@ func (m *Manager) handleEvent(ctx context.Context, collectionName string, record
 	bkctx, bkCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer bkCancel()
 	if err := m.redisClient.MarkProcessed(bkctx, eventID, processedEventTTL); err != nil {
-		log.Printf("Failed to mark event as processed: %v", err)
+		m.logger.Printf("Failed to mark event as processed: %v", err)
 	}
 
 	return nil
@@ -445,15 +451,15 @@ func (m *Manager) configChangeLoop(ctx context.Context) {
 				return
 			}
 			collectionName := msg.Payload
-			log.Printf("Config change detected for collection: %s", collectionName)
+			m.logger.Printf("Config change detected for collection: %s", collectionName)
 			// Handle change for specific collection. A panic while handling
 			// one message must not kill the loop; the next config change or
 			// sync will retry.
-			if _, panicked := recover.ProtectErr("manager:configChange", func() error {
+			if _, panicked := recover.ProtectErr(m.logger, "manager:configChange", func() error {
 				m.handleCollectionChange(ctx, collectionName)
 				return nil
 			}); panicked {
-				log.Printf("Config change handling for %s panicked; continuing loop", collectionName)
+				m.logger.Printf("Config change handling for %s panicked; continuing loop", collectionName)
 			}
 		}
 	}
@@ -480,13 +486,13 @@ func (m *Manager) handleCollectionChange(ctx context.Context, collectionName str
 		// stop the watcher immediately. No state purge here: Manager.OnPurge
 		// owns Redis cleanup, and a deleted-then-recreated race is safe.
 		if errors.Is(err, collections.ErrCollectionNotFound) {
-			log.Printf("Collection %s not found (deleted), stopping watcher", collectionName)
+			m.logger.Printf("Collection %s not found (deleted), stopping watcher", collectionName)
 			if err := m.stopWatcher(ctx, collectionName); err != nil {
-				log.Printf("Failed to stop watcher for deleted collection %s: %v", collectionName, err)
+				m.logger.Printf("Failed to stop watcher for deleted collection %s: %v", collectionName, err)
 			}
 			return
 		}
-		log.Printf("Failed to fetch collection %s for config change: %v", collectionName, err)
+		m.logger.Printf("Failed to fetch collection %s for config change: %v", collectionName, err)
 		return
 	}
 
@@ -498,24 +504,24 @@ func (m *Manager) handleCollectionChange(ctx context.Context, collectionName str
 		// No CDC-state purge: a disabled stream may be re-enabled later, so its
 		// resume token and retry queue must survive.
 		if watcherExists {
-			log.Printf("Stream for collection %s is disabled, stopping watcher", collectionName)
+			m.logger.Printf("Stream for collection %s is disabled, stopping watcher", collectionName)
 			if err := m.stopWatcher(ctx, collectionName); err != nil {
-				log.Printf("Failed to stop watcher for %s: %v", collectionName, err)
+				m.logger.Printf("Failed to stop watcher for %s: %v", collectionName, err)
 			}
 		}
 		return
 	}
 
 	if !watcherExists {
-		log.Printf("Stream for collection %s is enabled, starting watcher", collectionName)
+		m.logger.Printf("Stream for collection %s is enabled, starting watcher", collectionName)
 		if err := m.startWatcher(ctx, *collection); err != nil {
-			log.Printf("Failed to start watcher for %s: %v", collectionName, err)
+			m.logger.Printf("Failed to start watcher for %s: %v", collectionName, err)
 		}
 		return
 	}
 
 	if err := m.refreshSinks(ctx, collectionName); err != nil {
-		log.Printf("Failed to refresh sinks for %s: %v", collectionName, err)
+		m.logger.Printf("Failed to refresh sinks for %s: %v", collectionName, err)
 	}
 }
 
@@ -531,11 +537,11 @@ func (m *Manager) syncLoop(ctx context.Context) {
 		case <-ticker.C:
 			// A panic while syncing must not kill the loop; the next tick
 			// retries the reconciliation.
-			if _, panicked := recover.ProtectErr("manager:sync", func() error {
+			if _, panicked := recover.ProtectErr(m.logger, "manager:sync", func() error {
 				m.syncWithCollections(ctx)
 				return nil
 			}); panicked {
-				log.Println("Sync panicked; continuing loop")
+				m.logger.Println("Sync panicked; continuing loop")
 			}
 		}
 	}
@@ -543,12 +549,12 @@ func (m *Manager) syncLoop(ctx context.Context) {
 
 // syncWithCollections diffs current watchers with config.collections
 func (m *Manager) syncWithCollections(ctx context.Context) {
-	log.Println("Syncing watchers with config.collections...")
+	m.logger.Println("Syncing watchers with config.collections...")
 
 	// Fetch current stream-enabled collections
 	collectionList, err := m.collectionsManager.ListStreamEnabled(ctx)
 	if err != nil {
-		log.Printf("Failed to list collections: %v", err)
+		m.logger.Printf("Failed to list collections: %v", err)
 		return
 	}
 
@@ -575,7 +581,7 @@ func (m *Manager) syncWithCollections(ctx context.Context) {
 		existingWatcher, exists := currentWatchers[collectionName]
 		if !exists {
 			if err := m.startWatcher(ctx, collection); err != nil {
-				log.Printf("Failed to start watcher for %s: %v", collectionName, err)
+				m.logger.Printf("Failed to start watcher for %s: %v", collectionName, err)
 			}
 		} else if !existingWatcher.IsRunning() {
 			// Registered but its watch goroutine has exited (panic, terminal
@@ -584,18 +590,18 @@ func (m *Manager) syncWithCollections(ctx context.Context) {
 			// stopWatcher is safe on a dead watcher (Watcher.Stop returns
 			// promptly once the goroutine has exited). A startWatcher failure
 			// leaves the collection without a watcher (logged) until next sync.
-			log.Printf("watcher for %s is not running; recreating", collectionName)
+			m.logger.Printf("watcher for %s is not running; recreating", collectionName)
 			if err := m.stopWatcher(ctx, collectionName); err != nil {
-				log.Printf("Failed to stop dead watcher for %s: %v", collectionName, err)
+				m.logger.Printf("Failed to stop dead watcher for %s: %v", collectionName, err)
 			}
 			if err := m.startWatcher(ctx, collection); err != nil {
-				log.Printf("Failed to recreate watcher for %s: %v", collectionName, err)
+				m.logger.Printf("Failed to recreate watcher for %s: %v", collectionName, err)
 			} else {
-				log.Printf("recreated watcher for %s", collectionName)
+				m.logger.Printf("recreated watcher for %s", collectionName)
 			}
 		} else {
 			if err := m.refreshSinks(ctx, collectionName); err != nil {
-				log.Printf("Failed to refresh sinks for %s: %v", collectionName, err)
+				m.logger.Printf("Failed to refresh sinks for %s: %v", collectionName, err)
 			}
 		}
 	}
@@ -607,14 +613,14 @@ func (m *Manager) syncWithCollections(ctx context.Context) {
 	// queue survive here for a stream that may be re-enabled.
 	for collectionName := range currentWatchers {
 		if _, exists := enabledSet[collectionName]; !exists {
-			log.Printf("Collection %s is not configured (deleted or stream disabled), stopping watcher", collectionName)
+			m.logger.Printf("Collection %s is not configured (deleted or stream disabled), stopping watcher", collectionName)
 			if err := m.stopWatcher(ctx, collectionName); err != nil {
-				log.Printf("Failed to stop watcher for %s: %v", collectionName, err)
+				m.logger.Printf("Failed to stop watcher for %s: %v", collectionName, err)
 			}
 		}
 	}
 
-	log.Printf("Sync complete: %d active watchers", len(enabledSet))
+	m.logger.Printf("Sync complete: %d active watchers", len(enabledSet))
 }
 
 // refreshSinks reconciles current vs desired sinks and only applies changes.
@@ -631,7 +637,7 @@ func (m *Manager) refreshSinks(ctx context.Context, collectionName string) error
 
 	desired, err := m.loadSinks(ctx, collectionName)
 	if err != nil {
-		log.Printf("Failed to load sinks for %s: %v", collectionName, err)
+		m.logger.Printf("Failed to load sinks for %s: %v", collectionName, err)
 		return err
 	}
 
@@ -640,15 +646,15 @@ func (m *Manager) refreshSinks(ctx context.Context, collectionName string) error
 	m.mu.RUnlock()
 
 	reconciliation := ReconcileSinks(current, desired)
-	reconciliation.LogChanges(collectionName)
-	reconciliation.ApplyChanges(ctx, collectionName, d)
+	reconciliation.LogChanges(m.logger, collectionName)
+	reconciliation.ApplyChanges(ctx, m.logger, collectionName, d)
 
 	m.mu.Lock()
 	m.currentSinks[collectionName] = desired
 	m.mu.Unlock()
 
 	if len(reconciliation.Changes) > 0 {
-		log.Printf("Refreshed sinks for collection %s: %s", collectionName, reconciliation.Summary())
+		m.logger.Printf("Refreshed sinks for collection %s: %s", collectionName, reconciliation.Summary())
 	}
 
 	return nil
@@ -667,10 +673,10 @@ func (m *Manager) registerSinks(ctx context.Context, collectionName string, sink
 	}
 
 	for _, sink := range sinks {
-		transport := dispatch.BuildTransport(ctx, collectionName, sink.Type, sink.Spec)
+		transport := dispatch.BuildTransport(ctx, collectionName, sink.Type, sink.Spec, m.logger)
 		runtimeSink := dispatch.NewRuntimeSink(sink, transport)
 		d.Register(collectionName, runtimeSink)
-		log.Printf("Registered %s sink for collection %s", sink.Type, collectionName)
+		m.logger.Printf("Registered %s sink for collection %s", sink.Type, collectionName)
 	}
 	return nil
 }
@@ -701,4 +707,13 @@ type WatcherStats struct {
 	EventsProcessed int64
 	LastError       error
 	LastErrorTime   time.Time
+}
+
+// nilGuard returns a discard logger when logger is nil so a nil *log.Logger
+// never panics. It is the uniform nil-logger policy across the codebase.
+func nilGuard(logger *log.Logger) *log.Logger {
+	if logger == nil {
+		return log.New(io.Discard, "", 0)
+	}
+	return logger
 }

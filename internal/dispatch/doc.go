@@ -19,7 +19,8 @@
 //
 //	d := dispatch.NewDispatcher() // default per-sink lane config; use
 //	// NewDispatcherWithConfig for a custom queue size / worker count.
-//	transport := dispatch.BuildTransport(ctx, "collection", sink.Type, sink.Spec)
+//	logger := log.New(os.Stdout, "", log.LstdFlags)
+//	transport := dispatch.BuildTransport(ctx, "collection", sink.Type, sink.Spec, logger)
 //	d.Register("collection", dispatch.NewRuntimeSink(sink, transport))
 //
 //	// Route a stream record to all registered sinks (delivered in parallel)

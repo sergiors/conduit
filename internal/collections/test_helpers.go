@@ -2,6 +2,8 @@ package collections
 
 import (
 	"context"
+	"io"
+	"log"
 	"testing"
 	"time"
 
@@ -33,5 +35,5 @@ func newTestManager(t *testing.T) (*Manager, *mongo.Client, context.Context) {
 	}
 	t.Cleanup(func() { client.Disconnect(context.Background()) })
 
-	return NewManager(client, "conduit_test"), client, ctx
+	return NewManager(client, "conduit_test", log.New(io.Discard, "", 0)), client, ctx
 }

@@ -3,6 +3,8 @@ package dispatch
 import (
 	"context"
 	"errors"
+	"io"
+	"log"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -14,6 +16,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"
 )
+
+var discardLogger = log.New(io.Discard, "", 0)
 
 // MockTransport is a test double for Transport.
 type MockTransport struct {
@@ -731,7 +735,7 @@ func TestBuildTransportFailClosed(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("unknown sink type returns erroring transport", func(t *testing.T) {
-		tr := BuildTransport(ctx, "users", collections.Type("kafka"), map[string]interface{}{"endpoint": "http://localhost:3000"})
+		tr := BuildTransport(ctx, "users", collections.Type("kafka"), map[string]interface{}{"endpoint": "http://localhost:3000"}, discardLogger)
 		require.NotNil(t, tr, "unknown type must not return nil")
 		err := tr.Send(ctx, streams.StreamRecord{RecordType: streams.InsertRecord})
 		require.Error(t, err)
@@ -743,12 +747,12 @@ func TestBuildTransportFailClosed(t *testing.T) {
 		// returning nil, so the subtest exercises the registered-builder
 		// path rather than the "no registered builder" path.
 		testType := collections.Type("test-rejecting-builder")
-		RegisterTransport(testType, func(ctx context.Context, collectionName string, t collections.Type, spec map[string]interface{}) Transport {
+		RegisterTransport(testType, func(ctx context.Context, collectionName string, t collections.Type, spec map[string]interface{}, logger *log.Logger) Transport {
 			return nil
 		})
 		defer delete(transportBuilders, testType)
 
-		tr := BuildTransport(ctx, "users", testType, map[string]interface{}{})
+		tr := BuildTransport(ctx, "users", testType, map[string]interface{}{}, discardLogger)
 		require.NotNil(t, tr, "rejected spec must not return nil")
 		err := tr.Send(ctx, streams.StreamRecord{RecordType: streams.InsertRecord})
 		require.Error(t, err)

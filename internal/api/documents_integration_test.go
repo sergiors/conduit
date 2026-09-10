@@ -37,7 +37,7 @@ func newDocumentTestServer(t *testing.T) (*Server, *collections.Manager, *mongo.
 	client, err := mongo.NewClient(ctx, mongo.Config{
 		URI:      localMongoURI,
 		Database: "conduit_test_docs",
-	})
+	}, discardLogger)
 	if err != nil {
 		t.Skipf("MongoDB not available: %v", err)
 	}
@@ -46,7 +46,7 @@ func newDocumentTestServer(t *testing.T) (*Server, *collections.Manager, *mongo.
 	// Drop any leftover state from a previous run so the test is idempotent.
 	require.NoError(t, client.Client.Database("conduit_test_docs").Drop(ctx))
 
-	manager := collections.NewManager(client.Client, "conduit_test_docs")
+	manager := collections.NewManager(client.Client, "conduit_test_docs", discardLogger)
 	require.NoError(t, manager.CreateIndex(ctx))
 
 	server := New(Dependencies{

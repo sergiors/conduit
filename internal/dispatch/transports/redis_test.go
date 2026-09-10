@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log"
 	"testing"
 	"time"
 
@@ -15,6 +17,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+var discardLogger = log.New(io.Discard, "", 0)
 
 // fakeXAdder is a test double for the XAdder seam. It records the last XAddArgs
 // and context it received and returns a canned result or error.
@@ -52,7 +56,7 @@ func TestNewRedisValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			transport := NewRedis(context.Background(), tt.spec)
+			transport := NewRedis(context.Background(), tt.spec, discardLogger)
 			if tt.wantNil {
 				assert.Nil(t, transport)
 			} else {
@@ -197,30 +201,30 @@ func TestBuildRedisValidation(t *testing.T) {
 	// Missing url.
 	assert.Nil(t, buildRedis(ctx, "users", collections.SinkTypeRedis, map[string]interface{}{
 		"stream": "events",
-	}))
+	}, discardLogger))
 	// Empty url.
 	assert.Nil(t, buildRedis(ctx, "users", collections.SinkTypeRedis, map[string]interface{}{
 		"url":    "",
 		"stream": "events",
-	}))
+	}, discardLogger))
 	// Missing stream.
 	assert.Nil(t, buildRedis(ctx, "users", collections.SinkTypeRedis, map[string]interface{}{
 		"url": "redis://localhost:6379/0",
-	}))
+	}, discardLogger))
 	// Empty stream.
 	assert.Nil(t, buildRedis(ctx, "users", collections.SinkTypeRedis, map[string]interface{}{
 		"url":    "redis://localhost:6379/0",
 		"stream": "",
-	}))
+	}, discardLogger))
 	// Nil spec fails decode.
-	assert.Nil(t, buildRedis(ctx, "users", collections.SinkTypeRedis, nil))
+	assert.Nil(t, buildRedis(ctx, "users", collections.SinkTypeRedis, nil, discardLogger))
 }
 
 func TestBuildRedisValid(t *testing.T) {
 	tr := buildRedis(context.Background(), "users", collections.SinkTypeRedis, map[string]interface{}{
 		"url":    "redis://localhost:6379/0",
 		"stream": "events",
-	})
+	}, discardLogger)
 	require.NotNil(t, tr)
 
 	rt, ok := tr.(*RedisTransport)
@@ -234,7 +238,7 @@ func TestBuildRedisValid(t *testing.T) {
 func TestRedisTransportClose(t *testing.T) {
 	// NewRedis builds a real *redis.Client for an unreachable address; Close
 	// must not error and must be safe.
-	tr := NewRedis(context.Background(), RedisSpec{URL: "redis://localhost:6379/0", Stream: "events"})
+	tr := NewRedis(context.Background(), RedisSpec{URL: "redis://localhost:6379/0", Stream: "events"}, discardLogger)
 	require.NotNil(t, tr)
 	assert.NoError(t, tr.Close())
 }
@@ -304,7 +308,7 @@ func TestRedisTransportIntegration(t *testing.T) {
 
 	// NewRedis parses the URL only, so it succeeds even if Redis is down; the
 	// client reconnects on demand.
-	tr := NewRedis(ctx, RedisSpec{URL: "redis://localhost:6379/0", Stream: "conduit-test:" + fmt.Sprint(time.Now().UnixNano())})
+	tr := NewRedis(ctx, RedisSpec{URL: "redis://localhost:6379/0", Stream: "conduit-test:" + fmt.Sprint(time.Now().UnixNano())}, discardLogger)
 	require.NotNil(t, tr)
 	defer tr.Close()
 

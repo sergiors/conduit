@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"os"
 	"os/signal"
 	"sync/atomic"
 	"syscall"
@@ -26,11 +27,12 @@ type Worker struct {
 	dispatcher         *dispatch.Dispatcher
 	watcherManager     *watcher.Manager
 	retryProcessor     *retry.Processor
+	logger             *log.Logger
 
 	shutdownOnce atomic.Bool
 }
 
-func NewWorker(cfg config.Config) (*Worker, error) {
+func NewWorker(cfg config.Config, logger *log.Logger) (*Worker, error) {
 	// Use a generous timeout for startup: MongoDB may still be electing a PRIMARY
 	// after a restart, and NewClient waits for it before returning.
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -42,7 +44,7 @@ func NewWorker(cfg config.Config) (*Worker, error) {
 	mongoClient, err := mongo.NewClient(ctx, mongo.Config{
 		URI:      cfg.MongoDBURI,
 		Database: cfg.MongoDBDatabase,
-	})
+	}, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -51,14 +53,14 @@ func NewWorker(cfg config.Config) (*Worker, error) {
 	redisClient, err := redis.NewClient(ctx, redis.Config{
 		URI:    cfg.RedisURI,
 		Prefix: "cdc:",
-	})
+	}, logger)
 	if err != nil {
 		mongoClient.Close(ctx)
 		return nil, err
 	}
 
 	// Initialize collection manager
-	collectionsManager := collections.NewManager(mongoClient.Client, cfg.MongoDBDatabase)
+	collectionsManager := collections.NewManager(mongoClient.Client, cfg.MongoDBDatabase, logger)
 
 	// Create the manager's indexes (including the config.dlq dedupKey unique
 	// index) so DLQ idempotency holds even when the API hasn't run yet.
@@ -79,6 +81,7 @@ func NewWorker(cfg config.Config) (*Worker, error) {
 		collectionsManager,
 		dispatcher,
 		retry.DefaultConfig(),
+		logger,
 	)
 
 	// Initialize watcher manager
@@ -91,6 +94,7 @@ func NewWorker(cfg config.Config) (*Worker, error) {
 		dispatcher,
 		retryProcessor,
 		watcherCfg,
+		logger,
 	)
 
 	return &Worker{
@@ -100,6 +104,7 @@ func NewWorker(cfg config.Config) (*Worker, error) {
 		dispatcher:         dispatcher,
 		watcherManager:     watcherManager,
 		retryProcessor:     retryProcessor,
+		logger:             logger,
 	}, nil
 }
 
@@ -119,43 +124,43 @@ func (w *Worker) Shutdown(ctx context.Context) error {
 		return nil
 	}
 
-	log.Println("Shutting down worker...")
+	w.logger.Println("Shutting down worker...")
 
 	var errs []error
 
 	// Watcher manager goes first so no new events are dispatched while
 	// in-flight bookkeeping completes.
 	if err := w.watcherManager.Stop(ctx); err != nil {
-		log.Printf("Error stopping watcher manager: %v", err)
+		w.logger.Printf("Error stopping watcher manager: %v", err)
 		errs = append(errs, err)
 	}
 
 	if err := w.retryProcessor.Stop(ctx); err != nil {
-		log.Printf("Error stopping retry processor: %v", err)
+		w.logger.Printf("Error stopping retry processor: %v", err)
 		errs = append(errs, err)
 	}
 
 	if err := w.dispatcher.Close(); err != nil {
-		log.Printf("Error closing dispatcher: %v", err)
+		w.logger.Printf("Error closing dispatcher: %v", err)
 		errs = append(errs, err)
 	}
 
 	if err := w.redisClient.Close(); err != nil {
-		log.Printf("Error closing Redis: %v", err)
+		w.logger.Printf("Error closing Redis: %v", err)
 		errs = append(errs, err)
 	}
 
 	if err := w.mongoClient.Close(ctx); err != nil {
-		log.Printf("Error closing MongoDB: %v", err)
+		w.logger.Printf("Error closing MongoDB: %v", err)
 		errs = append(errs, err)
 	}
 
-	log.Println("Worker stopped")
+	w.logger.Println("Worker stopped")
 	return errors.Join(errs...)
 }
 
 func (w *Worker) Run(ctx context.Context) error {
-	log.Println("Worker starting...")
+	w.logger.Println("Worker starting...")
 
 	// Start watcher manager
 	if err := w.watcherManager.Start(ctx); err != nil {
@@ -167,17 +172,19 @@ func (w *Worker) Run(ctx context.Context) error {
 		return err
 	}
 
-	log.Printf("Worker started with %d active watchers", w.watcherManager.GetActiveWatchers())
+	w.logger.Printf("Worker started with %d active watchers", w.watcherManager.GetActiveWatchers())
 
 	return nil
 }
 
 func main() {
-	cfg := config.LoadWorker()
+	logger := log.New(os.Stdout, "", log.LstdFlags)
 
-	worker, err := NewWorker(cfg)
+	cfg := config.LoadWorker(logger)
+
+	worker, err := NewWorker(cfg, logger)
 	if err != nil {
-		log.Fatalf("Failed to create worker: %v", err)
+		logger.Fatalf("Failed to create worker: %v", err)
 	}
 
 	// SIGINT and SIGTERM both trigger a graceful shutdown.
@@ -185,13 +192,13 @@ func main() {
 	defer stop()
 
 	if err := worker.Run(ctx); err != nil {
-		log.Printf("Worker failed: %v", err)
+		logger.Printf("Worker failed: %v", err)
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 		defer cancel()
 		if serr := worker.Shutdown(shutdownCtx); serr != nil {
-			log.Printf("Error during shutdown after run failure: %v", serr)
+			logger.Printf("Error during shutdown after run failure: %v", serr)
 		}
-		log.Fatalf("Worker failed: %v", err)
+		logger.Fatalf("Worker failed: %v", err)
 	}
 
 	<-ctx.Done()
@@ -199,6 +206,6 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
 	if err := worker.Shutdown(shutdownCtx); err != nil {
-		log.Printf("Error during shutdown: %v", err)
+		logger.Printf("Error during shutdown: %v", err)
 	}
 }

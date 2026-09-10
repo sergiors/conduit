@@ -43,9 +43,10 @@ type MeilisearchTransport struct {
 }
 
 // NewMeilisearch builds a Meilisearch transport from its spec.
-func NewMeilisearch(ctx context.Context, spec MeilisearchSpec) dispatch.Transport {
+func NewMeilisearch(ctx context.Context, spec MeilisearchSpec, logger *log.Logger) dispatch.Transport {
+	logger = nilGuard(logger)
 	if spec.Host == "" {
-		log.Printf("Meilisearch transport requires a host")
+		logger.Printf("Meilisearch transport requires a host")
 		return nil
 	}
 
@@ -173,10 +174,11 @@ func (t *MeilisearchTransport) waitForTask(ctx context.Context, task *meilisearc
 func (t *MeilisearchTransport) Close() error { return nil }
 
 // buildMeilisearch decodes a raw spec and builds a Meilisearch transport.
-func buildMeilisearch(ctx context.Context, collectionName string, t collections.Type, rawSpec map[string]interface{}) dispatch.Transport {
+func buildMeilisearch(ctx context.Context, collectionName string, t collections.Type, rawSpec map[string]interface{}, logger *log.Logger) dispatch.Transport {
+	logger = nilGuard(logger)
 	var spec MeilisearchSpec
 	if err := decodeSpec(rawSpec, &spec); err != nil {
-		log.Printf("Failed to decode Meilisearch transport spec for %s: %v", collectionName, err)
+		logger.Printf("Failed to decode Meilisearch transport spec for %s: %v", collectionName, err)
 		return nil
 	}
 
@@ -184,7 +186,7 @@ func buildMeilisearch(ctx context.Context, collectionName string, t collections.
 		spec.IndexName = collectionName
 	}
 
-	return NewMeilisearch(ctx, spec)
+	return NewMeilisearch(ctx, spec, logger)
 }
 
 func init() {

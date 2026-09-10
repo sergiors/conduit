@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"sync"
 	"testing"
 	"time"
@@ -21,9 +22,11 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
+var discardLogger = log.New(io.Discard, "", 0)
+
 func TestWatcherCreation(t *testing.T) {
 	t.Run("new watcher with correct configuration", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "users", true, "", nil, nil)
+		watcher := NewWatcher(nil, "conduit", "users", true, "", nil, nil, discardLogger)
 
 		assert.NotNil(t, watcher)
 		assert.Equal(t, "conduit", watcher.database)
@@ -34,7 +37,7 @@ func TestWatcherCreation(t *testing.T) {
 
 	t.Run("watcher with resume token", func(t *testing.T) {
 		token := "test-resume-token"
-		watcher := NewWatcher(nil, "conduit", "orders", false, token, nil, nil)
+		watcher := NewWatcher(nil, "conduit", "orders", false, token, nil, nil, discardLogger)
 
 		assert.NotNil(t, watcher)
 		assert.Equal(t, token, watcher.resumeToken)
@@ -51,7 +54,7 @@ func TestBuildChangeStreamOptions(t *testing.T) {
 	t.Run("token present wins over the checkpoint", func(t *testing.T) {
 		tokenDoc, err := bson.Marshal(bson.M{"_data": "826A91ADB6000000022B042C0100296E"})
 		require.NoError(t, err)
-		w := NewWatcher(nil, "conduit", "users", false, string(tokenDoc), &checkpoint, nil)
+		w := NewWatcher(nil, "conduit", "users", false, string(tokenDoc), &checkpoint, nil, discardLogger)
 
 		opts := w.buildChangeStreamOptions()
 		assert.NotNil(t, opts.ResumeAfter, "a resume token must set ResumeAfter")
@@ -60,7 +63,7 @@ func TestBuildChangeStreamOptions(t *testing.T) {
 	})
 
 	t.Run("no token with a checkpoint sets StartAtOperationTime", func(t *testing.T) {
-		w := NewWatcher(nil, "conduit", "users", false, "", &checkpoint, nil)
+		w := NewWatcher(nil, "conduit", "users", false, "", &checkpoint, nil, discardLogger)
 
 		opts := w.buildChangeStreamOptions()
 		assert.Nil(t, opts.ResumeAfter, "no resume token")
@@ -69,7 +72,7 @@ func TestBuildChangeStreamOptions(t *testing.T) {
 	})
 
 	t.Run("no token and no checkpoint sets neither", func(t *testing.T) {
-		w := NewWatcher(nil, "conduit", "users", false, "", nil, nil)
+		w := NewWatcher(nil, "conduit", "users", false, "", nil, nil, discardLogger)
 
 		opts := w.buildChangeStreamOptions()
 		assert.Nil(t, opts.ResumeAfter)
@@ -81,7 +84,7 @@ func TestBuildChangeStreamOptions(t *testing.T) {
 		// is treated as absent and the checkpoint applies. (The invalidate
 		// path clears the token in Redis, but the in-memory value could be
 		// transiently corrupt after a restart.)
-		w := NewWatcher(nil, "conduit", "users", false, "not-valid-bson", &checkpoint, nil)
+		w := NewWatcher(nil, "conduit", "users", false, "not-valid-bson", &checkpoint, nil, discardLogger)
 
 		opts := w.buildChangeStreamOptions()
 		assert.Nil(t, opts.ResumeAfter, "unparseable token must not set ResumeAfter")
@@ -91,7 +94,7 @@ func TestBuildChangeStreamOptions(t *testing.T) {
 
 func TestWatcherStats(t *testing.T) {
 	t.Run("initial stats are correct", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "test", false, "", nil, nil)
+		watcher := NewWatcher(nil, "conduit", "test", false, "", nil, nil, discardLogger)
 
 		stats := watcher.GetStats()
 		assert.Zero(t, stats.EventsProcessed)
@@ -100,14 +103,14 @@ func TestWatcherStats(t *testing.T) {
 	})
 
 	t.Run("IsRunning returns false before start", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "test", false, "", nil, nil)
+		watcher := NewWatcher(nil, "conduit", "test", false, "", nil, nil, discardLogger)
 		assert.False(t, watcher.IsRunning())
 	})
 }
 
 func TestParseChange(t *testing.T) {
 	t.Run("parse insert operation", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "users", false, "", nil, nil)
+		watcher := NewWatcher(nil, "conduit", "users", false, "", nil, nil, discardLogger)
 
 		change := bson.M{
 			"operationType": "insert",
@@ -127,7 +130,7 @@ func TestParseChange(t *testing.T) {
 	})
 
 	t.Run("parse update operation with old image", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "orders", true, "", nil, nil)
+		watcher := NewWatcher(nil, "conduit", "orders", true, "", nil, nil, discardLogger)
 
 		change := bson.M{
 			"operationType": "update",
@@ -149,7 +152,7 @@ func TestParseChange(t *testing.T) {
 	})
 
 	t.Run("parse delete operation", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "sessions", true, "", nil, nil)
+		watcher := NewWatcher(nil, "conduit", "sessions", true, "", nil, nil, discardLogger)
 
 		change := bson.M{
 			"operationType": "delete",
@@ -167,7 +170,7 @@ func TestParseChange(t *testing.T) {
 	})
 
 	t.Run("parse unknown operation type", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "test", false, "", nil, nil)
+		watcher := NewWatcher(nil, "conduit", "test", false, "", nil, nil, discardLogger)
 
 		change := bson.M{
 			"operationType": "unknown",
@@ -179,7 +182,7 @@ func TestParseChange(t *testing.T) {
 	})
 
 	t.Run("parse missing operation type", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "test", false, "", nil, nil)
+		watcher := NewWatcher(nil, "conduit", "test", false, "", nil, nil, discardLogger)
 
 		change := bson.M{}
 
@@ -189,7 +192,7 @@ func TestParseChange(t *testing.T) {
 	})
 
 	t.Run("event ID is derived from resume token", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "users", false, "", nil, nil)
+		watcher := NewWatcher(nil, "conduit", "users", false, "", nil, nil, discardLogger)
 
 		change := bson.M{
 			"_id": bson.M{
@@ -215,8 +218,8 @@ func TestParseChange(t *testing.T) {
 			"fullDocument":  bson.M{"_id": "123"},
 		}
 
-		first := NewWatcher(nil, "conduit", "orders", false, "", nil, nil)
-		second := NewWatcher(nil, "conduit", "orders", false, "", nil, nil)
+		first := NewWatcher(nil, "conduit", "orders", false, "", nil, nil, discardLogger)
+		second := NewWatcher(nil, "conduit", "orders", false, "", nil, nil, discardLogger)
 
 		r1, err := first.parseChange(change)
 		assert.NoError(t, err)
@@ -228,7 +231,7 @@ func TestParseChange(t *testing.T) {
 	})
 
 	t.Run("event ID falls back to clusterTime and documentKey", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "orders", false, "", nil, nil)
+		watcher := NewWatcher(nil, "conduit", "orders", false, "", nil, nil, discardLogger)
 
 		change := bson.M{
 			"operationType": "update",
@@ -248,8 +251,8 @@ func TestParseChange(t *testing.T) {
 			"documentKey":   bson.M{"_id": "789"},
 		}
 
-		first := NewWatcher(nil, "conduit", "sessions", false, "", nil, nil)
-		second := NewWatcher(nil, "conduit", "sessions", false, "", nil, nil)
+		first := NewWatcher(nil, "conduit", "sessions", false, "", nil, nil, discardLogger)
+		second := NewWatcher(nil, "conduit", "sessions", false, "", nil, nil, discardLogger)
 
 		r1, err := first.parseChange(change)
 		assert.NoError(t, err)
@@ -261,7 +264,7 @@ func TestParseChange(t *testing.T) {
 	})
 
 	t.Run("different changes produce different event IDs", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "users", false, "", nil, nil)
+		watcher := NewWatcher(nil, "conduit", "users", false, "", nil, nil, discardLogger)
 
 		first, err := watcher.parseChange(bson.M{
 			"_id":           bson.M{"_data": "826A91ADB6000000022B04"},
@@ -281,7 +284,7 @@ func TestParseChange(t *testing.T) {
 	t.Run("event ID is never derived from time.Now", func(t *testing.T) {
 		// Parsing the same change twice within one watcher must also be
 		// deterministic (guards against any wall-clock dependency).
-		watcher := NewWatcher(nil, "conduit", "users", false, "", nil, nil)
+		watcher := NewWatcher(nil, "conduit", "users", false, "", nil, nil, discardLogger)
 
 		change := bson.M{
 			"_id":           bson.M{"_data": "826A91ADB6000000022B04"},
@@ -302,7 +305,7 @@ func TestParseChangeDocumentID(t *testing.T) {
 	t.Run("insert with ObjectID _id yields hex", func(t *testing.T) {
 		// Identity is the MongoDB `_id` regardless of any pk/sk-style fields
 		// present in the full document.
-		watcher := NewWatcher(nil, "conduit", "orders", false, "", nil, nil)
+		watcher := NewWatcher(nil, "conduit", "orders", false, "", nil, nil, discardLogger)
 		oid := primitive.NewObjectID()
 
 		change := bson.M{
@@ -321,7 +324,7 @@ func TestParseChangeDocumentID(t *testing.T) {
 	})
 
 	t.Run("insert with string _id is verbatim", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "users", false, "", nil, nil)
+		watcher := NewWatcher(nil, "conduit", "users", false, "", nil, nil, discardLogger)
 
 		change := bson.M{
 			"operationType": "insert",
@@ -337,7 +340,7 @@ func TestParseChangeDocumentID(t *testing.T) {
 	t.Run("delete with only documentKey yields _id hex", func(t *testing.T) {
 		// A delete event without a pre-image still carries documentKey, so the
 		// identity is always available.
-		watcher := NewWatcher(nil, "conduit", "sessions", false, "", nil, nil)
+		watcher := NewWatcher(nil, "conduit", "sessions", false, "", nil, nil, discardLogger)
 		oid := primitive.NewObjectID()
 
 		change := bson.M{
@@ -352,7 +355,7 @@ func TestParseChangeDocumentID(t *testing.T) {
 	})
 
 	t.Run("missing documentKey leaves DocumentID empty", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "users", false, "", nil, nil)
+		watcher := NewWatcher(nil, "conduit", "users", false, "", nil, nil, discardLogger)
 
 		change := bson.M{
 			"operationType": "insert",
@@ -473,7 +476,7 @@ func errStaleTokenScenario(token []byte) error {
 
 func TestResumeTokenPreservation(t *testing.T) {
 	t.Run("terminal parse errors propagate out of watchOnce", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "users", false, "", nil, nil)
+		watcher := NewWatcher(nil, "conduit", "users", false, "", nil, nil, discardLogger)
 
 		// A drop event must surface from parseChange instead of being
 		// swallowed, so watchLoop can stop the watcher.
@@ -494,7 +497,7 @@ func TestResumeTokenPreservation(t *testing.T) {
 func TestManagerCreation(t *testing.T) {
 	t.Run("new manager with correct configuration", func(t *testing.T) {
 		cfg := DefaultConfig()
-		manager := NewManager(nil, "conduit", nil, nil, nil, nil, cfg)
+		manager := NewManager(nil, "conduit", nil, nil, nil, nil, cfg, discardLogger)
 
 		assert.NotNil(t, manager)
 		assert.Equal(t, "conduit", manager.database)
@@ -531,7 +534,7 @@ func TestManagerConfig(t *testing.T) {
 func TestManagerMarkProcessedTTL(t *testing.T) {
 	t.Run("handleEvent marks processed with the fixed 24h TTL", func(t *testing.T) {
 		fr := newFakeRedis()
-		manager := NewManager(nil, "conduit", nil, fr, &fakeDispatcher{}, nil, Config{})
+		manager := NewManager(nil, "conduit", nil, fr, &fakeDispatcher{}, nil, Config{}, discardLogger)
 		record := streams.StreamRecord{TableName: "users", EventID: "users:abc"}
 
 		err := manager.handleEvent(context.Background(), "users", record)
@@ -544,7 +547,7 @@ func TestManagerMarkProcessedTTL(t *testing.T) {
 
 func TestManagerStopIdempotent(t *testing.T) {
 	t.Run("Stop before Start is safe", func(t *testing.T) {
-		manager := NewManager(nil, "conduit", nil, nil, nil, nil, DefaultConfig())
+		manager := NewManager(nil, "conduit", nil, nil, nil, nil, DefaultConfig(), discardLogger)
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 
@@ -552,7 +555,7 @@ func TestManagerStopIdempotent(t *testing.T) {
 	})
 
 	t.Run("Stop twice returns nil", func(t *testing.T) {
-		manager := NewManager(nil, "conduit", nil, nil, nil, nil, DefaultConfig())
+		manager := NewManager(nil, "conduit", nil, nil, nil, nil, DefaultConfig(), discardLogger)
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 
@@ -565,7 +568,7 @@ func TestManagerStopIdempotent(t *testing.T) {
 
 func TestWatcherStopIdempotent(t *testing.T) {
 	t.Run("Stop on non-started watcher returns nil", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "users", false, "", nil, nil)
+		watcher := NewWatcher(nil, "conduit", "users", false, "", nil, nil, discardLogger)
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 
@@ -593,7 +596,7 @@ func TestWatcherStopIdempotent(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = client.Disconnect(context.Background()) })
 
-		watcher := NewWatcher(client, "conduit", "users", false, "", nil, nil)
+		watcher := NewWatcher(client, "conduit", "users", false, "", nil, nil, discardLogger)
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 
@@ -621,7 +624,7 @@ func TestManagerStartWatcherDerivesFromRunCtx(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = client.Disconnect(context.Background()) })
 
-	manager := NewManager(client, "conduit", nil, nil, nil, nil, DefaultConfig())
+	manager := NewManager(client, "conduit", nil, nil, nil, nil, DefaultConfig(), discardLogger)
 	manager.runCtx, manager.runCancel = context.WithCancel(context.Background())
 
 	// startWatcher with a nil redisClient is tolerable here: watchOnce only
@@ -681,7 +684,7 @@ func TestManagerStartWatcherResumeTokenFailure(t *testing.T) {
 	// A sentinel representing a transient Redis outage (timeout / failover).
 	fr.getErr = errors.New("redis down")
 
-	manager := NewManager(client, "conduit", nil, fr, nil, nil, DefaultConfig())
+	manager := NewManager(client, "conduit", nil, fr, nil, nil, DefaultConfig(), discardLogger)
 	manager.runCtx, manager.runCancel = context.WithCancel(context.Background())
 	t.Cleanup(manager.runCancel)
 
@@ -708,7 +711,7 @@ func TestManagerStartWatcherResumeToken(t *testing.T) {
 		token := "existing-resume-token"
 		fr.resumeTokens["users"] = token
 
-		manager := NewManager(client, "conduit", nil, fr, nil, nil, DefaultConfig())
+		manager := NewManager(client, "conduit", nil, fr, nil, nil, DefaultConfig(), discardLogger)
 		manager.runCtx, manager.runCancel = context.WithCancel(context.Background())
 		t.Cleanup(manager.runCancel)
 
@@ -725,7 +728,7 @@ func TestManagerStartWatcherResumeToken(t *testing.T) {
 		client := newStartWatcherMongoClient(t)
 		fr := newFakeRedis()
 
-		manager := NewManager(client, "conduit", nil, fr, nil, nil, DefaultConfig())
+		manager := NewManager(client, "conduit", nil, fr, nil, nil, DefaultConfig(), discardLogger)
 		manager.runCtx, manager.runCancel = context.WithCancel(context.Background())
 		t.Cleanup(manager.runCancel)
 
@@ -743,7 +746,7 @@ func TestManagerStartWatcherResumeToken(t *testing.T) {
 		fr := newFakeRedis()
 		checkpoint := primitive.Timestamp{T: uint32(time.Now().Unix()), I: 1}
 
-		manager := NewManager(client, "conduit", nil, fr, nil, nil, DefaultConfig())
+		manager := NewManager(client, "conduit", nil, fr, nil, nil, DefaultConfig(), discardLogger)
 		manager.runCtx, manager.runCancel = context.WithCancel(context.Background())
 		t.Cleanup(manager.runCancel)
 
@@ -765,7 +768,7 @@ func TestManagerStartWatcherResumeToken(t *testing.T) {
 	t.Run("nil redis client skips the token read and still starts", func(t *testing.T) {
 		client := newStartWatcherMongoClient(t)
 
-		manager := NewManager(client, "conduit", nil, nil, nil, nil, DefaultConfig())
+		manager := NewManager(client, "conduit", nil, nil, nil, nil, DefaultConfig(), discardLogger)
 		manager.runCtx, manager.runCancel = context.WithCancel(context.Background())
 		t.Cleanup(manager.runCancel)
 
@@ -780,7 +783,7 @@ func TestManagerStartWatcherResumeToken(t *testing.T) {
 
 func TestInvokeHandlerPanicIsolation(t *testing.T) {
 	t.Run("a panicking handler is converted to an error", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "users", false, "", nil, nil)
+		watcher := NewWatcher(nil, "conduit", "users", false, "", nil, nil, discardLogger)
 
 		record := streams.StreamRecord{TableName: "users", EventID: "users:abc"}
 		err := watcher.invokeHandler(func(streams.StreamRecord) error {
@@ -794,7 +797,7 @@ func TestInvokeHandlerPanicIsolation(t *testing.T) {
 	})
 
 	t.Run("a normal handler error passes through unchanged", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "users", false, "", nil, nil)
+		watcher := NewWatcher(nil, "conduit", "users", false, "", nil, nil, discardLogger)
 		sentinel := errors.New("dispatch failed")
 
 		record := streams.StreamRecord{TableName: "users", EventID: "users:abc"}
@@ -806,7 +809,7 @@ func TestInvokeHandlerPanicIsolation(t *testing.T) {
 	})
 
 	t.Run("a clean handler returns nil", func(t *testing.T) {
-		watcher := NewWatcher(nil, "conduit", "users", false, "", nil, nil)
+		watcher := NewWatcher(nil, "conduit", "users", false, "", nil, nil, discardLogger)
 
 		record := streams.StreamRecord{TableName: "users", EventID: "users:abc"}
 		err := watcher.invokeHandler(func(streams.StreamRecord) error {
@@ -905,7 +908,7 @@ func (f *fakeRedis) resumeToken(collectionName string) string {
 // Start normally sets w.ctx, so set it here to exercise the detached-context
 // token persistence without spawning the watch goroutine.
 func newProcessEventWatcher(redisClient RedisClient) *Watcher {
-	watcher := NewWatcher(nil, "conduit", "users", false, "", nil, redisClient)
+	watcher := NewWatcher(nil, "conduit", "users", false, "", nil, redisClient, discardLogger)
 	watcher.ctx = context.Background()
 	return watcher
 }
@@ -1019,7 +1022,7 @@ func TestHandleEventSettlement(t *testing.T) {
 
 	t.Run("dispatch succeeds returns nil", func(t *testing.T) {
 		fr := newFakeRedis()
-		manager := NewManager(nil, "conduit", nil, fr, &fakeDispatcher{}, nil, DefaultConfig())
+		manager := NewManager(nil, "conduit", nil, fr, &fakeDispatcher{}, nil, DefaultConfig(), discardLogger)
 
 		err := manager.handleEvent(context.Background(), "users", record)
 
@@ -1031,7 +1034,7 @@ func TestHandleEventSettlement(t *testing.T) {
 	t.Run("dispatch fails but enqueue succeeds returns nil", func(t *testing.T) {
 		fr := newFakeRedis()
 		dispatchErr := errors.New("sink down")
-		manager := NewManager(nil, "conduit", nil, fr, &fakeDispatcher{dispatchErr: dispatchErr}, nil, DefaultConfig())
+		manager := NewManager(nil, "conduit", nil, fr, &fakeDispatcher{dispatchErr: dispatchErr}, nil, DefaultConfig(), discardLogger)
 
 		err := manager.handleEvent(context.Background(), "users", record)
 
@@ -1046,7 +1049,7 @@ func TestHandleEventSettlement(t *testing.T) {
 		fr := newFakeRedis()
 		fr.enqueueResult = errors.New("redis down")
 		dispatchErr := errors.New("sink down")
-		manager := NewManager(nil, "conduit", nil, fr, &fakeDispatcher{dispatchErr: dispatchErr}, nil, DefaultConfig())
+		manager := NewManager(nil, "conduit", nil, fr, &fakeDispatcher{dispatchErr: dispatchErr}, nil, DefaultConfig(), discardLogger)
 
 		err := manager.handleEvent(context.Background(), "users", record)
 
@@ -1059,7 +1062,7 @@ func TestHandleEventSettlement(t *testing.T) {
 	t.Run("idempotency-skip returns nil (settled in a previous attempt)", func(t *testing.T) {
 		fr := newFakeRedis()
 		fr.processed[record.EventID] = true
-		manager := NewManager(nil, "conduit", nil, fr, &fakeDispatcher{}, nil, DefaultConfig())
+		manager := NewManager(nil, "conduit", nil, fr, &fakeDispatcher{}, nil, DefaultConfig(), discardLogger)
 
 		err := manager.handleEvent(context.Background(), "users", record)
 
@@ -1086,7 +1089,7 @@ func TestWatcherStartPanicHandlerDoesNotCrash(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = client.Disconnect(context.Background()) })
 
-	watcher := NewWatcher(client, "conduit", "users", false, "", nil, nil)
+	watcher := NewWatcher(client, "conduit", "users", false, "", nil, nil, discardLogger)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
@@ -1132,7 +1135,7 @@ func TestSyncWithCollectionsRecreatesDeadWatcher(t *testing.T) {
 	fr := newFakeRedis()
 
 	const db = "conduit_test_lifecycle"
-	settings := collections.NewManager(client, db)
+	settings := collections.NewManager(client, db, discardLogger)
 
 	names := []string{"recovery_test", "recovery_test2"}
 	cleanup := func() {
@@ -1156,7 +1159,7 @@ func TestSyncWithCollectionsRecreatesDeadWatcher(t *testing.T) {
 		}))
 	}
 
-	manager := NewManager(client, db, settings, fr, nil, nil, DefaultConfig())
+	manager := NewManager(client, db, settings, fr, nil, nil, DefaultConfig(), discardLogger)
 	manager.runCtx, manager.runCancel = context.WithCancel(context.Background())
 	t.Cleanup(manager.runCancel)
 
@@ -1197,7 +1200,7 @@ func TestSyncWithCollectionsIdempotent(t *testing.T) {
 	fr := newFakeRedis()
 
 	const db = "conduit_test_lifecycle"
-	settings := collections.NewManager(client, db)
+	settings := collections.NewManager(client, db, discardLogger)
 
 	const name = "recovery_test"
 	cleanup := func() {
@@ -1216,7 +1219,7 @@ func TestSyncWithCollectionsIdempotent(t *testing.T) {
 		StreamEnabled:  true,
 	}))
 
-	manager := NewManager(client, db, settings, fr, nil, nil, DefaultConfig())
+	manager := NewManager(client, db, settings, fr, nil, nil, DefaultConfig(), discardLogger)
 	manager.runCtx, manager.runCancel = context.WithCancel(context.Background())
 	t.Cleanup(manager.runCancel)
 
@@ -1243,7 +1246,7 @@ func TestHandleCollectionChangeDeletedStopsWatcher(t *testing.T) {
 	fr := newFakeRedis()
 
 	const db = "conduit_test_handlechange"
-	settings := collections.NewManager(client, db)
+	settings := collections.NewManager(client, db, discardLogger)
 
 	names := []string{"gone_coll", "kept_coll", "disabled_coll"}
 	cleanup := func() {
@@ -1267,7 +1270,7 @@ func TestHandleCollectionChangeDeletedStopsWatcher(t *testing.T) {
 		}))
 	}
 
-	manager := NewManager(client, db, settings, fr, nil, nil, DefaultConfig())
+	manager := NewManager(client, db, settings, fr, nil, nil, DefaultConfig(), discardLogger)
 	manager.runCtx, manager.runCancel = context.WithCancel(context.Background())
 	t.Cleanup(manager.runCancel)
 
@@ -1334,7 +1337,7 @@ func TestFirstStartCheckpointLiveStreamsPreStartEvents(t *testing.T) {
 	// Use the collections manager to capture a real streamStartedAt via
 	// EnableStream, then simulate the gap: write events BEFORE starting a
 	// watcher anchored at that checkpoint, and assert the watcher observes them.
-	settings := collections.NewManager(client, db)
+	settings := collections.NewManager(client, db, discardLogger)
 
 	const name = "firststart_coll"
 	cleanup := func() {
@@ -1369,7 +1372,7 @@ func TestFirstStartCheckpointLiveStreamsPreStartEvents(t *testing.T) {
 
 	// Build the watcher anchored at the checkpoint (no resume token), exactly
 	// as the manager's startWatcher does for a freshly-enabled collection.
-	watcher := NewWatcher(client, db, name, false, "", enabled.StreamStartedAt, fr)
+	watcher := NewWatcher(client, db, name, false, "", enabled.StreamStartedAt, fr, discardLogger)
 
 	// The manager's handler settles every event: mark processed + dispatch.
 	observed := make(chan string, 8)
@@ -1422,7 +1425,7 @@ func TestFirstStartCheckpointLiveStreamsPreStartEvents(t *testing.T) {
 
 func TestWatcherTerminalExitClearsIsRunning(t *testing.T) {
 	client := newStartWatcherMongoClient(t)
-	watcher := NewWatcher(client, "conduit", "users", false, "", nil, nil)
+	watcher := NewWatcher(client, "conduit", "users", false, "", nil, nil, discardLogger)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -1447,7 +1450,7 @@ func TestPersistTerminalToken(t *testing.T) {
 
 	t.Run("updates in-memory token and persists to redis", func(t *testing.T) {
 		fr := newFakeRedis()
-		w := NewWatcher(nil, "conduit", "users", false, "old-token", nil, fr)
+		w := NewWatcher(nil, "conduit", "users", false, "old-token", nil, fr, discardLogger)
 		w.ctx = context.Background()
 
 		w.persistTerminalToken(tokenDoc)
@@ -1459,7 +1462,7 @@ func TestPersistTerminalToken(t *testing.T) {
 	t.Run("redis failure still updates in-memory token", func(t *testing.T) {
 		fr := newFakeRedis()
 		fr.getErr = errors.New("redis down")
-		w := NewWatcher(nil, "conduit", "users", false, "old-token", nil, fr)
+		w := NewWatcher(nil, "conduit", "users", false, "old-token", nil, fr, discardLogger)
 		w.ctx = context.Background()
 
 		w.persistTerminalToken(tokenDoc)
@@ -1468,7 +1471,7 @@ func TestPersistTerminalToken(t *testing.T) {
 	})
 
 	t.Run("nil redis client is tolerated", func(t *testing.T) {
-		w := NewWatcher(nil, "conduit", "users", false, "old-token", nil, nil)
+		w := NewWatcher(nil, "conduit", "users", false, "old-token", nil, nil, discardLogger)
 		w.ctx = context.Background()
 
 		w.persistTerminalToken(tokenDoc)
@@ -1478,7 +1481,7 @@ func TestPersistTerminalToken(t *testing.T) {
 
 	t.Run("nil token is a no-op", func(t *testing.T) {
 		fr := newFakeRedis()
-		w := NewWatcher(nil, "conduit", "users", false, "old-token", nil, fr)
+		w := NewWatcher(nil, "conduit", "users", false, "old-token", nil, fr, discardLogger)
 		w.ctx = context.Background()
 
 		w.persistTerminalToken(nil)

@@ -53,9 +53,10 @@ type EventBridgeTransport struct {
 }
 
 // NewEventBridge builds an EventBridge transport from its spec.
-func NewEventBridge(ctx context.Context, spec EventBridgeSpec) dispatch.Transport {
+func NewEventBridge(ctx context.Context, spec EventBridgeSpec, logger *log.Logger) dispatch.Transport {
+	logger = nilGuard(logger)
 	if spec.EventBusName == "" {
-		log.Printf("EventBridge transport requires an eventBusName")
+		logger.Printf("EventBridge transport requires an eventBusName")
 		return nil
 	}
 
@@ -73,7 +74,7 @@ func NewEventBridge(ctx context.Context, spec EventBridgeSpec) dispatch.Transpor
 	// succeeds even with no credentials).
 	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
-		log.Printf("EventBridge transport: failed to load AWS config: %v", err)
+		logger.Printf("EventBridge transport: failed to load AWS config: %v", err)
 		return nil
 	}
 
@@ -82,7 +83,7 @@ func NewEventBridge(ctx context.Context, spec EventBridgeSpec) dispatch.Transpor
 	// or the compute environment). Empty means the operator did
 	// not configure one anywhere, so registration fails fast with guidance.
 	if cfg.Region == "" {
-		log.Printf("EventBridge transport: no AWS region resolved; set AWS_REGION or configure the region in the shared AWS config / compute environment")
+		logger.Printf("EventBridge transport: no AWS region resolved; set AWS_REGION or configure the region in the shared AWS config / compute environment")
 		return nil
 	}
 
@@ -90,7 +91,7 @@ func NewEventBridge(ctx context.Context, spec EventBridgeSpec) dispatch.Transpor
 	// without any usable credentials fails fast here instead of at PutEvents
 	// time with an opaque signing error.
 	if _, err := cfg.Credentials.Retrieve(ctx); err != nil {
-		log.Printf("EventBridge transport: no AWS credentials resolved: %v; provide credentials via the AWS SDK default chain (e.g. AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN, shared credentials file, or an IAM role)", err)
+		logger.Printf("EventBridge transport: no AWS credentials resolved: %v; provide credentials via the AWS SDK default chain (e.g. AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN, shared credentials file, or an IAM role)", err)
 		return nil
 	}
 
@@ -174,14 +175,15 @@ func firstFailedEntry(entries []types.PutEventsResultEntry) string {
 func (t *EventBridgeTransport) Close() error { return nil }
 
 // buildEventBridge decodes a raw spec and builds an EventBridge transport.
-func buildEventBridge(ctx context.Context, collectionName string, t collections.Type, rawSpec map[string]interface{}) dispatch.Transport {
+func buildEventBridge(ctx context.Context, collectionName string, t collections.Type, rawSpec map[string]interface{}, logger *log.Logger) dispatch.Transport {
+	logger = nilGuard(logger)
 	var spec EventBridgeSpec
 	if err := decodeSpec(rawSpec, &spec); err != nil {
-		log.Printf("Failed to decode EventBridge transport spec for %s: %v", collectionName, err)
+		logger.Printf("Failed to decode EventBridge transport spec for %s: %v", collectionName, err)
 		return nil
 	}
 
-	return NewEventBridge(ctx, spec)
+	return NewEventBridge(ctx, spec, logger)
 }
 
 func init() {

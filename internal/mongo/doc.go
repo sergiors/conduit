@@ -14,10 +14,11 @@
 //
 // Usage:
 //
+//	logger := log.New(os.Stdout, "", log.LstdFlags)
 //	client, err := mongo.NewClient(ctx, mongo.Config{
 //	    URI:      "mongodb://localhost:27017/?replicaSet=rs0",
 //	    Database: "conduit",
-//	})
+//	}, logger)
 //	if err != nil {
 //	    log.Fatal(err)
 //	}

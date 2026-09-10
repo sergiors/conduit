@@ -3,6 +3,8 @@ package retry
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"log"
 	"testing"
 	"time"
 
@@ -14,6 +16,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"
 )
+
+var discardLogger = log.New(io.Discard, "", 0)
 
 func TestDefaultConfig(t *testing.T) {
 	t.Run("returns sensible defaults", func(t *testing.T) {
@@ -29,7 +33,7 @@ func TestDefaultConfig(t *testing.T) {
 func TestProcessorCreation(t *testing.T) {
 	t.Run("new processor with correct configuration", func(t *testing.T) {
 		cfg := DefaultConfig()
-		processor := NewProcessor(nil, nil, nil, cfg)
+		processor := NewProcessor(nil, nil, nil, cfg, discardLogger)
 
 		assert.NotNil(t, processor)
 		assert.Equal(t, cfg.Interval, processor.interval)
@@ -79,7 +83,7 @@ func TestProcessRetryEvent(t *testing.T) {
 		// Register a mock transport that always succeeds wrapped in a runtime sink.
 		dispatcher.Register("users", dispatch.NewRuntimeSink(collections.Sink{}, &successTransport{}))
 
-		processor := NewProcessor(nil, nil, dispatcher, DefaultConfig())
+		processor := NewProcessor(nil, nil, dispatcher, DefaultConfig(), discardLogger)
 
 		ctx := context.Background()
 		eventData, _ := bson.MarshalExtJSON(streams.StreamRecord{
@@ -102,7 +106,7 @@ func TestProcessRetryEvent(t *testing.T) {
 
 	t.Run("max retries exceeded skips DLQ when dlq store is nil", func(t *testing.T) {
 		dispatcher := dispatch.NewDispatcher()
-		processor := NewProcessor(nil, nil, dispatcher, DefaultConfig())
+		processor := NewProcessor(nil, nil, dispatcher, DefaultConfig(), discardLogger)
 
 		ctx := context.Background()
 		eventData, _ := bson.MarshalExtJSON(streams.StreamRecord{
@@ -145,7 +149,7 @@ func TestRetryEventStructure(t *testing.T) {
 
 func TestProcessorStop(t *testing.T) {
 	t.Run("Stop before Start is safe", func(t *testing.T) {
-		processor := NewProcessor(nil, nil, nil, DefaultConfig())
+		processor := NewProcessor(nil, nil, nil, DefaultConfig(), discardLogger)
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 
@@ -157,7 +161,7 @@ func TestProcessorStop(t *testing.T) {
 		// cancel the loop and wait for it to exit.
 		cfg := DefaultConfig()
 		cfg.Interval = 10 * time.Millisecond
-		processor := NewProcessor(nil, nil, nil, cfg)
+		processor := NewProcessor(nil, nil, nil, cfg, discardLogger)
 
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
@@ -167,7 +171,7 @@ func TestProcessorStop(t *testing.T) {
 	})
 
 	t.Run("Stop is idempotent", func(t *testing.T) {
-		processor := NewProcessor(nil, nil, nil, DefaultConfig())
+		processor := NewProcessor(nil, nil, nil, DefaultConfig(), discardLogger)
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 
@@ -178,7 +182,7 @@ func TestProcessorStop(t *testing.T) {
 	})
 
 	t.Run("Start is idempotent", func(t *testing.T) {
-		processor := NewProcessor(nil, nil, nil, DefaultConfig())
+		processor := NewProcessor(nil, nil, nil, DefaultConfig(), discardLogger)
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 
@@ -195,7 +199,7 @@ func TestProcessorLoopPanicIsolation(t *testing.T) {
 	// ProtectErr wrapper recovers it and the loop continues until Stop.
 	cfg := DefaultConfig()
 	cfg.Interval = 10 * time.Millisecond
-	processor := NewProcessor(nil, nil, nil, cfg)
+	processor := NewProcessor(nil, nil, nil, cfg, discardLogger)
 	// Register a collection so processQueue actually reaches DequeueRetry on
 	// the nil redisClient, which panics.
 	processor.RegisterCollection("users")
@@ -356,7 +360,7 @@ func TestProcessRetryEventDispatchFailure(t *testing.T) {
 		original := makeEvent(0, 5, time.Now().Add(-time.Second))
 		store.queue["users"] = []redis.RetryEvent{original}
 
-		p := NewProcessor(store, nil, newDispatcher(), DefaultConfig())
+		p := NewProcessor(store, nil, newDispatcher(), DefaultConfig(), discardLogger)
 		p.processRetryEvent(ctx, collectionName, original)
 
 		// Old event must still be present, unmodified.
@@ -372,7 +376,7 @@ func TestProcessRetryEventDispatchFailure(t *testing.T) {
 		original := makeEvent(0, 5, time.Now().Add(-time.Second))
 		store.queue["users"] = []redis.RetryEvent{original}
 
-		p := NewProcessor(store, nil, newDispatcher(), DefaultConfig())
+		p := NewProcessor(store, nil, newDispatcher(), DefaultConfig(), discardLogger)
 		p.processRetryEvent(ctx, collectionName, original)
 
 		// Exactly one member remains, with RetryCount incremented and a new
@@ -393,7 +397,7 @@ func TestProcessRetryEventDispatchFailure(t *testing.T) {
 		original := makeEvent(0, 5, time.Now().Add(-time.Second))
 		store.queue["users"] = []redis.RetryEvent{original}
 
-		p := NewProcessor(store, nil, newDispatcher(), DefaultConfig())
+		p := NewProcessor(store, nil, newDispatcher(), DefaultConfig(), discardLogger)
 		p.processRetryEvent(ctx, collectionName, original)
 
 		// The updated event must be enqueued (nothing lost); remove(old) failing
@@ -421,7 +425,7 @@ func TestProcessRetryEventDispatchFailure(t *testing.T) {
 		dispatcher := dispatch.NewDispatcher()
 		dispatcher.Register("users", dispatch.NewRuntimeSink(collections.Sink{}, &successTransport{}))
 
-		p := NewProcessor(store, nil, dispatcher, DefaultConfig())
+		p := NewProcessor(store, nil, dispatcher, DefaultConfig(), discardLogger)
 		p.processRetryEvent(ctx, collectionName, original)
 
 		// Success: the event is settled/delivered so it must be removed from
@@ -460,7 +464,7 @@ func TestProcessRetryEventMaxRetries(t *testing.T) {
 		event := makeEvent(5, 5)
 		store.queue["users"] = []redis.RetryEvent{event}
 
-		p := NewProcessor(store, dlqStore, newDispatcher(), DefaultConfig())
+		p := NewProcessor(store, dlqStore, newDispatcher(), DefaultConfig(), discardLogger)
 		p.processRetryEvent(ctx, collectionName, event)
 
 		// DLQ was attempted, but the event must NOT be removed.
@@ -475,7 +479,7 @@ func TestProcessRetryEventMaxRetries(t *testing.T) {
 		event := makeEvent(5, 5)
 		store.queue["users"] = []redis.RetryEvent{event}
 
-		p := NewProcessor(store, dlqStore, newDispatcher(), DefaultConfig())
+		p := NewProcessor(store, dlqStore, newDispatcher(), DefaultConfig(), discardLogger)
 		p.processRetryEvent(ctx, collectionName, event)
 
 		assert.Equal(t, 1, dlqStore.persistCalls)
@@ -495,7 +499,7 @@ func TestProcessRetryEventMaxRetries(t *testing.T) {
 		event := makeEvent(5, 5)
 		store.queue["users"] = []redis.RetryEvent{event}
 
-		p := NewProcessor(store, dlqStore, newDispatcher(), DefaultConfig())
+		p := NewProcessor(store, dlqStore, newDispatcher(), DefaultConfig(), discardLogger)
 		p.processRetryEvent(ctx, collectionName, event)
 
 		// The DLQ entry is durably persisted; the failed removal leaves a stale

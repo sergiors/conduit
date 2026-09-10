@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"os"
 	"time"
 
 	"github.com/sergiors/conduit/internal/api"
@@ -13,7 +14,9 @@ import (
 )
 
 func main() {
-	cfg := config.Load()
+	logger := log.New(os.Stdout, "", log.LstdFlags)
+
+	cfg := config.Load(logger)
 
 	// Use a generous timeout for startup: MongoDB may still be electing a PRIMARY
 	// after a restart, and NewClient waits for it before returning.
@@ -23,23 +26,23 @@ func main() {
 	mongoClient, err := mongo.NewClient(ctx, mongo.Config{
 		URI:      cfg.MongoDBURI,
 		Database: cfg.MongoDBDatabase,
-	})
+	}, logger)
 	if err != nil {
-		log.Fatalf("Failed to connect to MongoDB: %v", err)
+		logger.Fatalf("Failed to connect to MongoDB: %v", err)
 	}
 	defer mongoClient.Close(context.Background())
 
-	collectionsManager := collections.NewManager(mongoClient.Client, cfg.MongoDBDatabase)
+	collectionsManager := collections.NewManager(mongoClient.Client, cfg.MongoDBDatabase, logger)
 	if err := collectionsManager.CreateIndex(ctx); err != nil {
-		log.Fatalf("Failed to create collection index: %v", err)
+		logger.Fatalf("Failed to create collection index: %v", err)
 	}
 
 	redisClient, err := redis.NewClient(ctx, redis.Config{
 		URI:    cfg.RedisURI,
 		Prefix: "cdc:",
-	})
+	}, logger)
 	if err != nil {
-		log.Fatalf("Failed to connect to Redis: %v", err)
+		logger.Fatalf("Failed to connect to Redis: %v", err)
 	}
 	defer redisClient.Close()
 
@@ -56,8 +59,8 @@ func main() {
 		APIKey:      cfg.APIKey,
 	})
 
-	log.Printf("API server starting on port %s", cfg.Port)
+	logger.Printf("API server starting on port %s", cfg.Port)
 	if err := server.Router().Run(":" + cfg.Port); err != nil {
-		log.Fatalf("Server failed: %v", err)
+		logger.Fatalf("Server failed: %v", err)
 	}
 }

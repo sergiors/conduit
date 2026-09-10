@@ -3,12 +3,22 @@ package redis
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"log"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+var discardLogger = log.New(io.Discard, "", 0)
+
+// newTestClient returns a Client with a discard logger for exercising
+// parseRetryMembers without touching the underlying redis client.
+func newTestClient() *Client {
+	return &Client{logger: discardLogger}
+}
 
 func TestDefaultConfig(t *testing.T) {
 	t.Run("returns empty config (no defaults for connection)", func(t *testing.T) {
@@ -86,7 +96,7 @@ func TestRetryEvent(t *testing.T) {
 
 	t.Run("legacy member without lastError parses with empty LastError", func(t *testing.T) {
 		legacy := `{"id":"users-1","collectionName":"users","eventData":{"id":"1"},"retryCount":1,"maxRetries":5,"nextRetryAt":"2024-01-01T00:00:00Z"}`
-		events, skipped := parseRetryMembers([]string{legacy})
+		events, skipped := newTestClient().parseRetryMembers([]string{legacy})
 		assert.Equal(t, 0, skipped)
 		require.Len(t, events, 1)
 		assert.Equal(t, "", events[0].LastError, "legacy members must parse with empty LastError")
@@ -104,7 +114,7 @@ func TestParseRetryMembers(t *testing.T) {
 			NextRetryAt:    time.Now(),
 		})
 
-		events, skipped := parseRetryMembers([]string{string(valid)})
+		events, skipped := newTestClient().parseRetryMembers([]string{string(valid)})
 		assert.Equal(t, 0, skipped)
 		require.Len(t, events, 1)
 		assert.Equal(t, "users", events[0].CollectionName)
@@ -124,7 +134,7 @@ func TestParseRetryMembers(t *testing.T) {
 		corrupt := "this is not json{{{"
 		members := []string{corrupt, string(valid), corrupt}
 
-		events, skipped := parseRetryMembers(members)
+		events, skipped := newTestClient().parseRetryMembers(members)
 		assert.Equal(t, 2, skipped)
 		require.Len(t, events, 1)
 		assert.Equal(t, "users-1", events[0].ID)
@@ -133,7 +143,7 @@ func TestParseRetryMembers(t *testing.T) {
 
 	t.Run("all corrupt members yields empty result with no error", func(t *testing.T) {
 		members := []string{"not-json", "still-not-json"}
-		events, skipped := parseRetryMembers(members)
+		events, skipped := newTestClient().parseRetryMembers(members)
 		assert.Equal(t, 2, skipped)
 		assert.Empty(t, events)
 	})
@@ -148,7 +158,7 @@ func TestClientIntegration(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	client, err := NewClient(ctx, Config{URI: "redis://localhost:6379"})
+	client, err := NewClient(ctx, Config{URI: "redis://localhost:6379"}, discardLogger)
 	if err != nil {
 		t.Skipf("Redis not available: %v", err)
 	}
@@ -282,7 +292,7 @@ func TestClientCreation(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		client, err := NewClient(ctx, Config{URI: "redis://localhost:6379"})
+		client, err := NewClient(ctx, Config{URI: "redis://localhost:6379"}, discardLogger)
 		if err != nil {
 			t.Skipf("Redis not available: %v", err)
 		}
@@ -295,7 +305,7 @@ func TestClientCreation(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 
-		_, err := NewClient(ctx, Config{URI: "redis://invalid-host:6379"})
+		_, err := NewClient(ctx, Config{URI: "redis://invalid-host:6379"}, discardLogger)
 		assert.Error(t, err)
 	})
 
@@ -303,7 +313,7 @@ func TestClientCreation(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 
-		_, err := NewClient(ctx, Config{})
+		_, err := NewClient(ctx, Config{}, discardLogger)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "URI or Addr must be provided")
 	})

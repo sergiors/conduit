@@ -3,6 +3,7 @@ package mongo
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"time"
 
@@ -33,7 +34,8 @@ type Config struct {
 // The application never creates or modifies replica sets; it only waits for
 // readiness. Replica set topology is managed externally (by MongoDB
 // administrators or operators).
-func NewClient(ctx context.Context, cfg Config) (*Client, error) {
+func NewClient(ctx context.Context, cfg Config, logger *log.Logger) (*Client, error) {
+	logger = nilGuard(logger)
 	if cfg.URI == "" {
 		return nil, fmt.Errorf("MONGODB_URI is required")
 	}
@@ -55,11 +57,11 @@ func NewClient(ctx context.Context, cfg Config) (*Client, error) {
 	// Wait until MongoDB is actually usable before returning. This is what
 	// prevents NotPrimaryOrSecondary failures when MongoDB is still electing a
 	// PRIMARY after a restart.
-	if err := waitForWritablePrimary(ctx, client); err != nil {
+	if err := waitForWritablePrimary(ctx, client, logger); err != nil {
 		client.Disconnect(context.Background())
 		return nil, fmt.Errorf("wait for writable primary: %w", err)
 	}
-	if err := waitForClientReady(ctx, client); err != nil {
+	if err := waitForClientReady(ctx, client, logger); err != nil {
 		client.Disconnect(context.Background())
 		return nil, fmt.Errorf("wait for mongo client: %w", err)
 	}
@@ -85,7 +87,8 @@ func (c *Client) Close(ctx context.Context) error {
 // waitForWritablePrimary polls the hello command until the node reports itself
 // as the writable PRIMARY. Transient errors while the node is recovering or
 // electing a PRIMARY are retried until the context is done.
-func waitForWritablePrimary(ctx context.Context, client *mongo.Client) error {
+func waitForWritablePrimary(ctx context.Context, client *mongo.Client, logger *log.Logger) error {
+	logger = nilGuard(logger)
 	helloCmd := bson.D{{Key: "hello", Value: 1}}
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
@@ -98,7 +101,7 @@ func waitForWritablePrimary(ctx context.Context, client *mongo.Client) error {
 		err := client.Database("admin").RunCommand(ctx, helloCmd).Decode(&hello)
 
 		if err == nil && hello.OK == 1 && hello.IsWritablePrimary {
-			log.Println("MongoDB node is writable PRIMARY")
+			logger.Println("MongoDB node is writable PRIMARY")
 			return nil
 		}
 
@@ -113,13 +116,14 @@ func waitForWritablePrimary(ctx context.Context, client *mongo.Client) error {
 // waitForClientReady pings the client until it can reach a server, ensuring the
 // replica-set-mode client has discovered the PRIMARY. Transient errors are
 // retried until the context is done.
-func waitForClientReady(ctx context.Context, client *mongo.Client) error {
+func waitForClientReady(ctx context.Context, client *mongo.Client, logger *log.Logger) error {
+	logger = nilGuard(logger)
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
 	for {
 		if err := client.Ping(ctx, nil); err == nil {
-			log.Println("MongoDB client ready")
+			logger.Println("MongoDB client ready")
 			return nil
 		}
 
@@ -129,4 +133,13 @@ func waitForClientReady(ctx context.Context, client *mongo.Client) error {
 		case <-ticker.C:
 		}
 	}
+}
+
+// nilGuard returns a discard logger when logger is nil so a nil *log.Logger
+// never panics. It is the uniform nil-logger policy across the codebase.
+func nilGuard(logger *log.Logger) *log.Logger {
+	if logger == nil {
+		return log.New(io.Discard, "", 0)
+	}
+	return logger
 }

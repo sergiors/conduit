@@ -35,12 +35,14 @@ type HTTPTransport struct {
 	HTTPSpec
 
 	client *http.Client
+	logger *log.Logger
 }
 
 // NewHTTP builds an HTTP transport from its spec.
-func NewHTTP(ctx context.Context, spec HTTPSpec) dispatch.Transport {
+func NewHTTP(ctx context.Context, spec HTTPSpec, logger *log.Logger) dispatch.Transport {
+	logger = nilGuard(logger)
 	if spec.Endpoint == "" {
-		log.Printf("HTTP transport requires an endpoint")
+		logger.Printf("HTTP transport requires an endpoint")
 		return nil
 	}
 
@@ -59,6 +61,7 @@ func NewHTTP(ctx context.Context, spec HTTPSpec) dispatch.Transport {
 				return fmt.Errorf("redirect to %s rejected: events must be delivered only to the configured endpoint", req.URL)
 			},
 		},
+		logger: logger,
 	}
 }
 
@@ -96,7 +99,7 @@ func (t *HTTPTransport) Send(ctx context.Context, record streams.StreamRecord) e
 	// consumed returns io.EOF — neither indicates a delivery problem, so ignore
 	// all drain errors. The body is never read into memory.
 	if _, err := io.CopyN(io.Discard, resp.Body, maxDrainBytes); err != nil && !errors.Is(err, io.EOF) {
-		log.Printf("HTTP transport: drain response body: %v", err)
+		t.logger.Printf("HTTP transport: drain response body: %v", err)
 	}
 	return nil
 }
@@ -104,13 +107,14 @@ func (t *HTTPTransport) Send(ctx context.Context, record streams.StreamRecord) e
 func (t *HTTPTransport) Close() error { return nil }
 
 func init() {
-	dispatch.RegisterTransport(collections.SinkTypeHTTP, func(ctx context.Context, collectionName string, t collections.Type, rawSpec map[string]interface{}) dispatch.Transport {
+	dispatch.RegisterTransport(collections.SinkTypeHTTP, func(ctx context.Context, collectionName string, t collections.Type, rawSpec map[string]interface{}, logger *log.Logger) dispatch.Transport {
+		logger = nilGuard(logger)
 		var spec HTTPSpec
 		if err := decodeSpec(rawSpec, &spec); err != nil {
-			log.Printf("Failed to decode HTTP transport spec for %s: %v", collectionName, err)
+			logger.Printf("Failed to decode HTTP transport spec for %s: %v", collectionName, err)
 			return nil
 		}
 
-		return NewHTTP(ctx, spec)
+		return NewHTTP(ctx, spec, logger)
 	})
 }

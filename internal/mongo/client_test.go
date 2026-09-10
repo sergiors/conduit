@@ -2,6 +2,8 @@ package mongo
 
 import (
 	"context"
+	"io"
+	"log"
 	"testing"
 	"time"
 
@@ -9,6 +11,8 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
+
+var discardLogger = log.New(io.Discard, "", 0)
 
 func TestConfig(t *testing.T) {
 	t.Run("default configuration", func(t *testing.T) {
@@ -41,7 +45,7 @@ func TestClientCreation(t *testing.T) {
 		_, err := NewClient(ctx, Config{
 			URI:      "mongodb://invalid-host:27017",
 			Database: "test",
-		})
+		}, discardLogger)
 
 		assert.Error(t, err, "should fail with invalid host")
 	})
@@ -60,7 +64,7 @@ func TestClientIntegration(t *testing.T) {
 		client, err := NewClient(ctx, Config{
 			URI:      "mongodb://localhost:27017/?replicaSet=rs0",
 			Database: "conduit",
-		})
+		}, discardLogger)
 		if err != nil {
 			t.Skipf("MongoDB not available: %v", err)
 		}
@@ -77,7 +81,7 @@ func TestClientIntegration(t *testing.T) {
 		client, err := NewClient(ctx, Config{
 			URI:      "mongodb://localhost:27017/?replicaSet=rs0",
 			Database: "conduit",
-		})
+		}, discardLogger)
 		if err != nil {
 			t.Skipf("MongoDB not available: %v", err)
 		}

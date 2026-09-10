@@ -103,7 +103,8 @@ func mutableFieldsEqual(a, b collections.Sink) bool {
 }
 
 // ApplyChanges applies the reconciliation changes to a dispatcher.
-func (r *Reconciliation) ApplyChanges(ctx context.Context, collectionName string, disp dispatcher) {
+func (r *Reconciliation) ApplyChanges(ctx context.Context, logger *log.Logger, collectionName string, disp dispatcher) {
+	logger = nilGuard(logger)
 	for _, change := range r.Changes {
 		switch change.Type {
 		case ChangeRemoved:
@@ -113,12 +114,12 @@ func (r *Reconciliation) ApplyChanges(ctx context.Context, collectionName string
 			// transport; fall back to a full register if the sink is not
 			// registered (e.g. created while the watcher was stopped).
 			if !disp.Update(collectionName, change.Sink) {
-				transport := dispatch.BuildTransport(ctx, collectionName, change.Sink.Type, change.Sink.Spec)
+				transport := dispatch.BuildTransport(ctx, collectionName, change.Sink.Type, change.Sink.Spec, logger)
 				sink := dispatch.NewRuntimeSink(change.Sink, transport)
 				disp.Register(collectionName, sink)
 			}
 		case ChangeAdded:
-			transport := dispatch.BuildTransport(ctx, collectionName, change.Sink.Type, change.Sink.Spec)
+			transport := dispatch.BuildTransport(ctx, collectionName, change.Sink.Type, change.Sink.Spec, logger)
 			sink := dispatch.NewRuntimeSink(change.Sink, transport)
 			disp.Register(collectionName, sink)
 		}
@@ -133,15 +134,16 @@ type dispatcher interface {
 }
 
 // LogChanges logs the changes at the appropriate level.
-func (r *Reconciliation) LogChanges(collectionName string) {
+func (r *Reconciliation) LogChanges(logger *log.Logger, collectionName string) {
+	logger = nilGuard(logger)
 	for _, change := range r.Changes {
 		switch change.Type {
 		case ChangeAdded:
-			log.Printf("Added sink %s for collection %s", change.Sink.ID, collectionName)
+			logger.Printf("Added sink %s for collection %s", change.Sink.ID, collectionName)
 		case ChangeRemoved:
-			log.Printf("Removed sink %s for collection %s", change.Sink.ID, collectionName)
+			logger.Printf("Removed sink %s for collection %s", change.Sink.ID, collectionName)
 		case ChangeUpdated:
-			log.Printf("Updated sink %s for collection %s", change.Sink.ID, collectionName)
+			logger.Printf("Updated sink %s for collection %s", change.Sink.ID, collectionName)
 		}
 	}
 }

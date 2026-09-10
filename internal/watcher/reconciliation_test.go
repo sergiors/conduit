@@ -133,7 +133,7 @@ func TestReconciliationLogChanges(t *testing.T) {
 			},
 		}
 		// Just verify it doesn't panic
-		rec.LogChanges("users")
+		rec.LogChanges(discardLogger, "users")
 	})
 
 	t.Run("log removed changes", func(t *testing.T) {
@@ -142,7 +142,7 @@ func TestReconciliationLogChanges(t *testing.T) {
 				{Type: ChangeRemoved, Sink: collections.Sink{ID: "s1"}},
 			},
 		}
-		rec.LogChanges("users")
+		rec.LogChanges(discardLogger, "users")
 	})
 
 	t.Run("log updated changes", func(t *testing.T) {
@@ -151,7 +151,7 @@ func TestReconciliationLogChanges(t *testing.T) {
 				{Type: ChangeUpdated, Sink: collections.Sink{ID: "s1"}},
 			},
 		}
-		rec.LogChanges("users")
+		rec.LogChanges(discardLogger, "users")
 	})
 }
 
@@ -174,7 +174,7 @@ func TestReconciliationApplyChangesUpdate(t *testing.T) {
 		},
 	}
 
-	rec.ApplyChanges(ctx, "users", disp)
+	rec.ApplyChanges(ctx, discardLogger, "users", disp)
 
 	require.Len(t, disp.updated["users"], 1)
 	assert.Equal(t, update, disp.updated["users"][0], "Update should receive the desired sink config")
@@ -205,7 +205,7 @@ func TestReconciliationApplyChangesUpdateFallbackRegister(t *testing.T) {
 		},
 	}
 
-	rec.ApplyChanges(ctx, "users", disp)
+	rec.ApplyChanges(ctx, discardLogger, "users", disp)
 
 	require.Len(t, disp.updated["users"], 1, "Update should still be attempted first")
 	assert.Equal(t, []string{"s1"}, disp.sinks["users"], "fallback should register the sink")

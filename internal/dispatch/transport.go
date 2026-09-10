@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 
 	"github.com/sergiors/conduit/internal/collections"
@@ -28,12 +29,19 @@ type Transport interface {
 // returning nil if the spec is invalid or unsupported at runtime. The collection
 // name may feed transport-specific defaults (e.g. a Meilisearch index name);
 // event types, filters and sink identity must not be handled here.
-type TransportBuilder func(ctx context.Context, collectionName string, t collections.Type, spec map[string]interface{}) Transport
+type TransportBuilder func(ctx context.Context, collectionName string, t collections.Type, spec map[string]interface{}, logger *log.Logger) Transport
 
 var transportBuilders = make(map[collections.Type]TransportBuilder)
 
 // RegisterTransport registers a builder function for a transport type.
 // Must be called during init() of the transport package.
+//
+// NOTE: the two log.Printf calls here intentionally stay on the package-global
+// logger. RegisterTransport runs during package init(), before any process-level
+// logger exists (the root logger is created in cmd/api and cmd/worker main()).
+// There is no injected logger available at init time, so the registry keeps its
+// global logging; this is the one documented exception to the injected-logger
+// policy.
 func RegisterTransport(t collections.Type, builder TransportBuilder) {
 	if builder == nil {
 		log.Printf("Attempted to register nil builder for type: %s", t)
@@ -52,17 +60,18 @@ func RegisterTransport(t collections.Type, builder TransportBuilder) {
 // erroring transport. The sink still participates in dispatch and Send fails
 // every matching event, so the watcher treats it as unsettled and retries; a nil
 // return is never produced for a configured sink.
-func BuildTransport(ctx context.Context, collectionName string, t collections.Type, spec map[string]interface{}) Transport {
+func BuildTransport(ctx context.Context, collectionName string, t collections.Type, spec map[string]interface{}, logger *log.Logger) Transport {
+	logger = nilGuard(logger)
 	builder, exists := transportBuilders[t]
 	if !exists {
 		err := fmt.Errorf("no transport registered for sink type %q (collection %s)", t, collectionName)
-		log.Print(err)
+		logger.Print(err)
 		return newUnavailableTransport(err)
 	}
-	transport := builder(ctx, collectionName, t, spec)
+	transport := builder(ctx, collectionName, t, spec, logger)
 	if transport == nil {
 		err := fmt.Errorf("transport builder rejected spec for sink type %q (collection %s)", t, collectionName)
-		log.Print(err)
+		logger.Print(err)
 		return newUnavailableTransport(err)
 	}
 	return transport
@@ -96,4 +105,13 @@ func RegisteredTransportTypes() []collections.Type {
 		types = append(types, t)
 	}
 	return types
+}
+
+// nilGuard returns a discard logger when logger is nil so a nil *log.Logger
+// never panics. It is the uniform nil-logger policy across the codebase.
+func nilGuard(logger *log.Logger) *log.Logger {
+	if logger == nil {
+		return log.New(io.Discard, "", 0)
+	}
+	return logger
 }

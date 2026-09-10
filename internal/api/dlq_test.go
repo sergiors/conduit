@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -15,6 +17,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"
 )
+
+var discardLogger = log.New(io.Discard, "", 0)
 
 // newDLQTestServer connects to MongoDB and returns a fully wired Server plus
 // the underlying collections.Manager and mongo client. It skips the test if
@@ -31,7 +35,7 @@ func newDLQTestServer(t *testing.T) (*Server, *collections.Manager, *mongo.Clien
 	client, err := mongo.NewClient(ctx, mongo.Config{
 		URI:      localMongoURI,
 		Database: "conduit_test_dlq_api",
-	})
+	}, discardLogger)
 	if err != nil {
 		t.Skipf("MongoDB not available: %v", err)
 	}
@@ -39,7 +43,7 @@ func newDLQTestServer(t *testing.T) (*Server, *collections.Manager, *mongo.Clien
 
 	require.NoError(t, client.Client.Database("conduit_test_dlq_api").Drop(ctx))
 
-	manager := collections.NewManager(client.Client, "conduit_test_dlq_api")
+	manager := collections.NewManager(client.Client, "conduit_test_dlq_api", discardLogger)
 	require.NoError(t, manager.CreateIndex(ctx))
 
 	server := New(Dependencies{

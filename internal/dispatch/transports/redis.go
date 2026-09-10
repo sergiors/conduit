@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"time"
 
@@ -41,19 +42,20 @@ type RedisTransport struct {
 }
 
 // NewRedis builds a Redis transport from its spec.
-func NewRedis(ctx context.Context, spec RedisSpec) dispatch.Transport {
+func NewRedis(ctx context.Context, spec RedisSpec, logger *log.Logger) dispatch.Transport {
+	logger = nilGuard(logger)
 	if spec.URL == "" {
-		log.Printf("Redis transport requires a url")
+		logger.Printf("Redis transport requires a url")
 		return nil
 	}
 	if spec.Stream == "" {
-		log.Printf("Redis transport requires a stream")
+		logger.Printf("Redis transport requires a stream")
 		return nil
 	}
 
 	opts, err := redis.ParseURL(spec.URL)
 	if err != nil {
-		log.Printf("Redis transport: invalid url %q: %v", spec.URL, err)
+		logger.Printf("Redis transport: invalid url %q: %v", spec.URL, err)
 		return nil
 	}
 
@@ -105,16 +107,26 @@ func (t *RedisTransport) Close() error {
 // buildRedis decodes a raw spec and builds a Redis transport. Unlike
 // Meilisearch's optional indexName, the stream is required and is never
 // defaulted to the collection name.
-func buildRedis(ctx context.Context, collectionName string, t collections.Type, rawSpec map[string]interface{}) dispatch.Transport {
+func buildRedis(ctx context.Context, collectionName string, t collections.Type, rawSpec map[string]interface{}, logger *log.Logger) dispatch.Transport {
+	logger = nilGuard(logger)
 	var spec RedisSpec
 	if err := decodeSpec(rawSpec, &spec); err != nil {
-		log.Printf("Failed to decode Redis transport spec for %s: %v", collectionName, err)
+		logger.Printf("Failed to decode Redis transport spec for %s: %v", collectionName, err)
 		return nil
 	}
 
-	return NewRedis(ctx, spec)
+	return NewRedis(ctx, spec, logger)
 }
 
 func init() {
 	dispatch.RegisterTransport(collections.SinkTypeRedis, buildRedis)
+}
+
+// nilGuard returns a discard logger when logger is nil so a nil *log.Logger
+// never panics. It is the uniform nil-logger policy across the codebase.
+func nilGuard(logger *log.Logger) *log.Logger {
+	if logger == nil {
+		return log.New(io.Discard, "", 0)
+	}
+	return logger
 }

@@ -33,7 +33,7 @@ func newHTTPTestTransport(t *testing.T, handler http.Handler) dispatch.Transport
 	ts := httptest.NewServer(handler)
 	t.Cleanup(ts.Close)
 
-	tr := NewHTTP(context.Background(), HTTPSpec{Endpoint: ts.URL})
+	tr := NewHTTP(context.Background(), HTTPSpec{Endpoint: ts.URL}, discardLogger)
 	require.NotNil(t, tr)
 	return tr
 }

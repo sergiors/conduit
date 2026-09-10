@@ -106,7 +106,7 @@ func newMeiliTransport(t *testing.T) (*MeilisearchTransport, *meiliServer) {
 	ts := httptest.NewServer(srv.handler())
 	t.Cleanup(ts.Close)
 
-	tr := NewMeilisearch(context.Background(), MeilisearchSpec{Host: ts.URL, IndexName: "movies"})
+	tr := NewMeilisearch(context.Background(), MeilisearchSpec{Host: ts.URL, IndexName: "movies"}, discardLogger)
 	require.NotNil(t, tr)
 	return tr.(*MeilisearchTransport), srv
 }
@@ -269,7 +269,7 @@ func TestMeilisearchSendFailedTask(t *testing.T) {
 	ts := httptest.NewServer(srv.handler())
 	defer ts.Close()
 
-	tr := NewMeilisearch(context.Background(), MeilisearchSpec{Host: ts.URL, IndexName: "movies"})
+	tr := NewMeilisearch(context.Background(), MeilisearchSpec{Host: ts.URL, IndexName: "movies"}, discardLogger)
 	require.NotNil(t, tr)
 
 	err := tr.Send(context.Background(), streams.StreamRecord{
@@ -290,7 +290,7 @@ func TestMeilisearchSendNon2xx(t *testing.T) {
 	ts := httptest.NewServer(srv.handler())
 	defer ts.Close()
 
-	tr := NewMeilisearch(context.Background(), MeilisearchSpec{Host: ts.URL, IndexName: "movies"})
+	tr := NewMeilisearch(context.Background(), MeilisearchSpec{Host: ts.URL, IndexName: "movies"}, discardLogger)
 	require.NotNil(t, tr)
 
 	err := tr.Send(context.Background(), streams.StreamRecord{
@@ -310,7 +310,7 @@ func TestMeilisearchSendRequestError(t *testing.T) {
 	serverURL := ts.URL
 	ts.Close()
 
-	tr := NewMeilisearch(context.Background(), MeilisearchSpec{Host: serverURL, IndexName: "movies"})
+	tr := NewMeilisearch(context.Background(), MeilisearchSpec{Host: serverURL, IndexName: "movies"}, discardLogger)
 	require.NotNil(t, tr)
 
 	err := tr.Send(context.Background(), streams.StreamRecord{
@@ -338,7 +338,7 @@ func TestMeilisearchEnqueueTimeout(t *testing.T) {
 	defer ts.Close()
 	defer close(block)
 
-	tr := NewMeilisearch(context.Background(), MeilisearchSpec{Host: ts.URL, IndexName: "movies"})
+	tr := NewMeilisearch(context.Background(), MeilisearchSpec{Host: ts.URL, IndexName: "movies"}, discardLogger)
 	require.NotNil(t, tr)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
@@ -369,7 +369,7 @@ func TestMeilisearchErrorContext(t *testing.T) {
 	ts := httptest.NewServer(srv.handler())
 	defer ts.Close()
 
-	tr := NewMeilisearch(context.Background(), MeilisearchSpec{Host: ts.URL, IndexName: "movies"})
+	tr := NewMeilisearch(context.Background(), MeilisearchSpec{Host: ts.URL, IndexName: "movies"}, discardLogger)
 	require.NotNil(t, tr)
 
 	err := tr.Send(context.Background(), streams.StreamRecord{
@@ -422,7 +422,7 @@ func TestMeilisearchBuilder(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			transport := buildMeilisearch(context.Background(), "movies", collections.SinkTypeMeilisearch, tt.spec)
+			transport := buildMeilisearch(context.Background(), "movies", collections.SinkTypeMeilisearch, tt.spec, discardLogger)
 			if tt.wantNil {
 				assert.Nil(t, transport)
 			} else {
@@ -433,7 +433,7 @@ func TestMeilisearchBuilder(t *testing.T) {
 }
 
 func TestMeilisearchIndexNameDefault(t *testing.T) {
-	transport := buildMeilisearch(context.Background(), "movies", collections.SinkTypeMeilisearch, map[string]interface{}{"host": "http://localhost:7700"})
+	transport := buildMeilisearch(context.Background(), "movies", collections.SinkTypeMeilisearch, map[string]interface{}{"host": "http://localhost:7700"}, discardLogger)
 	require.NotNil(t, transport)
 	mt, ok := transport.(*MeilisearchTransport)
 	require.True(t, ok)

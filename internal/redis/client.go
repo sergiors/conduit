@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 // Client wraps Redis client with CDC-specific operations
 type Client struct {
 	client *redis.Client
+	logger *log.Logger
 }
 
 // Config holds Redis connection configuration
@@ -38,7 +40,8 @@ func DefaultConfig() Config {
 
 // NewClient creates a new Redis client
 // Supports both URI (DSN) and separate Addr/Password configurations
-func NewClient(ctx context.Context, cfg Config) (*Client, error) {
+func NewClient(ctx context.Context, cfg Config, logger *log.Logger) (*Client, error) {
+	logger = nilGuard(logger)
 	var client *redis.Client
 
 	if cfg.URI != "" {
@@ -66,6 +69,7 @@ func NewClient(ctx context.Context, cfg Config) (*Client, error) {
 
 	return &Client{
 		client: client,
+		logger: logger,
 	}, nil
 }
 
@@ -198,7 +202,7 @@ func (c *Client) DequeueRetry(ctx context.Context, collectionName string, limit 
 		return nil, fmt.Errorf("dequeue retry: %w", err)
 	}
 
-	events, _ := parseRetryMembers(members)
+	events, _ := c.parseRetryMembers(members)
 	return events, nil
 }
 
@@ -215,13 +219,14 @@ func (c *Client) DequeueRetry(ctx context.Context, collectionName string, limit 
 // to the caller, which re-parses the record and removes members it cannot
 // re-dispatch (see retry.Processor.processRetryEvent's parse-failure branch),
 // so data problems are handled in one place.
-func parseRetryMembers(members []string) ([]RetryEvent, int) {
+func (c *Client) parseRetryMembers(members []string) ([]RetryEvent, int) {
+	logger := nilGuard(c.logger)
 	events := make([]RetryEvent, 0, len(members))
 	skipped := 0
 	for _, member := range members {
 		var event RetryEvent
 		if err := json.Unmarshal([]byte(member), &event); err != nil {
-			log.Printf("skipping unparseable retry event member: %v", err)
+			logger.Printf("skipping unparseable retry event member: %v", err)
 			skipped++
 			continue
 		}
@@ -273,4 +278,13 @@ func (c *Client) SubscribeConfigChanges(ctx context.Context) (*redis.PubSub, err
 	}
 
 	return pubsub, nil
+}
+
+// nilGuard returns a discard logger when logger is nil so a nil *log.Logger
+// never panics. It is the uniform nil-logger policy across the codebase.
+func nilGuard(logger *log.Logger) *log.Logger {
+	if logger == nil {
+		return log.New(io.Discard, "", 0)
+	}
+	return logger
 }

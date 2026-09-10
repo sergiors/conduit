@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"time"
 
@@ -38,6 +39,7 @@ type Manager struct {
 	collection *mongo.Collection
 	sinks      *mongo.Collection
 	dlq        *mongo.Collection
+	logger     *log.Logger
 
 	// OnPublish is an optional hook invoked after any successful configuration
 	// mutation (collection created or deleted, stream/TTL enabled or disabled,
@@ -60,13 +62,15 @@ type Manager struct {
 }
 
 // NewManager creates a new collection manager
-func NewManager(client *mongo.Client, database string) *Manager {
+func NewManager(client *mongo.Client, database string, logger *log.Logger) *Manager {
+	logger = nilGuard(logger)
 	return &Manager{
 		client:     client,
 		database:   database,
 		collection: client.Database(database).Collection("config.collections"),
 		sinks:      client.Database(database).Collection("config.sinks"),
 		dlq:        client.Database(database).Collection(DLQCollectionName),
+		logger:     logger,
 	}
 }
 
@@ -80,7 +84,7 @@ func (m *Manager) notifyPublish(ctx context.Context, name string) {
 		return
 	}
 	if err := m.OnPublish(ctx, name); err != nil {
-		log.Printf("failed to publish config change for %s: %v", name, err)
+		m.logger.Printf("failed to publish config change for %s: %v", name, err)
 	}
 }
 
@@ -95,7 +99,7 @@ func (m *Manager) purgeState(ctx context.Context, name string) {
 	purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	if err := m.OnPurge(purgeCtx, name); err != nil {
-		log.Printf("failed to purge CDC state after deleting collection %s: %v", name, err)
+		m.logger.Printf("failed to purge CDC state after deleting collection %s: %v", name, err)
 	}
 }
 
@@ -402,4 +406,13 @@ func (m *Manager) Delete(ctx context.Context, name string) error {
 	m.notifyPublish(ctx, name)
 
 	return nil
+}
+
+// nilGuard returns a discard logger when logger is nil so a nil *log.Logger
+// never panics. It is the uniform nil-logger policy across the codebase.
+func nilGuard(logger *log.Logger) *log.Logger {
+	if logger == nil {
+		return log.New(io.Discard, "", 0)
+	}
+	return logger
 }

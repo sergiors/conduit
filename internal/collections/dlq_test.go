@@ -2,6 +2,8 @@ package collections
 
 import (
 	"context"
+	"io"
+	"log"
 	"testing"
 	"time"
 
@@ -11,6 +13,8 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
+
+var discardLogger = log.New(io.Discard, "", 0)
 
 // newTestDLQManager connects to MongoDB and returns a Manager whose DLQ is
 // backed by a dedicated test database. It skips the test if MongoDB is not
@@ -33,7 +37,7 @@ func newTestDLQManager(t *testing.T) (*Manager, *mongo.Client, context.Context) 
 	// Drop any leftover state from a previous run so the test is idempotent.
 	require.NoError(t, client.Database("conduit_test_dlq").Drop(ctx))
 
-	manager := NewManager(client, "conduit_test_dlq")
+	manager := NewManager(client, "conduit_test_dlq", discardLogger)
 	require.NoError(t, manager.CreateIndex(ctx))
 	return manager, client, ctx
 }

@@ -26,7 +26,8 @@
 //
 // Usage:
 //
-//	client, err := redis.NewClient(ctx, redis.DefaultConfig())
+//	logger := log.New(os.Stdout, "", log.LstdFlags)
+//	client, err := redis.NewClient(ctx, redis.DefaultConfig(), logger)
 //	if err != nil {
 //	    log.Fatal(err)
 //	}

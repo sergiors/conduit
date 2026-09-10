@@ -15,7 +15,8 @@
 //
 // Usage:
 //
-//	processor := retry.NewProcessor(redisClient, collectionsManager, dispatcher, retry.DefaultConfig())
+//	logger := log.New(os.Stdout, "", log.LstdFlags)
+//	processor := retry.NewProcessor(redisClient, collectionsManager, dispatcher, retry.DefaultConfig(), logger)
 //	if err := processor.Start(ctx); err != nil {
 //	    log.Fatal(err)
 //	}
