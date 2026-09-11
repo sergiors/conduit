@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"conduit/internal/apikey"
 	"conduit/internal/collections"
 	"conduit/internal/mongo"
 
@@ -23,12 +24,17 @@ const localMongoURI = "mongodb://localhost:27017/?directConnection=true"
 
 var discardLogger = log.New(io.Discard, "", 0)
 
-// doRequest performs an authenticated request against the server's router.
+// testToken is the plaintext API key created for integration tests. It is set
+// by newMongoTestServer and consumed by doRequest.
+var testToken string
+
+// doRequest performs an authenticated request against the server's router using
+// the test API key token captured at server construction.
 func doRequest(t *testing.T, server *Server, method, path string) *httptest.ResponseRecorder {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	req := httptest.NewRequest(method, path, nil)
-	req.Header.Set("Authorization", "Bearer test-key")
+	req.Header.Set("Authorization", "Bearer "+testToken)
 	rec := httptest.NewRecorder()
 	server.Router().ServeHTTP(rec, req)
 	return rec
@@ -61,10 +67,19 @@ func newMongoTestServer(t *testing.T, database string) (*Server, *collections.Ma
 	manager := collections.NewManager(client.Client, database, discardLogger)
 	require.NoError(t, manager.CreateIndex(ctx))
 
+	apiKeys := apikey.NewManager(client.Client, database, discardLogger)
+	require.NoError(t, apiKeys.CreateIndex(ctx))
+
+	// Create a real persisted API key; doRequest authenticates with its
+	// plaintext secret.
+	_, secret, err := apiKeys.Create(ctx, "test")
+	require.NoError(t, err)
+	testToken = secret
+
 	server := New(Dependencies{
 		Collections: manager,
 		MongoClient: client,
-		APIKey:      "test-key",
+		APIKeys:     apiKeys,
 	})
 
 	return server, manager, client, ctx

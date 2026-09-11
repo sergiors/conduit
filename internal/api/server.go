@@ -6,6 +6,7 @@ import (
 	"log"
 	"time"
 
+	"conduit/internal/apikey"
 	"conduit/internal/collections"
 	"conduit/internal/config"
 	"conduit/internal/mongo"
@@ -18,7 +19,7 @@ import (
 type Dependencies struct {
 	Collections *collections.Manager
 	MongoClient *mongo.Client
-	APIKey      string
+	APIKeys     *apikey.Manager
 }
 
 // Server exposes HTTP endpoints. It contains no business rules; it only binds
@@ -75,6 +76,11 @@ func Run(cfg config.Config, logger *log.Logger) error {
 		return fmt.Errorf("failed to create collection index: %w", err)
 	}
 
+	apiKeys := apikey.NewManager(mongoClient.Client, cfg.MongoDBDatabase, logger)
+	if err := apiKeys.CreateIndex(ctx); err != nil {
+		return fmt.Errorf("failed to create api key index: %w", err)
+	}
+
 	redisClient, err := redis.NewClient(ctx, redis.Config{
 		URI:    cfg.RedisURI,
 		Prefix: "cdc:",
@@ -94,7 +100,7 @@ func Run(cfg config.Config, logger *log.Logger) error {
 	server := New(Dependencies{
 		Collections: collectionsManager,
 		MongoClient: mongoClient,
-		APIKey:      cfg.APIKey,
+		APIKeys:     apiKeys,
 	})
 
 	logger.Printf("API server starting on port %s", cfg.Port)

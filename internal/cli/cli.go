@@ -1,37 +1,37 @@
-// Package cli implements the conduit command-line interface.
+// Package cli implements the conduit command-line interface using
+// github.com/urfave/cli/v3. It wires the executable-level commands (server,
+// worker, health, apikey) to the underlying runtime packages.
 package cli
 
 import (
-	"fmt"
+	"context"
 	"log"
-	"os"
+
+	"github.com/urfave/cli/v3"
 )
 
-const usageText = `Usage:  conduit COMMAND
-
-Commands:
-  server    Start the API server
-  worker    Start the CDC worker
-  health    Check service health
-`
-
-// Run dispatches to the command named by args[0]. With no command (or an
-// unknown one) it prints the usage to stderr and returns an error.
+// Run executes the conduit CLI with the given argument slice (typically
+// os.Args[1:]). It is kept callable from cmd/main.go, which exits 1 and logs the
+// returned error. urfave/cli prints usage errors itself; this only returns
+// execution errors.
+//
+// The command tree is built fresh on each call so the logger is captured by the
+// action closures for the runtime commands (server, worker, health, apikey),
+// keeping their logging behavior identical to the pre-urfave CLI.
 func Run(args []string, logger *log.Logger) error {
-	if len(args) == 0 {
-		fmt.Fprint(os.Stderr, usageText)
-		return fmt.Errorf("no command given")
+	root := &cli.Command{
+		Name:  "conduit",
+		Usage: "Conduit CDC platform",
+		Commands: []*cli.Command{
+			serverCommand(logger),
+			workerCommand(logger),
+			healthCommand(logger),
+			apikeyCommand(logger),
+		},
 	}
-
-	switch args[0] {
-	case "server":
-		return runServer(logger)
-	case "worker":
-		return runWorker(logger)
-	case "health":
-		return runHealth(logger)
-	default:
-		fmt.Fprint(os.Stderr, usageText)
-		return fmt.Errorf("unknown command: %q", args[0])
-	}
+	// urfave/cli interprets osArgs[0] as the root command name. main.go calls
+	// Run(os.Args[1:], logger) (without "conduit"), so prepend the root name to
+	// satisfy cli's dispatch.
+	fullArgs := append([]string{root.Name}, args...)
+	return root.Run(context.Background(), fullArgs)
 }

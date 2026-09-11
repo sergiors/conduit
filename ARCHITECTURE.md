@@ -172,7 +172,7 @@ A collection is the root. Sinks hang off the collection. When streaming is enabl
 
 ### Responsibility
 
-The API layer is the control plane. It accepts HTTP requests, validates their shape, invokes the domain packages, and returns canonical JSON responses. It contains no business rules; all invariants live in `internal/collections`. All `/api/*` routes are protected by bearer-token auth middleware; `/health` is exempt.
+The API layer is the control plane. It accepts HTTP requests, validates their shape, invokes the domain packages, and returns canonical JSON responses. It contains no business rules; all invariants live in `internal/collections`. All `/api/*` routes are protected by bearer-token auth backed by persisted API keys in the `config.apiKeys` collection (`internal/apikey`); `/health` is exempt.
 
 ### Public API
 

@@ -153,7 +153,7 @@ result set:
 Results are sorted by `_id` ascending, so pages are deterministic. Example:
 
 ```bash
-curl -H "Authorization: Bearer $API_KEY" \
+curl -H "Authorization: Bearer sk-..." \
   "http://localhost:8080/api/collections/users/documents?limit=50&skip=100"
 ```
 
@@ -181,7 +181,7 @@ single entry is only returned if it belongs to the requested collection
 (otherwise `404 dlq_entry_not_found`). Example:
 
 ```bash
-curl -H "Authorization: Bearer $API_KEY" \
+curl -H "Authorization: Bearer sk-..." \
   "http://localhost:8080/api/collections/users/dlq?limit=50&skip=100"
 ```
 
@@ -191,15 +191,27 @@ curl -H "Authorization: Bearer $API_KEY" \
 
 ### Authentication
 
-All `/api/*` endpoints require a bearer token:
+All `/api/*` endpoints require a bearer token: an API key. Keys are persisted
+in MongoDB (`config.apiKeys`) and managed with the CLI.
 
 ```bash
-curl -H "Authorization: Bearer $API_KEY" http://localhost:8080/api/collections
+conduit apikey create --name my-key
+# ID    01K...
+# Name  my-key
+# Key   sk-...
+
+# Save this key. It will not be shown again.
 ```
 
-- Send the token as `Authorization: Bearer $API_KEY` on every `/api/*` request.
+- Create a key with `conduit apikey create --name <name>`. The full `sk-...`
+  secret is shown **exactly once** at creation; only a hash is stored, so it
+  cannot be recovered later.
+- List keys with `conduit apikey list`, and revoke one with
+  `conduit apikey revoke --id <id>`.
+- Send the key as `Authorization: Bearer <sk-...>` on every `/api/*` request.
 - `/health` is exempt and requires no token.
-- `API_KEY` is **required**: the API refuses to start without it.
+- A revoked or unknown key is rejected with `401`; the API refuses requests
+  when API key storage is unavailable (fail closed).
 
 ---
 
@@ -354,7 +366,6 @@ MONGODB_URI=mongodb://localhost:27017/?replicaSet=rs0
 MONGODB_DATABASE=conduit
 REDIS_URI=redis://localhost:6379
 PORT=8080
-API_KEY=your-secret-key
 # Optional: bounded by a 30s default; applies to the worker's graceful shutdown.
 # SHUTDOWN_TIMEOUT=45s
 # Optional: only needed for the EventBridge sink. AWS_ACCESS_KEY_ID,

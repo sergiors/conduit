@@ -13,6 +13,8 @@ import (
 	"conduit/internal/config"
 	"conduit/internal/mongo"
 	"conduit/internal/redis"
+
+	"github.com/urfave/cli/v3"
 )
 
 // checkCtx returns a short-lived context for a single dependency health probe.
@@ -20,17 +22,30 @@ func checkCtx() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), 5*time.Second)
 }
 
+// healthCommand returns the "conduit health" command. Behavior (including the
+// tabwriter status table and Load's REDIS_URI requirement) is unchanged from
+// the pre-urfave runHealth.
+func healthCommand(logger *log.Logger) *cli.Command {
+	return &cli.Command{
+		Name:  "health",
+		Usage: "Check service health",
+		Action: func(ctx context.Context, _ *cli.Command) error {
+			return runHealth(logger)
+		},
+	}
+}
+
 // runHealth checks MongoDB and Redis connectivity for the "health" command.
 // Every failing dependency is still checked and reported so the operator sees
 // the full picture, and an error is returned so the CLI exits non-zero on any
 // failure.
 func runHealth(logger *log.Logger) error {
-	cfg := config.LoadHealth(logger)
+	cfg := config.Load(logger)
 
 	// Probe noise (e.g. "MongoDB node is writable PRIMARY" / "MongoDB client
 	// ready") is suppressed so the status table stays the only output beyond the
 	// config-loader warnings. The injected logger is still passed to
-	// config.LoadHealth so environment warnings print.
+	// config.Load so environment warnings print.
 	probeLogger := log.New(io.Discard, "", 0)
 
 	// Each check gets its own short timeout rather than sharing one context, so a

@@ -15,49 +15,23 @@ type Config struct {
 	MongoDBDatabase string
 	RedisURI        string
 	Port            string
-	APIKey          string
 	ShutdownTimeout time.Duration
 }
 
-// Load is the API server's loader. It reads the full application configuration
-// from the environment, hard-requiring API_KEY because the API's bearer-token
-// auth middleware depends on fail-closed behavior. The worker runtime should
-// use LoadWorker instead, which requires only what the worker consumes.
+// Load reads the full application configuration from the environment; every
+// conduit command uses it. It requires the three connection settings every
+// command needs — MONGODB_URI, MONGODB_DATABASE and REDIS_URI — plus the
+// optional PORT (default "8080") and SHUTDOWN_TIMEOUT (default 30s) tuning
+// knobs. There is deliberately a single loader: there is no longer a reason to
+// let some commands omit the broker configuration, so the whole CLI stays
+// consistent about the settings it reads.
 func Load(logger *log.Logger) Config {
 	return Config{
 		MongoDBURI:      requiredEnv(logger, "MONGODB_URI"),
 		MongoDBDatabase: requiredEnv(logger, "MONGODB_DATABASE"),
 		RedisURI:        requiredEnv(logger, "REDIS_URI"),
 		Port:            getEnv("PORT", "8080"),
-		APIKey:          requiredEnv(logger, "API_KEY"),
-	}
-}
-
-// LoadWorker reads configuration for the worker runtime from the environment.
-//
-// The worker connects to MongoDB and Redis and never serves HTTP nor holds the
-// API auth secret, so API_KEY and PORT are intentionally not read from the
-// environment: a worker-only deployment must not need the API's credential.
-// Only the settings the worker consumes are populated; Port and APIKey are left
-// at their zero values.
-func LoadWorker(logger *log.Logger) Config {
-	return Config{
-		MongoDBURI:      requiredEnv(logger, "MONGODB_URI"),
-		MongoDBDatabase: requiredEnv(logger, "MONGODB_DATABASE"),
-		RedisURI:        requiredEnv(logger, "REDIS_URI"),
 		ShutdownTimeout: loadDuration(logger, "SHUTDOWN_TIMEOUT", getEnv("SHUTDOWN_TIMEOUT", "30s"), 30*time.Second),
-	}
-}
-
-// LoadHealth reads the subset of configuration the CLI health command needs:
-// MongoDB and Redis connection settings only. It must not require API_KEY (which
-// is irrelevant to a connectivity check) nor PORT, so a health probe can run in
-// deployments that don't serve the API's credentials.
-func LoadHealth(logger *log.Logger) Config {
-	return Config{
-		MongoDBURI:      requiredEnv(logger, "MONGODB_URI"),
-		MongoDBDatabase: requiredEnv(logger, "MONGODB_DATABASE"),
-		RedisURI:        requiredEnv(logger, "REDIS_URI"),
 	}
 }
 
@@ -89,9 +63,9 @@ func loadDuration(logger *log.Logger, name, value string, fallback time.Duration
 // NOTE: this is PRE-EXISTING behavior preserved as-is. requiredEnv calls
 // logger.Fatalf (process exit) on a missing required environment variable. It
 // is only ever reached from the executable boundary (the conduit CLI commands
-// call Load/LoadWorker/LoadHealth), so the fatal exit is intentional and must
-// not be converted to a returned error. The injected logger is non-nil at this
-// entry point (the CLI owns logger creation).
+// call Load), so the fatal exit is intentional and must not be converted to a
+// returned error. The injected logger is non-nil at this entry point (the CLI
+// owns logger creation).
 func requiredEnv(logger *log.Logger, key string) string {
 	if value := os.Getenv(key); value != "" {
 		return value

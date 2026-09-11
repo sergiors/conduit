@@ -9,7 +9,7 @@ func (s *Server) registerRoutes(r *gin.Engine) {
 	r.GET("/health", s.health)
 
 	// All /api/* routes are protected by bearer-token auth.
-	api := r.Group("/api", authMiddleware(s.deps.APIKey))
+	api := r.Group("/api", authMiddleware(s.deps.APIKeys))
 
 	// Collection configuration
 	api.GET("/collections", s.listCollections)

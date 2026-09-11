@@ -34,24 +34,36 @@ func TestLoadShutdownTimeout(t *testing.T) {
 	})
 }
 
-func TestLoadWorker_RequiredVariables(t *testing.T) {
+func TestLoad_RequiredVariables(t *testing.T) {
 	t.Setenv("MONGODB_URI", "mongodb://localhost:27017")
 	t.Setenv("MONGODB_DATABASE", "conduit")
 	t.Setenv("REDIS_URI", "redis://localhost:6379")
 	t.Setenv("SHUTDOWN_TIMEOUT", "10s")
+	t.Setenv("PORT", "9090")
 
-	cfg := LoadWorker(discardLogger)
+	cfg := Load(discardLogger)
 
 	assert.Equal(t, "mongodb://localhost:27017", cfg.MongoDBURI)
 	assert.Equal(t, "conduit", cfg.MongoDBDatabase)
 	assert.Equal(t, "redis://localhost:6379", cfg.RedisURI)
 	assert.Equal(t, 10*time.Second, cfg.ShutdownTimeout)
-	// The worker must not depend on the API's credential nor serve HTTP.
-	assert.Equal(t, "", cfg.APIKey)
-	assert.Equal(t, "", cfg.Port)
+	assert.Equal(t, "9090", cfg.Port)
 }
 
-func TestLoadWorker_ShutdownTimeoutDefault(t *testing.T) {
+func TestLoad_PortDefaultWhenUnset(t *testing.T) {
+	t.Setenv("MONGODB_URI", "mongodb://localhost:27017")
+	t.Setenv("MONGODB_DATABASE", "conduit")
+	t.Setenv("REDIS_URI", "redis://localhost:6379")
+	// Clear PORT explicitly so a developer's exported value cannot leak in and
+	// mask the default.
+	t.Setenv("PORT", "")
+
+	cfg := Load(discardLogger)
+
+	assert.Equal(t, "8080", cfg.Port)
+}
+
+func TestLoad_ShutdownTimeoutDefault(t *testing.T) {
 	t.Setenv("MONGODB_URI", "mongodb://localhost:27017")
 	t.Setenv("MONGODB_DATABASE", "conduit")
 	t.Setenv("REDIS_URI", "redis://localhost:6379")
@@ -60,7 +72,7 @@ func TestLoadWorker_ShutdownTimeoutDefault(t *testing.T) {
 	// back to the default anyway, but a valid value would not).
 	t.Setenv("SHUTDOWN_TIMEOUT", "")
 
-	cfg := LoadWorker(discardLogger)
+	cfg := Load(discardLogger)
 
 	assert.Equal(t, 30*time.Second, cfg.ShutdownTimeout)
 }
