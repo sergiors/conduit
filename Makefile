@@ -1,89 +1,31 @@
-.PHONY: build test test-unit test-integration clean run-server run-worker fmt lint vet help docker-up docker-down deps
+.PHONY: test test-unit test-integration test-coverage test-all fmt vet up down
 
 GOCACHE := /tmp/go-build
 GO := go
 GOTEST := $(GO) test -v
-BUILD_DIR := ./bin
 
-all: fmt vet lint build test
+test: test-unit
 
-build:
-	@echo "Building..."
-	GOCACHE=$(GOCACHE) $(GO) build -o $(BUILD_DIR)/conduit ./cmd
-
-test: test-unit ## Run unit tests
-
-test-unit: ## Run unit tests (no integration)
-	@echo "Running unit tests..."
+test-unit:
 	GOCACHE=$(GOCACHE) $(GOTEST) -short ./...
 
-test-integration: ## Run integration tests (requires MongoDB + Redis)
-	@echo "Running integration tests..."
+test-integration:
 	GOCACHE=$(GOCACHE) $(GOTEST) -tags=integration ./...
 
-test-coverage: ## Run tests with coverage report
-	@echo "Running tests with coverage..."
+test-coverage:
 	GOCACHE=$(GOCACHE) $(GOTEST) -short -coverprofile=coverage.out ./...
 	$(GO) tool cover -html=coverage.out -o coverage.html
 
+test-all: test-unit test-integration
 
-fmt: ## Format Go code
-	@echo "Formatting code..."
+fmt:
 	$(GO) fmt ./...
 
-vet: ## Run go vet
-	@echo "Running go vet..."
+vet:
 	GOCACHE=$(GOCACHE) $(GO) vet ./...
 
-lint: ## Run golangci-lint
-	@echo "Running linter..."
-	@if command -v golangci-lint >/dev/null 2>&1; then \
-		golangci-lint run ./...; \
-	else \
-		echo "golangci-lint not installed, skipping..."; \
-	fi
-
-check: fmt vet lint test ## Run all checks
-
-deps: ## Download dependencies
-	@echo "Downloading dependencies..."
-	$(GO) mod download
-	$(GO) mod tidy
-
-docker-up: ## Start full stack with Docker (MongoDB + Redis + API + Worker)
-	@echo "Starting full stack (MongoDB + Redis + API + Worker)..."
+up:
 	docker compose -f compose.dev.yaml up -d --build
-	@echo "Waiting for services to be ready..."
-	@sleep 5
-	@echo ""
-	@echo "Services:"
-	@echo "  API:      http://localhost:8080"
-	@echo "  MongoDB:  mongodb://localhost:27017"
-	@echo "  Redis:    localhost:6379"
 
-docker-down: ## Stop all services
-	@echo "Stopping all services..."
+down:
 	docker compose -f compose.dev.yaml down
-
-docker-clean: ## Clean containers and volumes
-	@echo "Cleaning containers and volumes..."
-	docker compose -f compose.dev.yaml down -v
-	docker system prune -f
-
-clean: ## Clean build artifacts
-	@echo "Cleaning..."
-	rm -rf $(GOCACHE)
-	rm -rf $(BUILD_DIR)
-	rm -f coverage.out coverage.html
-	$(GO) clean -cache -testcache
-
-init: deps fmt vet ## Initialize project (first time setup)
-	@echo "Project initialized!"
-
-help: ## Show this help message
-	@echo "Conduit MongoDB CDC - Makefile Commands"
-	@echo "======================================"
-	@echo ""
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
-		awk 'BEGIN {FS = ":.*?## "}; {printf "  %-20s %s\n", $$1, $$2}'
-	@echo ""

@@ -2,7 +2,6 @@
 package cli
 
 import (
-	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -21,7 +20,7 @@ Commands:
 func Run(args []string, logger *log.Logger) error {
 	if len(args) == 0 {
 		fmt.Fprint(os.Stderr, usageText)
-		return errors.New("no command given")
+		return fmt.Errorf("no command given")
 	}
 
 	switch args[0] {

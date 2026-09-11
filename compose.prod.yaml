@@ -13,18 +13,26 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: ["./bin/conduit", "worker"]
+    container_name: conduit
+    command: ["conduit", "worker"]
     env_file: .env
     depends_on:
       redis:
         condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "conduit", "health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
 
   api:
     build:
       context: .
       dockerfile: Dockerfile
-    command: ["./bin/conduit", "server"]
+    container_name: conduit-api
+    command: ["conduit", "server"]
     ports:
       - 8080:8080
     env_file: .env
