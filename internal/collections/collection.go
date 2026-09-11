@@ -44,7 +44,8 @@ type Manager struct {
 	// mutation (collection created or deleted, stream/TTL enabled or disabled,
 	// sink created or deleted), with the affected collection's name. It exists so
 	// callers can fan out config-change notifications without coupling this
-	// package to their infrastructure: cmd/api assigns it a method value that
+	// package to their infrastructure: the api package assigns it a method value
+	// that
 	// publishes to Redis pub/sub. nil (the zero value) means "no notification".
 	// Invocations are best-effort: an error is logged, never returned — a
 	// committed mutation must not be reported as failed because notification

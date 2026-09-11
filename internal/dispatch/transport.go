@@ -37,7 +37,7 @@ var transportBuilders = make(map[collections.Type]TransportBuilder)
 //
 // NOTE: the two log.Printf calls here intentionally stay on the package-global
 // logger. RegisterTransport runs during package init(), before any process-level
-// logger exists (the root logger is created in cmd/api and cmd/worker main()).
+// logger exists (the root logger is created in cmd/main.go).
 // There is no injected logger available at init time, so the registry keeps its
 // global logging; this is the one documented exception to the injected-logger
 // policy.

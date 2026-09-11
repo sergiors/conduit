@@ -19,10 +19,10 @@ type Config struct {
 	ShutdownTimeout time.Duration
 }
 
-// Load is the API binary's loader. It reads the full application
-// configuration from the environment, hard-requiring API_KEY because the API's
-// bearer-token auth middleware depends on fail-closed behavior. Worker binaries
-// should use LoadWorker instead, which requires only what the worker consumes.
+// Load is the API server's loader. It reads the full application configuration
+// from the environment, hard-requiring API_KEY because the API's bearer-token
+// auth middleware depends on fail-closed behavior. The worker runtime should
+// use LoadWorker instead, which requires only what the worker consumes.
 func Load(logger *log.Logger) Config {
 	return Config{
 		MongoDBURI:      requiredEnv(logger, "MONGODB_URI"),
@@ -33,7 +33,7 @@ func Load(logger *log.Logger) Config {
 	}
 }
 
-// LoadWorker reads the worker process's configuration from the environment.
+// LoadWorker reads configuration for the worker runtime from the environment.
 //
 // The worker connects to MongoDB and Redis and never serves HTTP nor holds the
 // API auth secret, so API_KEY and PORT are intentionally not read from the
@@ -46,6 +46,18 @@ func LoadWorker(logger *log.Logger) Config {
 		MongoDBDatabase: requiredEnv(logger, "MONGODB_DATABASE"),
 		RedisURI:        requiredEnv(logger, "REDIS_URI"),
 		ShutdownTimeout: loadDuration(logger, "SHUTDOWN_TIMEOUT", getEnv("SHUTDOWN_TIMEOUT", "30s"), 30*time.Second),
+	}
+}
+
+// LoadHealth reads the subset of configuration the CLI health command needs:
+// MongoDB and Redis connection settings only. It must not require API_KEY (which
+// is irrelevant to a connectivity check) nor PORT, so a health probe can run in
+// deployments that don't serve the API's credentials.
+func LoadHealth(logger *log.Logger) Config {
+	return Config{
+		MongoDBURI:      requiredEnv(logger, "MONGODB_URI"),
+		MongoDBDatabase: requiredEnv(logger, "MONGODB_DATABASE"),
+		RedisURI:        requiredEnv(logger, "REDIS_URI"),
 	}
 }
 
@@ -76,10 +88,10 @@ func loadDuration(logger *log.Logger, name, value string, fallback time.Duration
 //
 // NOTE: this is PRE-EXISTING behavior preserved as-is. requiredEnv calls
 // logger.Fatalf (process exit) on a missing required environment variable. It
-// is only ever reached from the executable boundary (cmd/api and cmd/worker
-// call Load/LoadWorker), so the fatal exit is intentional and must not be
-// converted to a returned error. The injected logger is non-nil at this entry
-// point (the executables own logger creation).
+// is only ever reached from the executable boundary (the conduit CLI commands
+// call Load/LoadWorker/LoadHealth), so the fatal exit is intentional and must
+// not be converted to a returned error. The injected logger is non-nil at this
+// entry point (the CLI owns logger creation).
 func requiredEnv(logger *log.Logger, key string) string {
 	if value := os.Getenv(key); value != "" {
 		return value

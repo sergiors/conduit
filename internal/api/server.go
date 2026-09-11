@@ -1,9 +1,16 @@
 package api
 
 import (
+	"context"
+	"fmt"
+	"log"
+	"time"
+
 	"github.com/gin-gonic/gin"
 	"github.com/sergiors/conduit/internal/collections"
+	"github.com/sergiors/conduit/internal/config"
 	"github.com/sergiors/conduit/internal/mongo"
+	"github.com/sergiors/conduit/internal/redis"
 )
 
 // Dependencies holds the business/infrastructure packages the API layer needs.
@@ -33,4 +40,65 @@ func (s *Server) Router() *gin.Engine {
 	s.registerRoutes(r)
 
 	return r
+}
+
+// Run bootstraps and starts the API server. It does exactly what the former
+// cmd/api main() did: connects MongoDB and Redis, creates the collection index,
+// wires the publish/purge hooks, and blocks serving HTTP via Router().Run.
+//
+// Config is passed in (not loaded here). There is deliberately no signal
+// handling or graceful HTTP shutdown: the API server blocks in Router().Run and
+// relies on process termination — an accepted limitation of this codebase
+// (acceptable only behind a trusted network).
+//
+// The function returns an error instead of the original logger.Fatalf so the CLI
+// can exit non-zero on failure; fatal-on-invalid-config still happens earlier in
+// config.Load.
+func Run(cfg config.Config, logger *log.Logger) error {
+	// Use a generous timeout for startup: MongoDB may still be electing a PRIMARY
+	// after a restart, and NewClient waits for it before returning.
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	mongoClient, err := mongo.NewClient(ctx, mongo.Config{
+		URI:      cfg.MongoDBURI,
+		Database: cfg.MongoDBDatabase,
+	}, logger)
+	if err != nil {
+		return fmt.Errorf("failed to connect to MongoDB: %w", err)
+	}
+	defer mongoClient.Close(context.Background())
+
+	collectionsManager := collections.NewManager(mongoClient.Client, cfg.MongoDBDatabase, logger)
+	if err := collectionsManager.CreateIndex(ctx); err != nil {
+		return fmt.Errorf("failed to create collection index: %w", err)
+	}
+
+	redisClient, err := redis.NewClient(ctx, redis.Config{
+		URI:    cfg.RedisURI,
+		Prefix: "cdc:",
+	}, logger)
+	if err != nil {
+		return fmt.Errorf("failed to connect to Redis: %w", err)
+	}
+	defer redisClient.Close()
+
+	// Infrastructure side effects of collections.Manager mutations: publish a
+	// config-change notification and purge CDC state after a successful delete.
+	// Injected as method values so both the collections package and the API
+	// layer stay decoupled from Redis.
+	collectionsManager.OnPublish = redisClient.PublishConfigChange
+	collectionsManager.OnPurge = redisClient.DeleteCollectionState
+
+	server := New(Dependencies{
+		Collections: collectionsManager,
+		MongoClient: mongoClient,
+		APIKey:      cfg.APIKey,
+	})
+
+	logger.Printf("API server starting on port %s", cfg.Port)
+	if err := server.Router().Run(":" + cfg.Port); err != nil {
+		return fmt.Errorf("server failed: %w", err)
+	}
+	return nil
 }

@@ -381,14 +381,14 @@ docker compose up -d mongo redis
 Then run the API and worker:
 
 ```bash
-make run-api
+make run-server
 make run-worker
 ```
 
 ### Build
 
 ```bash
-make build-all
+make build
 ```
 
 Binaries are written to `./bin/`.

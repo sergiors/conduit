@@ -13,7 +13,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: ["./bin/worker"]
+    command: ["./bin/conduit", "worker"]
     env_file: .env
     depends_on:
       redis:
@@ -24,7 +24,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: ["./bin/api"]
+    command: ["./bin/conduit", "server"]
     ports:
       - 8080:8080
     env_file: .env

@@ -1,4 +1,4 @@
-.PHONY: build test test-unit test-integration clean run-api run-worker fmt lint vet help docker-up docker-down deps
+.PHONY: build test test-unit test-integration clean run-server run-worker fmt lint vet help docker-up docker-down deps
 
 GOCACHE := /tmp/go-build
 GO := go
@@ -7,19 +7,9 @@ BUILD_DIR := ./bin
 
 all: fmt vet lint build test
 
-build: ## Build all packages
-	@echo "Building all packages..."
-	GOCACHE=$(GOCACHE) $(GO) build -o $(BUILD_DIR)/ ./...
-
-build-api: ## Build API server
-	@echo "Building API server..."
-	GOCACHE=$(GOCACHE) $(GO) build -o $(BUILD_DIR)/api ./cmd/api
-
-build-worker: ## Build Worker
-	@echo "Building Worker..."
-	GOCACHE=$(GOCACHE) $(GO) build -o $(BUILD_DIR)/worker ./cmd/worker
-
-build-all: build-api build-worker ## Build all binaries
+build:
+	@echo "Building..."
+	GOCACHE=$(GOCACHE) $(GO) build -o $(BUILD_DIR)/conduit ./cmd
 
 test: test-unit ## Run unit tests
 
@@ -36,13 +26,6 @@ test-coverage: ## Run tests with coverage report
 	GOCACHE=$(GOCACHE) $(GOTEST) -short -coverprofile=coverage.out ./...
 	$(GO) tool cover -html=coverage.out -o coverage.html
 
-run-api: ## Run API server locally
-	@echo "Starting API server..."
-	GOCACHE=$(GOCACHE) $(GO) run ./cmd/api
-
-run-worker: ## Run Worker locally
-	@echo "Starting Worker..."
-	GOCACHE=$(GOCACHE) $(GO) run ./cmd/worker
 
 fmt: ## Format Go code
 	@echo "Formatting code..."

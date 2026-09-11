@@ -1,34 +1,30 @@
-# Build stage
-FROM golang:1.25-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS build
 
-WORKDIR /app
+ARG TARGETOS
+ARG TARGETARCH
 
-# Install git for fetching dependencies
-RUN apk add --no-cache git
+WORKDIR /src
 
-# Copy go mod files
+# Copy module files first so `go mod download` is cached unless they change.
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Copy source code
 COPY . .
 
-# Build API and Worker
-RUN go build -o bin/api ./cmd/api
-RUN go build -o bin/worker ./cmd/worker
+# CGO_ENABLED=0 keeps the binary static and allows native Go
+# cross-compilation for the requested target architecture.
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build \
+    -trimpath \
+    -ldflags="-s -w" \
+    -o /conduit \
+    ./cmd
 
-# Runtime stage
-FROM alpine:3.21
+FROM alpine:3.22
+
+RUN apk add --no-cache ca-certificates tzdata
+
+COPY --from=build /conduit /usr/local/bin/conduit
 
 WORKDIR /app
 
-# Install ca-certificates for HTTPS
-RUN apk add --no-cache ca-certificates tzdata
-
-# Copy binaries from builder
-COPY --from=builder /app/bin/api ./bin/api
-COPY --from=builder /app/bin/worker ./bin/worker
-
-EXPOSE 8080
-
-CMD ["./bin/api"]
+CMD ["conduit", "worker"]

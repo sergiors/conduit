@@ -3,8 +3,6 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"io"
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -18,41 +16,11 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 )
 
-var discardLogger = log.New(io.Discard, "", 0)
-
 // newDLQTestServer connects to MongoDB and returns a fully wired Server plus
 // the underlying collections.Manager and mongo client. It skips the test if
 // MongoDB is not available.
 func newDLQTestServer(t *testing.T) (*Server, *collections.Manager, *mongo.Client, context.Context) {
-	t.Helper()
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	t.Cleanup(cancel)
-
-	client, err := mongo.NewClient(ctx, mongo.Config{
-		URI:      localMongoURI,
-		Database: "conduit_test_dlq_api",
-	}, discardLogger)
-	if err != nil {
-		t.Skipf("MongoDB not available: %v", err)
-	}
-	t.Cleanup(func() { client.Close(context.Background()) })
-
-	require.NoError(t, client.Client.Database("conduit_test_dlq_api").Drop(ctx))
-
-	manager := collections.NewManager(client.Client, "conduit_test_dlq_api", discardLogger)
-	require.NoError(t, manager.CreateIndex(ctx))
-
-	server := New(Dependencies{
-		Collections: manager,
-		MongoClient: client,
-		APIKey:      "test-key",
-	})
-
-	return server, manager, client, ctx
+	return newMongoTestServer(t, "conduit_test_dlq_api")
 }
 
 // TestDLQEndpointsRegisteredCollectionOnly verifies that both DLQ endpoints

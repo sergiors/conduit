@@ -1,10 +1,12 @@
-package main
+// Package worker hosts the CDC worker runtime: MongoDB change-stream watchers
+// and the retry processor run here until a shutdown signal stops them in
+// dependency order.
+package worker
 
 import (
 	"context"
 	"errors"
 	"log"
-	"os"
 	"os/signal"
 	"sync/atomic"
 	"syscall"
@@ -159,7 +161,8 @@ func (w *Worker) Shutdown(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-func (w *Worker) Run(ctx context.Context) error {
+// start boots the worker's runtime components (watcher manager and retry processor).
+func (w *Worker) start(ctx context.Context) error {
 	w.logger.Println("Worker starting...")
 
 	// Start watcher manager
@@ -177,28 +180,28 @@ func (w *Worker) Run(ctx context.Context) error {
 	return nil
 }
 
-func main() {
-	logger := log.New(os.Stdout, "", log.LstdFlags)
-
-	cfg := config.LoadWorker(logger)
-
+// Run is the worker's process-level entrypoint: create the worker, run it
+// until SIGINT/SIGTERM, and perform a graceful shutdown bounded by the
+// configured shutdown timeout. It returns an error (which the caller should log
+// and turn into a non-zero exit) rather than crashing the process.
+func Run(cfg config.Config, logger *log.Logger) error {
 	worker, err := NewWorker(cfg, logger)
 	if err != nil {
-		logger.Fatalf("Failed to create worker: %v", err)
+		return err
 	}
 
 	// SIGINT and SIGTERM both trigger a graceful shutdown.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	if err := worker.Run(ctx); err != nil {
+	if err := worker.start(ctx); err != nil {
 		logger.Printf("Worker failed: %v", err)
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 		defer cancel()
 		if serr := worker.Shutdown(shutdownCtx); serr != nil {
 			logger.Printf("Error during shutdown after run failure: %v", serr)
 		}
-		logger.Fatalf("Worker failed: %v", err)
+		return err
 	}
 
 	<-ctx.Done()
@@ -207,5 +210,8 @@ func main() {
 	defer cancel()
 	if err := worker.Shutdown(shutdownCtx); err != nil {
 		logger.Printf("Error during shutdown: %v", err)
+		return err
 	}
+
+	return nil
 }

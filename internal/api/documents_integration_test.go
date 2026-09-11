@@ -6,69 +6,21 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"testing"
-	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/sergiors/conduit/internal/collections"
 	"github.com/sergiors/conduit/internal/mongo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
-
-// localMongoURI mirrors the collections test helper: the compose MongoDB runs
-// as a single-node replica set (rs0) advertising its internal hostname, so
-// directConnection=true is required to reach it from outside the compose
-// network.
-const localMongoURI = "mongodb://localhost:27017/?directConnection=true"
 
 // newDocumentTestServer connects to MongoDB and returns a fully wired Server
 // plus the underlying collections.Manager and mongo client. It skips the test
 // if MongoDB is not available.
 func newDocumentTestServer(t *testing.T) (*Server, *collections.Manager, *mongo.Client, context.Context) {
-	t.Helper()
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	t.Cleanup(cancel)
-
-	client, err := mongo.NewClient(ctx, mongo.Config{
-		URI:      localMongoURI,
-		Database: "conduit_test_docs",
-	}, discardLogger)
-	if err != nil {
-		t.Skipf("MongoDB not available: %v", err)
-	}
-	t.Cleanup(func() { client.Close(context.Background()) })
-
-	// Drop any leftover state from a previous run so the test is idempotent.
-	require.NoError(t, client.Client.Database("conduit_test_docs").Drop(ctx))
-
-	manager := collections.NewManager(client.Client, "conduit_test_docs", discardLogger)
-	require.NoError(t, manager.CreateIndex(ctx))
-
-	server := New(Dependencies{
-		Collections: manager,
-		MongoClient: client,
-		APIKey:      "test-key",
-	})
-
-	return server, manager, client, ctx
-}
-
-// doRequest performs an authenticated request against the server's router.
-func doRequest(t *testing.T, server *Server, method, path string) *httptest.ResponseRecorder {
-	t.Helper()
-	gin.SetMode(gin.TestMode)
-	req := httptest.NewRequest(method, path, nil)
-	req.Header.Set("Authorization", "Bearer test-key")
-	rec := httptest.NewRecorder()
-	server.Router().ServeHTTP(rec, req)
-	return rec
+	return newMongoTestServer(t, "conduit_test_docs")
 }
 
 // TestDocumentEndpointsRegisteredCollectionOnly verifies that both document
@@ -78,9 +30,11 @@ func TestDocumentEndpointsRegisteredCollectionOnly(t *testing.T) {
 	server, manager, client, ctx := newDocumentTestServer(t)
 
 	// Create a managed collection and seed a document in its physical collection.
+	// Document IDs are ObjectIDs per the collections.Document contract.
 	managed := &collections.Collection{CollectionName: "managed_docs"}
 	require.NoError(t, manager.Create(ctx, managed))
-	_, err := client.Collection("managed_docs").InsertOne(ctx, bson.M{"_id": "doc-1", "name": "hello"})
+	docID := primitive.NewObjectID()
+	_, err := client.Collection("managed_docs").InsertOne(ctx, bson.M{"_id": docID, "name": "hello"})
 	require.NoError(t, err)
 
 	// Seed an UNREGISTERED physical collection that must never be readable.
@@ -97,7 +51,7 @@ func TestDocumentEndpointsRegisteredCollectionOnly(t *testing.T) {
 	})
 
 	t.Run("registered collection single doc works", func(t *testing.T) {
-		rec := doRequest(t, server, http.MethodGet, "/api/collections/managed_docs/documents/doc-1")
+		rec := doRequest(t, server, http.MethodGet, "/api/collections/managed_docs/documents/"+docID.Hex())
 		require.Equal(t, http.StatusOK, rec.Code)
 		var doc bson.M
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &doc))
