@@ -127,9 +127,28 @@ func TestEnableStreamEnsuresPreImageCapability(t *testing.T) {
 	// Sanity check: the collection starts without the capability.
 	assert.False(t, hasPreImageCapability(ctx, t, client, name), "precondition: fresh collection has no pre-image capability")
 
-	// Enable the stream with oldImage; EnableStream must repair the gap.
-	table := &Collection{CollectionName: name, StreamEnabled: false}
-	require.NoError(t, manager.Create(ctx, table))
+	// EnableStream requires a config document but Manager.Create refuses to
+	// adopt a collection that already physically exists (ErrCollectionAlreadyExists
+	// since commit 9551a5c). Insert the config document directly so the test can
+	// still prove EnableStream repairs the capability gap on a collection created
+	// outside Conduit.
+	cfg := &Collection{
+		CollectionName:     name,
+		StreamEnabled:      false,
+		DeletionProtection: true,
+		CreatedAt:          time.Now(),
+		UpdatedAt:          time.Now(),
+	}
+	_, err := manager.collection.InsertOne(ctx, cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		bgCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_, _ = manager.collection.DeleteOne(bgCtx, bson.M{"collectionName": name})
+	})
+
+	// EnableStream must enable the stream AND repair the physical collection's
+	// capability gap so the watcher receives pre-images.
 	require.NoError(t, manager.EnableStream(ctx, name, true))
 	t.Cleanup(func() {
 		bgCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

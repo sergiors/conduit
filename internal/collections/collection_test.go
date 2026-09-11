@@ -1,6 +1,7 @@
 package collections
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -124,12 +125,15 @@ func TestManagerCRUD(t *testing.T) {
 
 		foundPKSK := false
 		for _, idx := range indexes {
-			if idx.Name == "primary_sort_key_idx" {
+			// Commit 192eb36 renamed the pk+sk index from primary_sort_key_idx
+			// to primarySortKeyIdx (primaryKeyIdx for pk-only); assert the
+			// current name.
+			if idx.Name == "primarySortKeyIdx" {
 				foundPKSK = true
 				break
 			}
 		}
-		assert.True(t, foundPKSK, "primary_sort_key_idx should exist on table collection")
+		assert.True(t, foundPKSK, "primarySortKeyIdx should exist on table collection")
 	})
 
 	t.Run("get table", func(t *testing.T) {
@@ -292,14 +296,24 @@ func TestManagerValidator(t *testing.T) {
 	})
 
 	t.Run("validator not applied to pre-existing collection", func(t *testing.T) {
-		// Create the physical collection directly (no validator), then create the
-		// config through the manager. Conduit must NOT adopt a pre-existing
-		// physical collection by applying validator changes to it.
+		// Create the physical collection directly (no validator), then attempt
+		// to create the config through the manager. Since commit 9551a5c,
+		// Manager.Create refuses to adopt a pre-existing physical collection
+		// and returns an error wrapping ErrCollectionAlreadyExists, leaving the
+		// physical collection untouched (no validator, no Conduit side effects).
 		db := client.Database("conduit_test")
 		_ = db.Collection("validator_preexisting").Drop(ctx)
 		require.NoError(t, db.CreateCollection(ctx, "validator_preexisting"))
+		t.Cleanup(func() {
+			_ = db.Collection("validator_preexisting").Drop(context.Background())
+		})
+
 		table := &Collection{CollectionName: "validator_preexisting", PartitionKey: "pk"}
-		require.NoError(t, manager.Create(ctx, table))
+		err := manager.Create(ctx, table)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrCollectionAlreadyExists, "Create must refuse to adopt a pre-existing collection")
+
+		// The physical collection is left alone: it still has no validator.
 		assert.Nil(t, validatorRequired("validator_preexisting"))
 	})
 }

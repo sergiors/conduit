@@ -388,7 +388,14 @@ func (m *Manager) UpdateSink(
 		return nil, NewValidationError("no mutable fields provided for sink update")
 	}
 
+	// Capture a single timestamp, used both for the returned record and the
+	// $set written to MongoDB, so the caller always sees an updatedAt that
+	// exactly matches what was persisted and is strictly newer than the
+	// previous value.
+	now := time.Now()
+
 	updated := *current
+	updated.UpdatedAt = now
 	if update.Filter != nil {
 		updated.Filter = *update.Filter
 	}
@@ -415,7 +422,7 @@ func (m *Manager) UpdateSink(
 			"$set": bson.M{
 				"filter":     updated.Filter,
 				"eventTypes": updated.EventTypes,
-				"updatedAt":  time.Now(),
+				"updatedAt":  now,
 			},
 		},
 	)
