@@ -1,0 +1,241 @@
+package cli
+
+import (
+	"bytes"
+	"context"
+	"io"
+	"log"
+	"testing"
+
+	"conduit/internal/config"
+	"conduit/internal/mongo"
+	"conduit/internal/redis"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"github.com/urfave/cli/v3"
+)
+
+// discardLogger is shared by tests that only need a logger for config.Load; the
+// CLI commands' own output is captured in the root's Writer instead.
+var discardLogger = log.New(io.Discard, "", 0)
+
+// newRootCommandForTest builds the real command tree with its Writer pointed at
+// a captured buffer so help output and command output can be asserted. It is
+// also used by the integration tests (apikey_integration_test.go) to drive the
+// API key subcommands against a live MongoDB. New already installs the empty
+// ExitErrHandler, so errors return from Run instead of exiting the test process.
+func newRootCommandForTest(t *testing.T) (*cli.Command, *bytes.Buffer) {
+	t.Helper()
+	buf := &bytes.Buffer{}
+	return New(discardLogger, buf), buf
+}
+
+// runRoot runs a freshly built CLI with the given args (the post-binary slice,
+// e.g. ["frobnicate"]). It prepends "conduit" for urfave/cli's dispatch, so the
+// call mirrors what a real invocation passes as os.Args.
+func runRoot(t *testing.T, args []string) ([]byte, error) {
+	t.Helper()
+	cmd, buf := newRootCommandForTest(t)
+	argv := append([]string{"conduit"}, args...)
+	err := cmd.Run(context.Background(), argv)
+	return buf.Bytes(), err
+}
+
+// commandNames returns the names of the given commands, in order.
+func commandNames(cmds []*cli.Command) []string {
+	names := make([]string, 0, len(cmds))
+	for _, c := range cmds {
+		names = append(names, c.Name)
+	}
+	return names
+}
+
+func TestRootCommandRegistration(t *testing.T) {
+	root, _ := newRootCommandForTest(t)
+	names := commandNames(root.Commands)
+	assert.ElementsMatch(t, []string{"server", "worker", "health", "apikey"}, names)
+}
+
+func TestAPIKeySubcommandRegistration(t *testing.T) {
+	root, _ := newRootCommandForTest(t)
+
+	var apikey *cli.Command
+	for _, c := range root.Commands {
+		if c.Name == "apikey" {
+			apikey = c
+			break
+		}
+	}
+	require.NotNil(t, apikey, "apikey command must be registered")
+	assert.ElementsMatch(t, []string{"create", "list", "revoke"}, commandNames(apikey.Commands))
+
+	for _, sub := range apikey.Commands {
+		switch sub.Name {
+		case "create":
+			f := requiredFlag(t, sub, "name")
+			sf, ok := f.(*cli.StringFlag)
+			require.True(t, ok, "name flag must be a *cli.StringFlag")
+			assert.True(t, sf.Required, "create must require --name")
+		case "revoke":
+			f := requiredFlag(t, sub, "id")
+			sf, ok := f.(*cli.StringFlag)
+			require.True(t, ok, "id flag must be a *cli.StringFlag")
+			assert.True(t, sf.Required, "revoke must require --id")
+		}
+	}
+}
+
+// requiredFlag finds the named flag on a command's flag list.
+func requiredFlag(t *testing.T, cmd *cli.Command, name string) cli.Flag {
+	t.Helper()
+	for _, f := range cmd.Flags {
+		for _, n := range f.Names() {
+			if n == name {
+				return f
+			}
+		}
+	}
+	t.Fatalf("flag %q not found on command %q", name, cmd.Name)
+	return nil
+}
+
+// Empirical finding (urfave/cli v3.11.0): the root command has no Action (urfave
+// injects a default help action), so an unknown first argument is treated as an
+// unknown help topic and errors back out of Run. The test asserts only that the
+// argument name surfaces, deliberately avoiding the exact help phrasing.
+func TestRunUnknownCommand(t *testing.T) {
+	_, err := runRoot(t, []string{"frobnicate"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "frobnicate")
+}
+
+func TestRunHelp(t *testing.T) {
+	out, err := runRoot(t, []string{"--help"})
+	require.NoError(t, err)
+	help := string(out)
+	assert.Contains(t, help, "server")
+	assert.Contains(t, help, "worker")
+	assert.Contains(t, help, "health")
+	assert.Contains(t, help, "apikey")
+
+	out, err = runRoot(t, []string{"apikey", "--help"})
+	require.NoError(t, err)
+	help = string(out)
+	assert.Contains(t, help, "create")
+	assert.Contains(t, help, "list")
+	assert.Contains(t, help, "revoke")
+}
+
+// Empirical finding (urfave/cli v3.11.0): running the root command with no
+// arguments prints the root help and returns nil.
+func TestRunNoArgs(t *testing.T) {
+	out, err := runRoot(t, nil)
+	require.NoError(t, err)
+	assert.Contains(t, string(out), "server")
+	assert.Contains(t, string(out), "apikey")
+}
+
+func TestServerCommandDispatch(t *testing.T) {
+	t.Setenv("MONGODB_URI", "mongodb://dummy:27017")
+	t.Setenv("MONGODB_DATABASE", "dummy")
+	t.Setenv("REDIS_URI", "redis://dummy:6379")
+	t.Setenv("PORT", "9999")
+
+	logger := log.New(io.Discard, "", 0)
+	root := New(logger, io.Discard)
+
+	sentinel := &sentinelErr{}
+	var capturedCfg config.Config
+	var capturedLogger *log.Logger
+	orig := apiRun
+	apiRun = func(cfg config.Config, l *log.Logger) error {
+		capturedCfg = cfg
+		capturedLogger = l
+		return sentinel
+	}
+	t.Cleanup(func() { apiRun = orig })
+
+	err := root.Run(context.Background(), []string{"conduit", "server"})
+	assert.ErrorIs(t, err, sentinel)
+	assert.Equal(t, "9999", capturedCfg.Port)
+	assert.Equal(t, logger, capturedLogger)
+}
+
+type sentinelErr struct{}
+
+func (e *sentinelErr) Error() string { return "sentinel dispatch error" }
+
+func TestWorkerCommandDispatch(t *testing.T) {
+	t.Setenv("MONGODB_URI", "mongodb://dummy:27017")
+	t.Setenv("MONGODB_DATABASE", "dummy")
+	t.Setenv("REDIS_URI", "redis://dummy:6379")
+
+	logger := log.New(io.Discard, "", 0)
+	root := New(logger, io.Discard)
+
+	sentinel := &sentinelErr{}
+	var capturedCfg config.Config
+	var capturedLogger *log.Logger
+	orig := workerRun
+	workerRun = func(cfg config.Config, l *log.Logger) error {
+		capturedCfg = cfg
+		capturedLogger = l
+		return sentinel
+	}
+	t.Cleanup(func() { workerRun = orig })
+
+	err := root.Run(context.Background(), []string{"conduit", "worker"})
+	assert.ErrorIs(t, err, sentinel)
+	assert.Equal(t, "redis://dummy:6379", capturedCfg.RedisURI)
+	assert.Equal(t, logger, capturedLogger)
+	assert.Equal(t, "dummy", capturedCfg.MongoDBDatabase)
+}
+
+// TestNestedCommandUsesRootWriter proves a subcommand's action writes through
+// the root command's Writer without any writer being passed to the command
+// constructors (urfave/cli inherits the parent's Writer for a subcommand whose
+// own Writer is nil). The apikey path is covered end-to-end by the integration
+// tests; this test exercises the seam without infrastructure.
+func TestNestedCommandUsesRootWriter(t *testing.T) {
+	healthEnv(t)
+	stubProbes(t, "healthy", "healthy")
+
+	cmd, buf := newRootCommandForTest(t)
+	err := cmd.Run(context.Background(), []string{"conduit", "health"})
+	require.NoError(t, err)
+
+	out := buf.String()
+	assert.Contains(t, out, "MongoDB")
+	assert.Contains(t, out, "Redis")
+	assert.Contains(t, out, "healthy")
+}
+
+// TestRunContextCancellation proves cancellation propagates from the caller
+// through Run and the command action into the probe contexts derived by
+// runHealth. A pre-cancelled ctx must yield a probe ctx whose Err() is
+// context.Canceled — deterministically, with no sleeps.
+func TestRunContextCancellation(t *testing.T) {
+	healthEnv(t)
+
+	var mongoCtxErr error
+	om := mongoProbe
+	mongoProbe = func(ctx context.Context, _ mongo.Config) string {
+		mongoCtxErr = ctx.Err()
+		return "healthy"
+	}
+	t.Cleanup(func() { mongoProbe = om })
+	or := redisProbe
+	redisProbe = func(ctx context.Context, _ redis.Config) string {
+		return "healthy"
+	}
+	t.Cleanup(func() { redisProbe = or })
+
+	cmd := New(discardLogger, io.Discard)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := cmd.Run(ctx, []string{"conduit", "health"})
+	require.NoError(t, err)
+	assert.ErrorIs(t, mongoCtxErr, context.Canceled)
+}

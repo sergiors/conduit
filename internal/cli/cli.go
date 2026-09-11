@@ -5,23 +5,28 @@ package cli
 
 import (
 	"context"
+	"io"
 	"log"
+	"os"
 
 	"github.com/urfave/cli/v3"
 )
 
-// Run executes the conduit CLI with the given argument slice (typically
-// os.Args[1:]). It is kept callable from cmd/main.go, which exits 1 and logs the
-// returned error. urfave/cli prints usage errors itself; this only returns
-// execution errors.
+// New creates the Conduit CLI command tree. The writer is configured once on
+// the root command; subcommands with a nil Writer inherit it at run time
+// (urfave/cli setupSubcommand parent-writer inheritance), and actions write
+// through cmd.Writer.
 //
-// The command tree is built fresh on each call so the logger is captured by the
-// action closures for the runtime commands (server, worker, health, apikey),
-// keeping their logging behavior identical to the pre-urfave CLI.
-func Run(args []string, logger *log.Logger) error {
-	root := &cli.Command{
-		Name:  "conduit",
-		Usage: "Conduit CDC platform",
+// An empty ExitErrHandler replaces urfave's default HandleExitCoder, which
+// would os.Exit(1) inside the library for exit-coded errors (usage errors,
+// unknown commands). Keeping errors returning from Run lets cmd/main.go own
+// logging and the process exit code — a single place prints each failure.
+func New(logger *log.Logger, writer io.Writer) *cli.Command {
+	return &cli.Command{
+		Name:           "conduit",
+		Usage:          "Conduit CDC platform",
+		Writer:         writer,
+		ExitErrHandler: func(context.Context, *cli.Command, error) {},
 		Commands: []*cli.Command{
 			serverCommand(logger),
 			workerCommand(logger),
@@ -29,9 +34,12 @@ func Run(args []string, logger *log.Logger) error {
 			apikeyCommand(logger),
 		},
 	}
-	// urfave/cli interprets osArgs[0] as the root command name. main.go calls
-	// Run(os.Args[1:], logger) (without "conduit"), so prepend the root name to
-	// satisfy cli's dispatch.
-	fullArgs := append([]string{root.Name}, args...)
-	return root.Run(context.Background(), fullArgs)
+}
+
+// Run executes the Conduit CLI. args must be the complete argument slice
+// urfave/cli expects (binary name first, e.g. os.Args). The returned error —
+// a single failure — is logged and turned into the exit code by cmd/main.go;
+// urfave/cli prints usage errors to Writer itself.
+func Run(ctx context.Context, args []string, logger *log.Logger) error {
+	return New(logger, os.Stdout).Run(ctx, args)
 }
