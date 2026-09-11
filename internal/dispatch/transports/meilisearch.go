@@ -6,10 +6,11 @@ import (
 	"log"
 	"time"
 
+	"conduit/internal/collections"
+	"conduit/internal/dispatch"
+	"conduit/internal/streams"
+
 	"github.com/meilisearch/meilisearch-go"
-	"github.com/sergiors/conduit/internal/collections"
-	"github.com/sergiors/conduit/internal/dispatch"
-	"github.com/sergiors/conduit/internal/streams"
 )
 
 // MeilisearchSpec holds the type-specific configuration for a Meilisearch transport.

@@ -6,8 +6,8 @@ import (
 	"log"
 	"reflect"
 
-	"github.com/sergiors/conduit/internal/collections"
-	"github.com/sergiors/conduit/internal/dispatch"
+	"conduit/internal/collections"
+	"conduit/internal/dispatch"
 )
 
 // SinkChange represents a change produced by reconciling sink state.

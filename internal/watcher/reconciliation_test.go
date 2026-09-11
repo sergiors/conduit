@@ -4,11 +4,12 @@ import (
 	"context"
 	"testing"
 
-	"github.com/sergiors/conduit/internal/collections"
-	"github.com/sergiors/conduit/internal/dispatch"
-	_ "github.com/sergiors/conduit/internal/dispatch/transports" // register transport builders
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"conduit/internal/collections"
+	"conduit/internal/dispatch"
+	_ "conduit/internal/dispatch/transports" // register transport builders
 )
 
 func rawSpec(endpoint string) map[string]interface{} {

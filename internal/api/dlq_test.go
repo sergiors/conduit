@@ -9,11 +9,12 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/sergiors/conduit/internal/collections"
-	"github.com/sergiors/conduit/internal/mongo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"
+
+	"conduit/internal/collections"
+	"conduit/internal/mongo"
 )
 
 // newDLQTestServer connects to MongoDB and returns a fully wired Server plus

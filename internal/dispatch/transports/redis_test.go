@@ -11,11 +11,12 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	"github.com/sergiors/conduit/internal/collections"
-	"github.com/sergiors/conduit/internal/dispatch"
-	"github.com/sergiors/conduit/internal/streams"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"conduit/internal/collections"
+	"conduit/internal/dispatch"
+	"conduit/internal/streams"
 )
 
 var discardLogger = log.New(io.Discard, "", 0)

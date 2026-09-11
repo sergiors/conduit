@@ -10,13 +10,14 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	"github.com/sergiors/conduit/internal/collections"
-	"github.com/sergiors/conduit/internal/dispatch"
-	"github.com/sergiors/conduit/internal/recover"
-	redisclient "github.com/sergiors/conduit/internal/redis"
-	"github.com/sergiors/conduit/internal/retry"
-	"github.com/sergiors/conduit/internal/streams"
 	"go.mongodb.org/mongo-driver/mongo"
+
+	"conduit/internal/collections"
+	"conduit/internal/dispatch"
+	"conduit/internal/recover"
+	redisclient "conduit/internal/redis"
+	"conduit/internal/retry"
+	"conduit/internal/streams"
 )
 
 // collectionsStore is the manager's persisted collection/sink config dependency.

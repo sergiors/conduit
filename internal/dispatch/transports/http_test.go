@@ -8,10 +8,11 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/sergiors/conduit/internal/dispatch"
-	"github.com/sergiors/conduit/internal/streams"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"conduit/internal/dispatch"
+	"conduit/internal/streams"
 )
 
 // newTestRecord returns a minimal StreamRecord suitable for the HTTP transport.

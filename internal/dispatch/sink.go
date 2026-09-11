@@ -5,8 +5,8 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/sergiors/conduit/internal/collections"
-	"github.com/sergiors/conduit/internal/streams"
+	"conduit/internal/collections"
+	"conduit/internal/streams"
 )
 
 // sinkSnapshot is an immutable copy of a sink's persisted configuration,

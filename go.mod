@@ -1,4 +1,4 @@
-module github.com/sergiors/conduit
+module conduit
 
 go 1.25.6
 

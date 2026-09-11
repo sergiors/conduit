@@ -12,14 +12,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/sergiors/conduit/internal/collections"
-	"github.com/sergiors/conduit/internal/config"
-	"github.com/sergiors/conduit/internal/dispatch"
-	_ "github.com/sergiors/conduit/internal/dispatch/transports" // Register transport builders via init()
-	"github.com/sergiors/conduit/internal/mongo"
-	"github.com/sergiors/conduit/internal/redis"
-	"github.com/sergiors/conduit/internal/retry"
-	"github.com/sergiors/conduit/internal/watcher"
+	"conduit/internal/collections"
+	"conduit/internal/config"
+	"conduit/internal/dispatch"
+	_ "conduit/internal/dispatch/transports" // Register transport builders via init()
+	"conduit/internal/mongo"
+	"conduit/internal/redis"
+	"conduit/internal/retry"
+	"conduit/internal/watcher"
 )
 
 type Worker struct {

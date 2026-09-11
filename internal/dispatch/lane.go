@@ -5,7 +5,7 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/sergiors/conduit/internal/streams"
+	"conduit/internal/streams"
 )
 
 // errLaneClosed is returned when a job is submitted to a lane that has been

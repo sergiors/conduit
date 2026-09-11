@@ -3,8 +3,8 @@ package cli
 import (
 	"log"
 
-	"github.com/sergiors/conduit/internal/api"
-	"github.com/sergiors/conduit/internal/config"
+	"conduit/internal/api"
+	"conduit/internal/config"
 )
 
 // runServer starts the API server for the "server" command.

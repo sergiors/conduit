@@ -4,10 +4,11 @@ import (
 	"context"
 	"testing"
 
-	"github.com/sergiors/conduit/internal/collections"
-	"github.com/sergiors/conduit/internal/streams"
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/bson"
+
+	"conduit/internal/collections"
+	"conduit/internal/streams"
 )
 
 func TestRuntimeSinkEventTypeFiltering(t *testing.T) {

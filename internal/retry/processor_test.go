@@ -8,13 +8,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sergiors/conduit/internal/collections"
-	"github.com/sergiors/conduit/internal/dispatch"
-	"github.com/sergiors/conduit/internal/redis"
-	"github.com/sergiors/conduit/internal/streams"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"
+
+	"conduit/internal/collections"
+	"conduit/internal/dispatch"
+	"conduit/internal/redis"
+	"conduit/internal/streams"
 )
 
 var discardLogger = log.New(io.Discard, "", 0)

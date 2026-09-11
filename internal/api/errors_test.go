@@ -6,7 +6,8 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/sergiors/conduit/internal/collections"
+	"conduit/internal/collections"
+
 	"github.com/stretchr/testify/assert"
 )
 

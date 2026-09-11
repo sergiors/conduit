@@ -11,10 +11,11 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/eventbridge"
 	"github.com/aws/aws-sdk-go-v2/service/eventbridge/types"
-	"github.com/sergiors/conduit/internal/collections"
-	"github.com/sergiors/conduit/internal/streams"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"conduit/internal/collections"
+	"conduit/internal/streams"
 )
 
 func TestNewEventBridgeValidation(t *testing.T) {

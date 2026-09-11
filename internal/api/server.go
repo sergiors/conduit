@@ -6,11 +6,12 @@ import (
 	"log"
 	"time"
 
+	"conduit/internal/collections"
+	"conduit/internal/config"
+	"conduit/internal/mongo"
+	"conduit/internal/redis"
+
 	"github.com/gin-gonic/gin"
-	"github.com/sergiors/conduit/internal/collections"
-	"github.com/sergiors/conduit/internal/config"
-	"github.com/sergiors/conduit/internal/mongo"
-	"github.com/sergiors/conduit/internal/redis"
 )
 
 // Dependencies holds the business/infrastructure packages the API layer needs.

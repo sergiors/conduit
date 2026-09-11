@@ -10,9 +10,9 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/sergiors/conduit/internal/config"
-	"github.com/sergiors/conduit/internal/mongo"
-	"github.com/sergiors/conduit/internal/redis"
+	"conduit/internal/config"
+	"conduit/internal/mongo"
+	"conduit/internal/redis"
 )
 
 // checkCtx returns a short-lived context for a single dependency health probe.

@@ -4,8 +4,9 @@ import (
 	"net/http"
 	"strconv"
 
+	"conduit/internal/collections"
+
 	"github.com/gin-gonic/gin"
-	"github.com/sergiors/conduit/internal/collections"
 )
 
 // Default and maximum page sizes for the documents list endpoint. These cap

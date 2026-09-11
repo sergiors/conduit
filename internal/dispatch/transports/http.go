@@ -11,9 +11,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/sergiors/conduit/internal/collections"
-	"github.com/sergiors/conduit/internal/dispatch"
-	"github.com/sergiors/conduit/internal/streams"
+	"conduit/internal/collections"
+	"conduit/internal/dispatch"
+	"conduit/internal/streams"
 )
 
 // maxDrainBytes is the bounded budget of response-body bytes drained on a

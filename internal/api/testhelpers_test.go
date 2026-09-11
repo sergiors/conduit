@@ -8,9 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"conduit/internal/collections"
+	"conduit/internal/mongo"
+
 	"github.com/gin-gonic/gin"
-	"github.com/sergiors/conduit/internal/collections"
-	"github.com/sergiors/conduit/internal/mongo"
 	"github.com/stretchr/testify/require"
 )
 

@@ -12,12 +12,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	recoverpkg "github.com/sergiors/conduit/internal/recover"
-	"github.com/sergiors/conduit/internal/streams"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+
+	recoverpkg "conduit/internal/recover"
+	"conduit/internal/streams"
 )
 
 // Sentinel errors for terminal change stream conditions.

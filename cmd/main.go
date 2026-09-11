@@ -7,7 +7,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/sergiors/conduit/internal/cli"
+	"conduit/internal/cli"
 )
 
 func main() {

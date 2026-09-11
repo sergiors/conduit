@@ -3,8 +3,9 @@ package api
 import (
 	"net/http"
 
+	"conduit/internal/collections"
+
 	"github.com/gin-gonic/gin"
-	"github.com/sergiors/conduit/internal/collections"
 )
 
 func (s *Server) getSinks(c *gin.Context) {

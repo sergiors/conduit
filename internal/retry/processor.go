@@ -7,11 +7,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sergiors/conduit/internal/collections"
-	"github.com/sergiors/conduit/internal/dispatch"
-	"github.com/sergiors/conduit/internal/recover"
-	"github.com/sergiors/conduit/internal/redis"
-	"github.com/sergiors/conduit/internal/streams"
+	"conduit/internal/collections"
+	"conduit/internal/dispatch"
+	"conduit/internal/recover"
+	"conduit/internal/redis"
+	"conduit/internal/streams"
 )
 
 // Store is the queue-storage facade the Processor needs. The concrete

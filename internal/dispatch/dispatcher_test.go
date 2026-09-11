@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sergiors/conduit/internal/collections"
-	"github.com/sergiors/conduit/internal/streams"
+	"conduit/internal/collections"
+	"conduit/internal/streams"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"

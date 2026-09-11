@@ -7,13 +7,14 @@ import (
 	"log"
 	"time"
 
+	"conduit/internal/collections"
+	"conduit/internal/dispatch"
+	"conduit/internal/streams"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/eventbridge"
 	"github.com/aws/aws-sdk-go-v2/service/eventbridge/types"
-	"github.com/sergiors/conduit/internal/collections"
-	"github.com/sergiors/conduit/internal/dispatch"
-	"github.com/sergiors/conduit/internal/streams"
 )
 
 // EventBridgeSpec holds the type-specific configuration for an EventBridge transport.

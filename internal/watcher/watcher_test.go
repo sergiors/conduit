@@ -11,15 +11,16 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	"github.com/sergiors/conduit/internal/collections"
-	redisclient "github.com/sergiors/conduit/internal/redis"
-	"github.com/sergiors/conduit/internal/streams"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+
+	"conduit/internal/collections"
+	redisclient "conduit/internal/redis"
+	"conduit/internal/streams"
 )
 
 var discardLogger = log.New(io.Discard, "", 0)

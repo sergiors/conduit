@@ -4,8 +4,8 @@ import (
 	"context"
 	"sync"
 
-	"github.com/sergiors/conduit/internal/collections"
-	"github.com/sergiors/conduit/internal/streams"
+	"conduit/internal/collections"
+	"conduit/internal/streams"
 )
 
 // DefaultQueueSize and DefaultWorkerCount are the per-sink lane defaults used

@@ -6,15 +6,15 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/sergiors/conduit/internal/collections"
-	"github.com/sergiors/conduit/internal/streams"
+	"conduit/internal/collections"
+	"conduit/internal/streams"
 )
 
 // Transport builders register themselves via init() in the transports package.
 // main.go must import that package with a blank import so all init() functions
 // run before main() and BuildTransport() can find them:
 //
-//	import _ "github.com/sergiors/conduit/internal/dispatch/transports"
+//	import _ "conduit/internal/dispatch/transports"
 
 // Transport defines the runtime interface responsible for delivering stream
 // events to a destination. A transport knows only how to deliver an event;

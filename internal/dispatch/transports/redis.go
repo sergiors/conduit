@@ -8,9 +8,10 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	"github.com/sergiors/conduit/internal/collections"
-	"github.com/sergiors/conduit/internal/dispatch"
-	"github.com/sergiors/conduit/internal/streams"
+
+	"conduit/internal/collections"
+	"conduit/internal/dispatch"
+	"conduit/internal/streams"
 )
 
 // RedisSpec holds the type-specific configuration for a Redis Streams transport.

@@ -3,8 +3,8 @@ package cli
 import (
 	"log"
 
-	"github.com/sergiors/conduit/internal/config"
-	"github.com/sergiors/conduit/internal/worker"
+	"conduit/internal/config"
+	"conduit/internal/worker"
 )
 
 // runWorker starts the CDC worker for the "worker" command.

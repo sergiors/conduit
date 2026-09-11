@@ -6,7 +6,8 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/sergiors/conduit/internal/collections"
+
+	"conduit/internal/collections"
 )
 
 // ErrorInfo describes a single API error.

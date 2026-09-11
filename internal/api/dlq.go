@@ -5,7 +5,8 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
-	"github.com/sergiors/conduit/internal/collections"
+
+	"conduit/internal/collections"
 )
 
 // Default and maximum page sizes for the DLQ list endpoint. These cap the
