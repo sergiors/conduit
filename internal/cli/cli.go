@@ -5,6 +5,7 @@ package cli
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -32,6 +33,16 @@ func New(logger *log.Logger, writer io.Writer) *cli.Command {
 			workerCommand(logger),
 			healthCommand(logger),
 			apikeyCommand(logger),
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			if !cmd.Args().Present() {
+				return cli.ShowAppHelp(cmd)
+			}
+
+			return fmt.Errorf(
+				"conduit: unknown command: conduit %s\n\nRun 'conduit --help' for more information",
+				cmd.Args().First(),
+			)
 		},
 	}
 }

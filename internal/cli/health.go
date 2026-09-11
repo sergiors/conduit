@@ -9,11 +9,11 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/urfave/cli/v3"
+
 	"conduit/internal/config"
 	"conduit/internal/mongo"
 	"conduit/internal/redis"
-
-	"github.com/urfave/cli/v3"
 )
 
 // checkCtx returns a bounded context for a single dependency health probe.

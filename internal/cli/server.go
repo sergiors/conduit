@@ -4,10 +4,10 @@ import (
 	"context"
 	"log"
 
+	"github.com/urfave/cli/v3"
+
 	"conduit/internal/api"
 	"conduit/internal/config"
-
-	"github.com/urfave/cli/v3"
 )
 
 // apiRun dispatches to the API runtime. It is an indirection seam so tests can

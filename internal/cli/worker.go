@@ -4,10 +4,10 @@ import (
 	"context"
 	"log"
 
+	"github.com/urfave/cli/v3"
+
 	"conduit/internal/config"
 	"conduit/internal/worker"
-
-	"github.com/urfave/cli/v3"
 )
 
 // workerRun dispatches to the worker runtime. It is an indirection seam so tests
