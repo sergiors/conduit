@@ -44,7 +44,6 @@ type MeilisearchTransport struct {
 
 // NewMeilisearch builds a Meilisearch transport from its spec.
 func NewMeilisearch(ctx context.Context, spec MeilisearchSpec, logger *log.Logger) dispatch.Transport {
-	logger = nilGuard(logger)
 	if spec.Host == "" {
 		logger.Printf("Meilisearch transport requires a host")
 		return nil
@@ -175,7 +174,6 @@ func (t *MeilisearchTransport) Close() error { return nil }
 
 // buildMeilisearch decodes a raw spec and builds a Meilisearch transport.
 func buildMeilisearch(ctx context.Context, collectionName string, t collections.Type, rawSpec map[string]interface{}, logger *log.Logger) dispatch.Transport {
-	logger = nilGuard(logger)
 	var spec MeilisearchSpec
 	if err := decodeSpec(rawSpec, &spec); err != nil {
 		logger.Printf("Failed to decode Meilisearch transport spec for %s: %v", collectionName, err)

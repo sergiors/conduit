@@ -104,7 +104,6 @@ func mutableFieldsEqual(a, b collections.Sink) bool {
 
 // ApplyChanges applies the reconciliation changes to a dispatcher.
 func (r *Reconciliation) ApplyChanges(ctx context.Context, logger *log.Logger, collectionName string, disp dispatcher) {
-	logger = nilGuard(logger)
 	for _, change := range r.Changes {
 		switch change.Type {
 		case ChangeRemoved:
@@ -135,7 +134,6 @@ type dispatcher interface {
 
 // LogChanges logs the changes at the appropriate level.
 func (r *Reconciliation) LogChanges(logger *log.Logger, collectionName string) {
-	logger = nilGuard(logger)
 	for _, change := range r.Changes {
 		switch change.Type {
 		case ChangeAdded:

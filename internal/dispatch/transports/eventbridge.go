@@ -54,7 +54,6 @@ type EventBridgeTransport struct {
 
 // NewEventBridge builds an EventBridge transport from its spec.
 func NewEventBridge(ctx context.Context, spec EventBridgeSpec, logger *log.Logger) dispatch.Transport {
-	logger = nilGuard(logger)
 	if spec.EventBusName == "" {
 		logger.Printf("EventBridge transport requires an eventBusName")
 		return nil
@@ -176,7 +175,6 @@ func (t *EventBridgeTransport) Close() error { return nil }
 
 // buildEventBridge decodes a raw spec and builds an EventBridge transport.
 func buildEventBridge(ctx context.Context, collectionName string, t collections.Type, rawSpec map[string]interface{}, logger *log.Logger) dispatch.Transport {
-	logger = nilGuard(logger)
 	var spec EventBridgeSpec
 	if err := decodeSpec(rawSpec, &spec); err != nil {
 		logger.Printf("Failed to decode EventBridge transport spec for %s: %v", collectionName, err)

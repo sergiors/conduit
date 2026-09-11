@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 
 	"github.com/sergiors/conduit/internal/collections"
@@ -61,7 +60,6 @@ func RegisterTransport(t collections.Type, builder TransportBuilder) {
 // every matching event, so the watcher treats it as unsettled and retries; a nil
 // return is never produced for a configured sink.
 func BuildTransport(ctx context.Context, collectionName string, t collections.Type, spec map[string]interface{}, logger *log.Logger) Transport {
-	logger = nilGuard(logger)
 	builder, exists := transportBuilders[t]
 	if !exists {
 		err := fmt.Errorf("no transport registered for sink type %q (collection %s)", t, collectionName)
@@ -105,13 +103,4 @@ func RegisteredTransportTypes() []collections.Type {
 		types = append(types, t)
 	}
 	return types
-}
-
-// nilGuard returns a discard logger when logger is nil so a nil *log.Logger
-// never panics. It is the uniform nil-logger policy across the codebase.
-func nilGuard(logger *log.Logger) *log.Logger {
-	if logger == nil {
-		return log.New(io.Discard, "", 0)
-	}
-	return logger
 }

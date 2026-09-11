@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"time"
 
@@ -43,7 +42,6 @@ type RedisTransport struct {
 
 // NewRedis builds a Redis transport from its spec.
 func NewRedis(ctx context.Context, spec RedisSpec, logger *log.Logger) dispatch.Transport {
-	logger = nilGuard(logger)
 	if spec.URL == "" {
 		logger.Printf("Redis transport requires a url")
 		return nil
@@ -108,7 +106,6 @@ func (t *RedisTransport) Close() error {
 // Meilisearch's optional indexName, the stream is required and is never
 // defaulted to the collection name.
 func buildRedis(ctx context.Context, collectionName string, t collections.Type, rawSpec map[string]interface{}, logger *log.Logger) dispatch.Transport {
-	logger = nilGuard(logger)
 	var spec RedisSpec
 	if err := decodeSpec(rawSpec, &spec); err != nil {
 		logger.Printf("Failed to decode Redis transport spec for %s: %v", collectionName, err)
@@ -120,13 +117,4 @@ func buildRedis(ctx context.Context, collectionName string, t collections.Type, 
 
 func init() {
 	dispatch.RegisterTransport(collections.SinkTypeRedis, buildRedis)
-}
-
-// nilGuard returns a discard logger when logger is nil so a nil *log.Logger
-// never panics. It is the uniform nil-logger policy across the codebase.
-func nilGuard(logger *log.Logger) *log.Logger {
-	if logger == nil {
-		return log.New(io.Discard, "", 0)
-	}
-	return logger
 }

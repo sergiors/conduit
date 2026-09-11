@@ -40,7 +40,6 @@ type HTTPTransport struct {
 
 // NewHTTP builds an HTTP transport from its spec.
 func NewHTTP(ctx context.Context, spec HTTPSpec, logger *log.Logger) dispatch.Transport {
-	logger = nilGuard(logger)
 	if spec.Endpoint == "" {
 		logger.Printf("HTTP transport requires an endpoint")
 		return nil
@@ -108,7 +107,6 @@ func (t *HTTPTransport) Close() error { return nil }
 
 func init() {
 	dispatch.RegisterTransport(collections.SinkTypeHTTP, func(ctx context.Context, collectionName string, t collections.Type, rawSpec map[string]interface{}, logger *log.Logger) dispatch.Transport {
-		logger = nilGuard(logger)
 		var spec HTTPSpec
 		if err := decodeSpec(rawSpec, &spec); err != nil {
 			logger.Printf("Failed to decode HTTP transport spec for %s: %v", collectionName, err)

@@ -4,7 +4,6 @@
 package config
 
 import (
-	"io"
 	"log"
 	"os"
 	"time"
@@ -57,7 +56,6 @@ func LoadWorker(logger *log.Logger) Config {
 // (e.g. "0s", "-1s") are rejected because they would otherwise disable or
 // invert operational behavior such as graceful shutdown.
 func loadDuration(logger *log.Logger, name, value string, fallback time.Duration) time.Duration {
-	logger = nilGuard(logger)
 	if value == "" {
 		return fallback
 	}
@@ -80,24 +78,14 @@ func loadDuration(logger *log.Logger, name, value string, fallback time.Duration
 // logger.Fatalf (process exit) on a missing required environment variable. It
 // is only ever reached from the executable boundary (cmd/api and cmd/worker
 // call Load/LoadWorker), so the fatal exit is intentional and must not be
-// converted to a returned error. The injected logger is nil-guarded so a nil
-// logger still exits the process rather than panicking.
+// converted to a returned error. The injected logger is non-nil at this entry
+// point (the executables own logger creation).
 func requiredEnv(logger *log.Logger, key string) string {
-	logger = nilGuard(logger)
 	if value := os.Getenv(key); value != "" {
 		return value
 	}
 	logger.Fatalf("Required environment variable %s is not set", key)
 	return ""
-}
-
-// nilGuard returns a discard logger when logger is nil so a nil *log.Logger
-// never panics. It is the uniform nil-logger policy across the codebase.
-func nilGuard(logger *log.Logger) *log.Logger {
-	if logger == nil {
-		return log.New(io.Discard, "", 0)
-	}
-	return logger
 }
 
 // getEnv returns the value of the environment variable key, or defaultValue if

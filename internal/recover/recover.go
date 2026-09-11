@@ -2,7 +2,6 @@ package recover
 
 import (
 	"fmt"
-	"io"
 	"log"
 	"runtime/debug"
 )
@@ -15,7 +14,6 @@ import (
 // prevents process death. Use ProtectErr for per-event/per-tick bodies that
 // must let the surrounding loop continue.
 func Protect(logger *log.Logger, name string, fn func()) (recovered any, panicked bool) {
-	logger = nilGuard(logger)
 	defer func() {
 		if r := recover(); r != nil {
 			logger.Printf("panic in %s: %v\n%s", name, r, debug.Stack())
@@ -34,7 +32,6 @@ func Protect(logger *log.Logger, name string, fn func()) (recovered any, panicke
 // Normal errors returned by fn are passed through unchanged; recovery only
 // engages on a panic.
 func ProtectErr(logger *log.Logger, name string, fn func() error) (err error, panicked bool) {
-	logger = nilGuard(logger)
 	defer func() {
 		if r := recover(); r != nil {
 			logger.Printf("panic in %s: %v\n%s", name, r, debug.Stack())
@@ -42,13 +39,4 @@ func ProtectErr(logger *log.Logger, name string, fn func() error) (err error, pa
 		}
 	}()
 	return fn(), false
-}
-
-// nilGuard returns a discard logger when logger is nil so a nil *log.Logger
-// never panics. It is the uniform nil-logger policy across the codebase.
-func nilGuard(logger *log.Logger) *log.Logger {
-	if logger == nil {
-		return log.New(io.Discard, "", 0)
-	}
-	return logger
 }

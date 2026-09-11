@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"sync"
 	"time"
@@ -103,7 +102,6 @@ func NewManager(
 	cfg Config,
 	logger *log.Logger,
 ) *Manager {
-	logger = nilGuard(logger)
 	// Apply safe defaults so a zero-value Config still behaves correctly.
 	if cfg.SyncInterval == 0 {
 		cfg.SyncInterval = 30 * time.Second
@@ -707,13 +705,4 @@ type WatcherStats struct {
 	EventsProcessed int64
 	LastError       error
 	LastErrorTime   time.Time
-}
-
-// nilGuard returns a discard logger when logger is nil so a nil *log.Logger
-// never panics. It is the uniform nil-logger policy across the codebase.
-func nilGuard(logger *log.Logger) *log.Logger {
-	if logger == nil {
-		return log.New(io.Discard, "", 0)
-	}
-	return logger
 }

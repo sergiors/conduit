@@ -3,7 +3,6 @@ package mongo
 import (
 	"context"
 	"fmt"
-	"io"
 	"log"
 	"time"
 
@@ -35,7 +34,6 @@ type Config struct {
 // readiness. Replica set topology is managed externally (by MongoDB
 // administrators or operators).
 func NewClient(ctx context.Context, cfg Config, logger *log.Logger) (*Client, error) {
-	logger = nilGuard(logger)
 	if cfg.URI == "" {
 		return nil, fmt.Errorf("MONGODB_URI is required")
 	}
@@ -88,7 +86,6 @@ func (c *Client) Close(ctx context.Context) error {
 // as the writable PRIMARY. Transient errors while the node is recovering or
 // electing a PRIMARY are retried until the context is done.
 func waitForWritablePrimary(ctx context.Context, client *mongo.Client, logger *log.Logger) error {
-	logger = nilGuard(logger)
 	helloCmd := bson.D{{Key: "hello", Value: 1}}
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
@@ -117,7 +114,6 @@ func waitForWritablePrimary(ctx context.Context, client *mongo.Client, logger *l
 // replica-set-mode client has discovered the PRIMARY. Transient errors are
 // retried until the context is done.
 func waitForClientReady(ctx context.Context, client *mongo.Client, logger *log.Logger) error {
-	logger = nilGuard(logger)
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
@@ -133,13 +129,4 @@ func waitForClientReady(ctx context.Context, client *mongo.Client, logger *log.L
 		case <-ticker.C:
 		}
 	}
-}
-
-// nilGuard returns a discard logger when logger is nil so a nil *log.Logger
-// never panics. It is the uniform nil-logger policy across the codebase.
-func nilGuard(logger *log.Logger) *log.Logger {
-	if logger == nil {
-		return log.New(io.Discard, "", 0)
-	}
-	return logger
 }

@@ -123,7 +123,6 @@ func NewWatcher(
 	redisClient RedisClient,
 	logger *log.Logger,
 ) *Watcher {
-	logger = nilGuard(logger)
 	return &Watcher{
 		mongoClient:          mongoClient,
 		database:             database,

@@ -2,7 +2,6 @@ package retry
 
 import (
 	"context"
-	"io"
 	"log"
 	"math"
 	"sync"
@@ -80,7 +79,6 @@ func NewProcessor(
 	cfg Config,
 	logger *log.Logger,
 ) *Processor {
-	logger = nilGuard(logger)
 	return &Processor{
 		store:       store,
 		dlq:         dlqStore,
@@ -348,13 +346,4 @@ func (p *Processor) GetRetryQueueLength(ctx context.Context, collectionName stri
 		return 0, nil
 	}
 	return p.store.GetRetryQueueLength(ctx, collectionName)
-}
-
-// nilGuard returns a discard logger when logger is nil so a nil *log.Logger
-// never panics. It is the uniform nil-logger policy across the codebase.
-func nilGuard(logger *log.Logger) *log.Logger {
-	if logger == nil {
-		return log.New(io.Discard, "", 0)
-	}
-	return logger
 }

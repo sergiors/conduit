@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"time"
 
@@ -63,7 +62,6 @@ type Manager struct {
 
 // NewManager creates a new collection manager
 func NewManager(client *mongo.Client, database string, logger *log.Logger) *Manager {
-	logger = nilGuard(logger)
 	return &Manager{
 		client:     client,
 		database:   database,
@@ -406,13 +404,4 @@ func (m *Manager) Delete(ctx context.Context, name string) error {
 	m.notifyPublish(ctx, name)
 
 	return nil
-}
-
-// nilGuard returns a discard logger when logger is nil so a nil *log.Logger
-// never panics. It is the uniform nil-logger policy across the codebase.
-func nilGuard(logger *log.Logger) *log.Logger {
-	if logger == nil {
-		return log.New(io.Discard, "", 0)
-	}
-	return logger
 }
