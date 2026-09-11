@@ -21,10 +21,12 @@
 // physical MongoDB collection is created with changeStreamPreAndPostImages
 // enabled, and the capability is never disabled afterwards. The oldImage flag
 // is a runtime behavior that tells the watcher whether to request and forward
-// pre-images; enabling a stream with oldImage also ensures (idempotently) that
-// the physical collection has the capability, repairing collections created by
-// older Conduit versions or outside Conduit. MongoDB configuration and Conduit
-// configuration are therefore almost entirely independent.
+// pre-images; enabling a stream with oldImage only VERIFIES that the physical
+// collection has the capability (collections created through Conduit always
+// do), and fails with a validation error if it does not. Collections created
+// outside Conduit must be recreated through Conduit to gain the capability.
+// MongoDB configuration and Conduit configuration therefore remain almost
+// entirely independent.
 //
 // Collection Schema:
 //

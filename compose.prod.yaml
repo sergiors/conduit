@@ -1,24 +1,9 @@
 services:
-  redis:
-    image: redis:latest
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
-      timeout: 5s
-      retries: 5
-
   worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/sergiors/conduit:latest
     container_name: conduit
     command: ["conduit", "worker"]
     env_file: .env
-    depends_on:
-      redis:
-        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "conduit", "health"]
@@ -28,27 +13,12 @@ services:
       start_period: 10s
 
   api:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/sergiors/conduit:latest
     container_name: conduit-api
     command: ["conduit", "server"]
     ports:
       - 8080:8080
     env_file: .env
-    depends_on:
-      redis:
-        condition: service_healthy
-    restart: unless-stopped
-
-  ui:
-    build:
-      context: ./ui
-      dockerfile: Dockerfile
-    ports:
-      - 80:80
-    depends_on:
-      - api
     restart: unless-stopped
 
 volumes:

@@ -11,17 +11,60 @@ import (
 
 // EnableStream enables the CDC stream for a collection and configures oldImage.
 //
-// When oldImage is true, the physical collection's changeStreamPreAndPostImages
-// capability is ensured first: without it MongoDB silently omits
-// fullDocumentBeforeChange, and the pre-image is lost at the source. A MongoDB
-// failure rolls the enablement back, and re-enabling a failure is a retry.
-// The stream configuration is immutable: changing it requires disable +
-// re-enable, so a subsequent EnableStream returns ErrStreamAlreadyExists.
-// Returns ErrCollectionNotFound if the collection does not exist.
-// On success, fires OnPublish (best-effort).
+// The changeStreamPreAndPostImages capability is a permanent property of every
+// managed collection, provisioned exactly once at creation (see
+// createCollection); EnableStream never modifies it. When oldImage is true,
+// EnableStream only VERIFIES that the physical collection was created with the
+// capability — without it MongoDB silently omits fullDocumentBeforeChange and
+// the pre-image is lost at the source. Because verification precedes
+// persistence, a failed verification leaves config.collections untouched (no
+// rollback needed). The stream configuration is immutable: changing it requires
+// disable + re-enable, so a subsequent EnableStream returns
+// ErrStreamAlreadyExists. Immutability (ErrStreamAlreadyExists) is checked
+// BEFORE capability verification: a re-enable attempt is an immutability
+// violation regardless of the physical collection's state. Returns
+// ErrCollectionNotFound if the collection does not exist. On success, fires
+// OnPublish (best-effort).
 func (m *Manager) EnableStream(ctx context.Context, name string, oldImage bool) error {
+	// Verify the collection configuration exists before any MongoDB-level
+	// work; EnableStream is called by both the API and admin paths and unknown
+	// collections must surface ErrCollectionNotFound.
+	cfg, err := m.Get(ctx, name)
+	if err != nil {
+		return err
+	}
+
+	// The stream configuration is immutable. Guard immutability up front,
+	// BEFORE capability verification: a re-enable attempt is an immutability
+	// violation (409) even when the physical collection lacks the pre-image
+	// capability (which would otherwise surface as a 400 validation error). A
+	// change requires disable + re-enable.
+	if cfg.StreamEnabled {
+		return ErrStreamAlreadyExists
+	}
+
+	// oldImage requires the physical collection to already carry the
+	// changeStreamPreAndPostImages capability. This check is read-only and runs
+	// BEFORE persistence, so a failure never leaves the stream enabled. The
+	// physical collection may exist while its config document is validated (it
+	// was, in step 1) yet lack the capability — typically because it was created
+	// outside Conduit. Recreate it through Conduit to gain the capability.
+	if oldImage {
+		enabled, err := m.hasChangeStreamPreAndPostImages(ctx, name)
+		if err != nil {
+			return err
+		}
+		if !enabled {
+			return NewValidationError(
+				"collection %q does not have changeStreamPreAndPostImages enabled; recreate the collection through Conduit to enable oldImage streams",
+				name,
+			)
+		}
+	}
+
 	// Atomic conditional update: only succeeds when the stream is not enabled
-	// yet, validating existence before any MongoDB-level side effect.
+	// yet. Existence was already confirmed above, so MatchedCount == 0 can only
+	// mean the stream is already enabled (immutability of stream configuration).
 	filter := bson.M{
 		"collectionName": name,
 		"streamEnabled":  bson.M{"$ne": true},
@@ -54,40 +97,39 @@ func (m *Manager) EnableStream(ctx context.Context, name string, oldImage bool) 
 		return ErrStreamAlreadyExists
 	}
 
-	if oldImage {
-		if err := m.ensureChangeStreamPreAndPostImages(ctx, name); err != nil {
-			if rollbackErr := m.rollbackStream(ctx, name); rollbackErr != nil {
-				return fmt.Errorf("%w (rollback failed: %v)", err, rollbackErr)
-			}
-			return err
-		}
-	}
-
 	m.notifyPublish(ctx, name)
 	return nil
 }
 
-// rollbackStream undoes a partially-applied EnableStream after the capability
-// repair failed.
-func (m *Manager) rollbackStream(ctx context.Context, name string) error {
-	_, err := m.collection.UpdateOne(
-		ctx,
-		bson.M{"collectionName": name},
-		bson.M{
-			"$set": bson.M{
-				"streamEnabled": false,
-				"oldImage":      false,
-				"updatedAt":     time.Now(),
-			},
-			"$unset": bson.M{
-				"streamStartedAt": "",
-			},
-		},
-	)
+// hasChangeStreamPreAndPostImages reports whether the physical collection was
+// created with changeStreamPreAndPostImages enabled. It is read-only and never
+// modifies the collection: the capability is granted at creation and Conduit
+// never enables it afterwards. A missing physical collection is a corrupted
+// state — its config document exists (EnableStream already validated it) but
+// the collection does not — so we wrap the error rather than treat it as a
+// benign "not enabled".
+func (m *Manager) hasChangeStreamPreAndPostImages(ctx context.Context, name string) (bool, error) {
+	specs, err := m.client.Database(m.database).ListCollectionSpecifications(ctx, bson.M{"name": name})
 	if err != nil {
-		return fmt.Errorf("rollback stream for %s: %w", name, err)
+		return false, fmt.Errorf("list collection specifications for %s: %w", name, err)
 	}
-	return nil
+	if len(specs) == 0 {
+		return false, fmt.Errorf("physical collection %q does not exist: %w", name, ErrCollectionNotFound)
+	}
+
+	if len(specs[0].Options) == 0 {
+		return false, nil
+	}
+
+	var opts struct {
+		ChangeStreamPreAndPostImages struct {
+			Enabled bool `bson:"enabled"`
+		} `bson:"changeStreamPreAndPostImages"`
+	}
+	if err := bson.Unmarshal(specs[0].Options, &opts); err != nil {
+		return false, fmt.Errorf("parse collection options for %s: %w", name, err)
+	}
+	return opts.ChangeStreamPreAndPostImages.Enabled, nil
 }
 
 // DisableStream disables the CDC stream and clears oldImage — and unsets the
@@ -134,26 +176,4 @@ func (m *Manager) ListStreamEnabled(ctx context.Context) ([]Collection, error) {
 		return nil, err
 	}
 	return collections, nil
-}
-
-// ensureChangeStreamPreAndPostImages enables the changeStreamPreAndPostImages
-// capability on the physical collection via collMod, so MongoDB can serve
-// fullDocumentBeforeChange to the watcher. Idempotent. MongoDB versions before
-// 6.0 reject the command; the error aborts EnableStream — enabling a stream
-// with oldImage on a deployment that cannot produce pre-images would silently
-// breach the event contract.
-func (m *Manager) ensureChangeStreamPreAndPostImages(ctx context.Context, name string) error {
-	cmd := bson.D{
-		{
-			Key:   "collMod",
-			Value: name},
-		{
-			Key:   "changeStreamPreAndPostImages",
-			Value: bson.M{"enabled": true},
-		},
-	}
-	if err := m.client.Database(m.database).RunCommand(ctx, cmd).Err(); err != nil {
-		return fmt.Errorf("enable changeStreamPreAndPostImages for %s: %w", name, err)
-	}
-	return nil
 }

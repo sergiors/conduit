@@ -476,7 +476,7 @@ The API returns `201 Created` with the collection body.
    - The update is conditional: it only succeeds when `streamEnabled` is not already `true`.
    - If the update matches no document, Conduit checks whether the collection exists. If it does, `ErrStreamAlreadyExists` is returned; otherwise `ErrCollectionNotFound`.
    - Stream configuration is therefore immutable while enabled.
-4. **Physical MongoDB configuration**: when `oldImage` is `true`, `changeStreamPreAndPostImages` is ensured on the collection via `collMod` (idempotent; collections created through Conduit already have it). A failure aborts the enablement and rolls the recorded stream back: enabling a stream with `oldImage` on a deployment that cannot produce pre-images would silently drop every pre-image at the source.
+4. **Physical MongoDB configuration**: when `oldImage` is `true`, `EnableStream` verifies that the physical collection already has `changeStreamPreAndPostImages.enabled == true` (collections created through Conduit always do, since the capability is provisioned at creation). If it does not — a collection created outside Conduit — the enablement fails with a validation error and the stream configuration is not persisted: enabling a stream with `oldImage` on a collection that cannot produce pre-images would silently drop every pre-image at the source.
 5. **Configuration persistence**: `streamEnabled`, `oldImage`, and the first-start checkpoint `streamStartedAt` (a `primitive.Timestamp` from the API host clock) are updated in `config.collections`. The checkpoint anchors the first watcher run so no event between enablement and watcher start is skipped.
 6. **Notification**: the API publishes the collection name to `cdc:config-change`.
 7. **Worker reaction**:
@@ -937,7 +937,7 @@ The package deliberately contains no business logic beyond HTTP translation.
 Domain package for configuration.
 
 - `collection.go`: `Collection` struct, `Manager` store, collection CRUD, physical MongoDB collection creation, key index management.
-- `stream.go`: Stream enable/disable with immutability and `changeStreamPreAndPostImages` configuration.
+- `stream.go`: Stream enable/disable with immutability, and verification (not mutation) of the `changeStreamPreAndPostImages` capability when `oldImage` is requested.
 - `sink.go`: `Sink` and `Sink` structs (common metadata only), sink CRUD, shared validation.
 - `ttl.go`: TTL index creation/removal with immutability.
 - `protection.go`: Deletion protection toggle with conflict detection.

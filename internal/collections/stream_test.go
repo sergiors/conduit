@@ -8,7 +8,6 @@ import (
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -92,19 +91,14 @@ func TestManagerStream(t *testing.T) {
 	require.NoError(t, manager.Delete(ctx, "stream_test_table"))
 }
 
-// TestEnableStreamEnsuresPreImageCapability is the regression test for the
-// end-to-end oldImage contract: when a stream is enabled with oldImage, the
-// physical MongoDB collection MUST have the changeStreamPreAndPostImages
-// capability. Without it, MongoDB accepts the change stream but silently omits
-// fullDocumentBeforeChange on update/replace/delete events — the pre-image is
-// lost at the source before any Conduit code can see it.
-//
-// The regression target is a collection created WITHOUT the capability (as
-// pre-b415252 Conduit versions and external tooling did): EnableStream must
-// repair it. The test proves the observable behavior — an update to a document
-// must surface fullDocumentBeforeChange on the change stream that the watcher
-// opens — not just the collMod side effect.
-func TestEnableStreamEnsuresPreImageCapability(t *testing.T) {
+// TestEnableStreamRejectsMissingPreImageCapability codifies the oldImage
+// verify-not-repair contract: when a stream is enabled with oldImage on a
+// physical collection that does NOT have the changeStreamPreAndPostImages
+// capability (e.g. one created outside Conduit), EnableStream must reject the
+// enablement with a validation error and must NOT persist the stream-enabled
+// state. Enabling the same collection without oldImage (no capability check)
+// remains valid.
+func TestEnableStreamRejectsMissingPreImageCapability(t *testing.T) {
 	manager, client, ctx := newTestManager(t)
 
 	const name = "preimage_capability_test_table"
@@ -116,7 +110,9 @@ func TestEnableStreamEnsuresPreImageCapability(t *testing.T) {
 	}
 
 	// A collection created outside Manager.Create (no pre-image capability),
-	// mirroring pre-b415252 Conduit and external provisioning.
+	// mirroring external provisioning. Manager.Create refuses to adopt a
+	// collection that already physically exists (ErrCollectionAlreadyExists),
+	// so insert the config document directly.
 	require.NoError(t, client.Database("conduit_test").CreateCollection(ctx, name))
 	t.Cleanup(func() {
 		bgCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -127,11 +123,6 @@ func TestEnableStreamEnsuresPreImageCapability(t *testing.T) {
 	// Sanity check: the collection starts without the capability.
 	assert.False(t, hasPreImageCapability(ctx, t, client, name), "precondition: fresh collection has no pre-image capability")
 
-	// EnableStream requires a config document but Manager.Create refuses to
-	// adopt a collection that already physically exists (ErrCollectionAlreadyExists
-	// since commit 9551a5c). Insert the config document directly so the test can
-	// still prove EnableStream repairs the capability gap on a collection created
-	// outside Conduit.
 	cfg := &Collection{
 		CollectionName:     name,
 		StreamEnabled:      false,
@@ -147,84 +138,93 @@ func TestEnableStreamEnsuresPreImageCapability(t *testing.T) {
 		_, _ = manager.collection.DeleteOne(bgCtx, bson.M{"collectionName": name})
 	})
 
-	// EnableStream must enable the stream AND repair the physical collection's
-	// capability gap so the watcher receives pre-images.
-	require.NoError(t, manager.EnableStream(ctx, name, true))
+	// Enabling with oldImage fails with a validation error.
+	err = manager.EnableStream(ctx, name, true)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrValidation), "missing pre-image capability should surface as a validation error")
+
+	// The rejected enablement must NOT persist the stream-enabled state.
+	got, err := manager.Get(ctx, name)
+	require.NoError(t, err)
+	assert.False(t, got.StreamEnabled, "stream must not be enabled after rejected oldImage enablement")
+	assert.False(t, got.OldImage, "oldImage must not be set after rejected oldImage enablement")
+	assert.Nil(t, got.StreamStartedAt, "streamStartedAt must not be set after rejected oldImage enablement")
+
+	// Preserved behavior: the same collection can still be enabled WITHOUT
+	// oldImage — no capability check, no MongoDB-level verification.
+	require.NoError(t, manager.EnableStream(ctx, name, false))
 	t.Cleanup(func() {
 		bgCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		_ = manager.DisableStream(bgCtx, name)
 	})
-
-	// The change stream is opened through the same options the watcher uses,
-	// BEFORE the writes, so every operation is observed from the oplog.
-	streamCtx, streamCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer streamCancel()
-
-	opts := options.ChangeStream()
-	opts.SetFullDocument(options.UpdateLookup)
-	opts.SetFullDocumentBeforeChange(options.WhenAvailable)
-
-	coll := client.Database("conduit_test").Collection(name)
-	cursor, err := coll.Watch(streamCtx, mongo.Pipeline{}, opts)
+	got, err = manager.Get(ctx, name)
 	require.NoError(t, err)
-	defer cursor.Close(streamCtx)
-
-	writeCtx, writeCancel := context.WithTimeout(streamCtx, 15*time.Second)
-	defer writeCancel()
-
-	if _, err := coll.InsertOne(writeCtx, bson.M{"_id": "doc-1", "status": "active", "v": int32(1)}); err != nil {
-		require.NoError(t, err)
-	}
-	if err := coll.FindOneAndReplace(writeCtx, bson.M{"_id": "doc-1"}, bson.M{"_id": "doc-1", "status": "active", "v": int32(2)}).Err(); err != nil {
-		require.NoError(t, err)
-	}
-	if err := coll.FindOneAndUpdate(writeCtx, bson.M{"_id": "doc-1"}, bson.M{"$set": bson.M{"status": "shipped"}}).Err(); err != nil {
-		require.NoError(t, err)
-	}
-	if _, err := coll.DeleteOne(writeCtx, bson.M{"_id": "doc-1"}); err != nil {
-		require.NoError(t, err)
-	}
-
-	sawReplace := false
-	sawUpdate := false
-	sawDelete := false
-	deadline := time.After(20 * time.Second)
-	for !sawReplace || !sawUpdate || !sawDelete {
-		select {
-		case <-streamCtx.Done():
-			t.Fatalf("change stream ended before observing all pre-images: replace=%v update=%v delete=%v (last error: %v)", sawReplace, sawUpdate, sawDelete, cursor.Err())
-		case <-deadline:
-			t.Fatalf("timed out observing pre-images: replace=%v update=%v delete=%v", sawReplace, sawUpdate, sawDelete)
-		default:
-		}
-		if !cursor.Next(streamCtx) {
-			continue
-		}
-		var change bson.M
-		require.NoError(t, cursor.Decode(&change))
-		switch change["operationType"] {
-		case "replace":
-			assert.NotNil(t, change["fullDocumentBeforeChange"], "replace must carry a pre-image")
-			sawReplace = hasPreImage(change)
-		case "update":
-			assert.NotNil(t, change["fullDocumentBeforeChange"], "update must carry a pre-image")
-			sawUpdate = hasPreImage(change)
-		case "delete":
-			// Delete events may arrive before the earlier replace/update events
-			// are surfaced from the oplog in rare orderings; only assert
-			// pre-image presence when the expected document is observed.
-			if dk, ok := change["documentKey"].(bson.M); ok && dk["_id"] == "doc-1" {
-				assert.NotNil(t, change["fullDocumentBeforeChange"], "delete must carry a pre-image")
-				sawDelete = hasPreImage(change)
-			}
-		}
-	}
+	assert.True(t, got.StreamEnabled, "enablement without oldImage must succeed")
+	assert.False(t, got.OldImage)
 }
 
-func hasPreImage(change bson.M) bool {
-	doc, ok := change["fullDocumentBeforeChange"].(bson.M)
-	return ok && doc != nil
+// TestEnableStreamAlreadyEnabledTakesPrecedenceOverCapability is a regression
+// test for the immutability guard in EnableStream. A re-enable attempt on an
+// already-enabled stream is an immutability violation (ErrStreamAlreadyExists)
+// and must be surfaced even when the physical collection has lost the
+// changeStreamPreAndPostImages capability — which would otherwise produce a 400
+// validation error. Immutability (409) must take precedence over capability
+// validation (400).
+func TestEnableStreamAlreadyEnabledTakesPrecedenceOverCapability(t *testing.T) {
+	manager, client, ctx := newTestManager(t)
+
+	const name = "precedence_capability_test_table"
+
+	// Cleanup leftovers
+	if _, err := manager.Get(ctx, name); err == nil {
+		_ = manager.DisableDeletionProtection(ctx, name)
+		_ = manager.Delete(ctx, name)
+	}
+
+	// A Conduit-created collection carries the changeStreamPreAndPostImages
+	// capability, so enabling with oldImage works.
+	table := &Collection{
+		CollectionName: name,
+		StreamEnabled:  false,
+	}
+	require.NoError(t, manager.Create(ctx, table))
+	require.NoError(t, manager.EnableStream(ctx, name, true))
+
+	got, err := manager.Get(ctx, name)
+	require.NoError(t, err)
+	assert.True(t, got.StreamEnabled)
+	assert.True(t, got.OldImage)
+
+	// Simulate capability loss on the physical collection: collMod disables
+	// changeStreamPreAndPostImages on the already-created collection. The
+	// config document still has streamEnabled=true; only the physical
+	// capability went away.
+	cmd := bson.D{
+		{Key: "collMod", Value: name},
+		{Key: "changeStreamPreAndPostImages", Value: bson.M{"enabled": false}},
+	}
+	require.NoError(t, client.Database("conduit_test").RunCommand(ctx, cmd).Err())
+
+	// A re-enable attempt with oldImage=true must surface the immutability
+	// error — NOT a validation error — even though the physical capability is
+	// gone.
+	err = manager.EnableStream(ctx, name, true)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrStreamAlreadyExists),
+		"re-enable with oldImage must return ErrStreamAlreadyExists (immutability precedes capability), got: %v", err)
+
+	// Immutability is independent of oldImage: re-enabling with oldImage=false
+	// must also return ErrStreamAlreadyExists.
+	err = manager.EnableStream(ctx, name, false)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrStreamAlreadyExists),
+		"re-enable without oldImage must return ErrStreamAlreadyExists, got: %v", err)
+
+	// Cleanup: disable the stream (idempotent), then drop the collection.
+	require.NoError(t, manager.DisableStream(ctx, name))
+	manager.DisableDeletionProtection(ctx, name)
+	manager.Delete(ctx, name)
 }
 
 // hasPreImageCapability reads the changeStreamPreAndPostImages setting from

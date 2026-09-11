@@ -187,8 +187,8 @@ func (m *Manager) createCollection(ctx context.Context, collection *Collection) 
 	// permanent capability of every managed collection, enabled exactly once at
 	// creation. It is independent of the oldImage runtime flag: MongoDB is
 	// always capable of producing pre-images, and Conduit decides at runtime
-	// whether to request and forward them. EnableStream additionally ensures
-	// the capability for collections created outside this path.
+	// whether to request and forward them. EnableStream verifies this capability
+	// when oldImage is requested; it never enables it here.
 	if err := db.CreateCollection(ctx, collectionName, opts); err != nil {
 		return fmt.Errorf("create collection: %w", err)
 	}
