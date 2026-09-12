@@ -4,6 +4,8 @@ services:
     container_name: conduit
     command: ["conduit", "worker"]
     env_file: .env
+    ports:
+      - 9090:9090
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "conduit", "health"]

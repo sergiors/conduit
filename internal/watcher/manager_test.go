@@ -100,7 +100,7 @@ func newFailClosedWatcherManager(t *testing.T, store *fakeCollectionsStore) (*Ma
 	fr := newFakeRedis()
 	disp := dispatch.NewDispatcher()
 	proc := retry.NewProcessor(nil, nil, disp, retry.DefaultConfig(), discardLogger)
-	mgr := NewManager(client, "conduit", store, fr, disp, proc, DefaultConfig(), discardLogger)
+	mgr := NewManager(client, "conduit", store, fr, disp, proc, DefaultConfig(), discardLogger, nil)
 	mgr.runCtx, mgr.runCancel = context.WithCancel(context.Background())
 	t.Cleanup(mgr.runCancel)
 	return mgr, fr, disp, proc

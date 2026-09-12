@@ -14,6 +14,7 @@ import (
 
 	"conduit/internal/collections"
 	"conduit/internal/dispatch"
+	"conduit/internal/metrics"
 	"conduit/internal/recover"
 	redisclient "conduit/internal/redis"
 	"conduit/internal/retry"
@@ -41,6 +42,7 @@ type Manager struct {
 	syncInterval       time.Duration
 	pubsub             *redis.PubSub
 	configChan         <-chan *redis.Message
+	metrics            *metrics.Metrics // nil when metrics disabled
 	logger             *log.Logger
 
 	// Runtime state
@@ -102,6 +104,7 @@ func NewManager(
 	retryProcessor *retry.Processor,
 	cfg Config,
 	logger *log.Logger,
+	m *metrics.Metrics,
 ) *Manager {
 	// Apply safe defaults so a zero-value Config still behaves correctly.
 	if cfg.SyncInterval == 0 {
@@ -117,6 +120,7 @@ func NewManager(
 		watchers:           make(map[string]*Watcher),
 		currentSinks:       make(map[string][]collections.Sink),
 		syncInterval:       cfg.SyncInterval,
+		metrics:            m,
 		logger:             logger,
 	}
 }
@@ -317,6 +321,9 @@ func (m *Manager) startWatcher(ctx context.Context, collection collections.Colle
 
 	m.watchers[collection.CollectionName] = watcher
 
+	// Record the watcher as running now that it is registered and started.
+	m.metrics.SetWatcherRunning(collection.CollectionName, watcher.IsRunning())
+
 	// Register collection with retry processor
 	if m.retryProcessor != nil {
 		m.retryProcessor.RegisterCollection(collection.CollectionName)
@@ -342,6 +349,9 @@ func (m *Manager) stopWatcher(ctx context.Context, collectionName string) error 
 	if err := watcher.Stop(ctx); err != nil {
 		return err
 	}
+
+	// The watcher is removed; record it as not running.
+	m.metrics.SetWatcherRunning(collectionName, false)
 
 	// Clear sinks from dispatcher
 	if d, ok := m.dispatcher.(*dispatch.Dispatcher); ok {
@@ -390,6 +400,9 @@ func (m *Manager) handleEvent(ctx context.Context, collectionName string, record
 		if enqErr := m.queueRetry(ctx, collectionName, record, eventID); enqErr != nil {
 			return fmt.Errorf("%w: dispatch %v; enqueue retry: %w", ErrEventUnsettled, err, enqErr)
 		}
+		// Settled by the retry-queue path: the event is durably queued for a
+		// later retry. Count it as processed (settled) for metrics.
+		m.metrics.ObserveEventsProcessed(collectionName, record.RecordType)
 		return nil
 	}
 
@@ -402,6 +415,9 @@ func (m *Manager) handleEvent(ctx context.Context, collectionName string, record
 	if err := m.redisClient.MarkProcessed(bkctx, eventID, processedEventTTL); err != nil {
 		m.logger.Printf("Failed to mark event as processed: %v", err)
 	}
+
+	// Count the dispatched event as settled (delivered to all sinks).
+	m.metrics.ObserveEventsProcessed(collectionName, record.RecordType)
 
 	return nil
 }

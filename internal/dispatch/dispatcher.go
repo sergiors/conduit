@@ -40,6 +40,11 @@ type Dispatcher struct {
 	mu    sync.RWMutex
 
 	cfg Config
+
+	// observer, when non-nil, is notified of each delivery attempt outcome so
+	// per-sink delivery metrics can be recorded. It is nil in tests and when
+	// metrics are disabled.
+	observer SinkDeliveryObserver
 }
 
 // NewDispatcher creates a new event dispatcher using default per-sink lane
@@ -56,6 +61,16 @@ func NewDispatcherWithConfig(cfg Config) *Dispatcher {
 		sinks: make(map[string][]*lane),
 		cfg:   sanitizeConfig(cfg),
 	}
+}
+
+// NewDispatcherWithObserver creates a new event dispatcher with a per-sink lane
+// delivery observer (nil allowed). It behaves exactly like NewDispatcher but
+// records delivery outcomes through obs. The worker wires *metrics.Metrics here
+// (via an adapter); tests may pass a recording fake.
+func NewDispatcherWithObserver(cfg Config, obs SinkDeliveryObserver) *Dispatcher {
+	d := NewDispatcherWithConfig(cfg)
+	d.observer = obs
+	return d
 }
 
 // sanitizeConfig replaces zero/negative values with the dispatcher defaults so
@@ -76,7 +91,8 @@ func (d *Dispatcher) laneCount() (queueSize, workerCount int) {
 }
 
 // Register adds a runtime sink for a collection, creating and starting its
-// delivery lane.
+// delivery lane. The collection name is carried onto the lane so per-sink
+// delivery metrics can be labeled by collection.
 func (d *Dispatcher) Register(collection string, sink *RuntimeSink) {
 	queueSize, workerCount := d.laneCount()
 
@@ -86,7 +102,7 @@ func (d *Dispatcher) Register(collection string, sink *RuntimeSink) {
 	if d.sinks[collection] == nil {
 		d.sinks[collection] = make([]*lane, 0)
 	}
-	d.sinks[collection] = append(d.sinks[collection], newLane(sink, queueSize, workerCount))
+	d.sinks[collection] = append(d.sinks[collection], newLaneFor(sink, queueSize, workerCount, collection, d.observer))
 }
 
 // Dispatch sends a stream record to all runtime sinks for a collection.
@@ -109,7 +125,11 @@ func (d *Dispatcher) Register(collection string, sink *RuntimeSink) {
 // the lane is closed. Dispatch then waits for every submitted job to complete
 // and returns a non-nil error if any matching sink delivery failed or any job
 // could not be submitted (context cancellation or a lane closed concurrently).
-func (d *Dispatcher) Dispatch(ctx context.Context, collection string, record streams.StreamRecord) error {
+func (d *Dispatcher) Dispatch(
+	ctx context.Context,
+	collection string,
+	record streams.StreamRecord,
+) error {
 	d.mu.RLock()
 	lanes := d.sinks[collection]
 	d.mu.RUnlock()

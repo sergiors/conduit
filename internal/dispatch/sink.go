@@ -4,10 +4,24 @@ import (
 	"context"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"conduit/internal/collections"
 	"conduit/internal/streams"
 )
+
+// SinkDeliveryObserver receives per-delivery outcomes from sink lanes. It is a
+// consumer-side interface defined here so dispatch stays decoupled from any
+// concrete observability implementation; *metrics.Metrics satisfies it via a
+// thin adapter in the worker package. When nil, no delivery metrics are
+// recorded. Retry deliveries re-dispatch through the same Dispatcher.Dispatch,
+// so retry attempts are observed identically.
+type SinkDeliveryObserver interface {
+	// ObserveSinkDelivery is called for every delivery attempt made by a sink
+	// lane: it carries the collection, the sink type, the measured delivery
+	// duration, and the Send outcome (nil error => success).
+	ObserveSinkDelivery(collection string, sinkType collections.Type, duration time.Duration, err error)
+}
 
 // sinkSnapshot is an immutable copy of a sink's persisted configuration,
 // swapped atomically so Send evaluates against a consistent view without a

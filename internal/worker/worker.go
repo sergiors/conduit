@@ -16,6 +16,7 @@ import (
 	"conduit/internal/config"
 	"conduit/internal/dispatch"
 	_ "conduit/internal/dispatch/transports" // Register transport builders via init()
+	"conduit/internal/metrics"
 	"conduit/internal/mongo"
 	"conduit/internal/redis"
 	"conduit/internal/retry"
@@ -29,6 +30,9 @@ type Worker struct {
 	dispatcher         *dispatch.Dispatcher
 	watcherManager     *watcher.Manager
 	retryProcessor     *retry.Processor
+	metrics            *metrics.Metrics
+	metricsServer      *metrics.Server
+	metricsRefresher   *metrics.Refresher
 	logger             *log.Logger
 
 	shutdownOnce atomic.Bool
@@ -72,8 +76,25 @@ func NewWorker(cfg config.Config, logger *log.Logger) (*Worker, error) {
 		return nil, err
 	}
 
-	// Initialize dispatcher
-	dispatcher := dispatch.NewDispatcher()
+	// Initialize metrics. The worker's Prometheus surface is a dedicated,
+	// non-global registry served on cfg.MetricsAddr. Metrics are opt-in: an
+	// empty MetricsAddr disables them — metrics stay nil and every
+	// instrumentation call site is a no-op (no server is started).
+	var metricsInstance *metrics.Metrics
+	var metricsServer *metrics.Server
+	if cfg.MetricsAddr != "" {
+		metricsInstance = metrics.New()
+		metricsServer = metrics.NewServer(cfg.MetricsAddr, metricsInstance.Handler(), logger)
+	}
+
+	// Initialize dispatcher. It records per-sink delivery metrics through the
+	// metrics instance when present.
+	var dispatcher *dispatch.Dispatcher
+	if metricsInstance != nil {
+		dispatcher = dispatch.NewDispatcherWithObserver(dispatch.Config{}, metricsObserver{metrics: metricsInstance})
+	} else {
+		dispatcher = dispatch.NewDispatcher()
+	}
 
 	// Initialize retry processor. The collections.Manager owns the MongoDB DLQ
 	// (config.dlq) and is passed as the DLQ dependency for exhausted retry
@@ -97,7 +118,18 @@ func NewWorker(cfg config.Config, logger *log.Logger) (*Worker, error) {
 		retryProcessor,
 		watcherCfg,
 		logger,
+		metricsInstance,
 	)
+
+	// Wire the gauge sources (retry queue depth, DLQ entries) into a refresher
+	// that periodically samples them so Prometheus does not pay for MongoDB /
+	// Redis round trips on every scrape.
+	var metricsRefresher *metrics.Refresher
+	if metricsInstance != nil {
+		metricsRefresher = metrics.NewRefresher(metricsInstance, metrics.DefaultRefreshInterval, logger)
+		metricsRefresher.AddSource(&retryQueueGaugeSource{processor: retryProcessor})
+		metricsRefresher.AddSource(&dlqGaugeSource{collectionsManager: collectionsManager})
+	}
 
 	return &Worker{
 		mongoClient:        mongoClient,
@@ -106,6 +138,9 @@ func NewWorker(cfg config.Config, logger *log.Logger) (*Worker, error) {
 		dispatcher:         dispatcher,
 		watcherManager:     watcherManager,
 		retryProcessor:     retryProcessor,
+		metrics:            metricsInstance,
+		metricsServer:      metricsServer,
+		metricsRefresher:   metricsRefresher,
 		logger:             logger,
 	}, nil
 }
@@ -115,9 +150,11 @@ func NewWorker(cfg config.Config, logger *log.Logger) (*Worker, error) {
 //  1. watcher manager (cancels the run ctx, waits for its loops and every
 //     watcher, closes pub/sub) — no new events flow while bookkeeping drains;
 //  2. retry processor (waits for the current processQueue pass to finish);
-//  3. dispatcher (closes all sinks/transports);
-//  4. redis client;
-//  5. mongo client.
+//  3. metrics refresher (stops gauges from sampling while tearing down);
+//  4. dispatcher (closes all sinks/transports);
+//  5. redis client;
+//  6. mongo client;
+//  7. metrics server (last, so /metrics stays serving through the drain).
 //
 // Individual errors are collected and logged; the combined error is returned.
 // Shutdown is idempotent: calling it more than once is a no-op.
@@ -142,6 +179,15 @@ func (w *Worker) Shutdown(ctx context.Context) error {
 		errs = append(errs, err)
 	}
 
+	// Stop the metrics refresher after the data plane so it is not sampling
+	// while the gauge sources are torn down.
+	if w.metricsRefresher != nil {
+		if err := w.metricsRefresher.Stop(ctx); err != nil {
+			w.logger.Printf("Error stopping metrics refresher: %v", err)
+			errs = append(errs, err)
+		}
+	}
+
 	if err := w.dispatcher.Close(); err != nil {
 		w.logger.Printf("Error closing dispatcher: %v", err)
 		errs = append(errs, err)
@@ -157,13 +203,39 @@ func (w *Worker) Shutdown(ctx context.Context) error {
 		errs = append(errs, err)
 	}
 
+	// Stop the metrics server last so the /metrics endpoint stays serving
+	// through the whole data-plane drain.
+	if w.metricsServer != nil {
+		if err := w.metricsServer.Stop(ctx); err != nil {
+			w.logger.Printf("Error stopping metrics server: %v", err)
+			errs = append(errs, err)
+		}
+	}
+
 	w.logger.Println("Worker stopped")
 	return errors.Join(errs...)
 }
 
-// start boots the worker's runtime components (watcher manager and retry processor).
+// start boots the worker's runtime components: the metrics server, the gauge
+// refresher, the watcher manager, and the retry processor.
 func (w *Worker) start(ctx context.Context) error {
 	w.logger.Println("Worker starting...")
+
+	// Start the metrics server first so Prometheus can scrape from the moment
+	// the worker begins operating. A bind error (port conflict) fails startup
+	// fast.
+	if w.metricsServer != nil {
+		if err := w.metricsServer.Start(ctx); err != nil {
+			return err
+		}
+	}
+
+	// Start the gauge refresher so retry/DLQ gauges populate early.
+	if w.metricsRefresher != nil {
+		if err := w.metricsRefresher.Start(ctx); err != nil {
+			return err
+		}
+	}
 
 	// Start watcher manager
 	if err := w.watcherManager.Start(ctx); err != nil {

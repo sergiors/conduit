@@ -76,3 +76,28 @@ func TestLoad_ShutdownTimeoutDefault(t *testing.T) {
 
 	assert.Equal(t, 30*time.Second, cfg.ShutdownTimeout)
 }
+
+func TestLoad_MetricsAddrDisabledWhenUnset(t *testing.T) {
+	t.Setenv("MONGODB_URI", "mongodb://localhost:27017")
+	t.Setenv("MONGODB_DATABASE", "conduit")
+	t.Setenv("REDIS_URI", "redis://localhost:6379")
+	// Clear METRICS_ADDR explicitly so a developer's exported value cannot leak
+	// in and mask the default.
+	t.Setenv("METRICS_ADDR", "")
+
+	cfg := Load(discardLogger)
+
+	// Metrics are opt-in: unset METRICS_ADDR disables them.
+	assert.Equal(t, "", cfg.MetricsAddr)
+}
+
+func TestLoad_MetricsAddrOverride(t *testing.T) {
+	t.Setenv("MONGODB_URI", "mongodb://localhost:27017")
+	t.Setenv("MONGODB_DATABASE", "conduit")
+	t.Setenv("REDIS_URI", "redis://localhost:6379")
+	t.Setenv("METRICS_ADDR", ":9100")
+
+	cfg := Load(discardLogger)
+
+	assert.Equal(t, ":9100", cfg.MetricsAddr)
+}

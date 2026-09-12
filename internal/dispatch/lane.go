@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"time"
 
 	"conduit/internal/streams"
 )
@@ -65,6 +66,13 @@ type lane struct {
 	stop chan struct{}
 	wg   sync.WaitGroup
 
+	// collection is the collection this lane belongs to, recorded at
+	// registration so per-sink delivery metrics can be labeled by collection.
+	collection string
+	// observer, when non-nil, receives each delivery attempt outcome (see
+	// SinkDeliveryObserver). It is nil in tests and when metrics are disabled.
+	observer SinkDeliveryObserver
+
 	// submitWG tracks in-flight submit calls so close can wait for every
 	// blocked/racing submit to settle before the workers drain and exit.
 	submitWG sync.WaitGroup
@@ -78,14 +86,22 @@ type lane struct {
 	closeOnce sync.Once
 }
 
-// newLane creates a lane for a runtime sink and starts its worker pool.
-// workerCount is the number of delivery worker goroutines.
-func newLane(sink *RuntimeSink, queueSize, workerCount int) *lane {
+// newLaneFor creates a lane carrying a collection label and an optional
+// delivery observer, used by Register when the dispatcher has an observer.
+func newLaneFor(
+	sink *RuntimeSink,
+	queueSize,
+	workerCount int,
+	collection string,
+	observer SinkDeliveryObserver,
+) *lane {
 	l := &lane{
-		sink:   sink,
-		jobs:   make(chan job, queueSize),
-		reject: make(chan struct{}),
-		stop:   make(chan struct{}),
+		sink:       sink,
+		jobs:       make(chan job, queueSize),
+		reject:     make(chan struct{}),
+		stop:       make(chan struct{}),
+		collection: collection,
+		observer:   observer,
 	}
 	l.wg.Add(workerCount)
 	for i := 0; i < workerCount; i++ {
@@ -120,8 +136,20 @@ func (l *lane) run() {
 // deliver runs the sink's Send for a single job and reports the outcome. The
 // shared done channel is buffered to the Dispatch's lane count, so this never
 // blocks regardless of dispatch goroutine scheduling.
+//
+// When the lane carries an observer, the delivery is timed around the Send call
+// and the outcome is observed. The outcome reflects the per-sink lane result:
+// success means the event was accepted by the sink's routing/delivery path
+// (which includes a filtered no-op returning nil), failure means Send returned
+// an error. Lane-submit failures (context cancellation / lane closed) are never
+// observed here because they happen before a transport attempt and settle in the
+// dispatcher's submit path instead.
 func (l *lane) deliver(j job) {
+	start := time.Now()
 	err := l.sink.Send(j.ctx, j.record)
+	if l.observer != nil {
+		l.observer.ObserveSinkDelivery(l.collection, l.sink.Type, time.Since(start), err)
+	}
 	j.done <- err
 }
 

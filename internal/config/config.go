@@ -15,22 +15,25 @@ type Config struct {
 	MongoDBDatabase string
 	RedisURI        string
 	Port            string
+	MetricsAddr     string
 	ShutdownTimeout time.Duration
 }
 
 // Load reads the full application configuration from the environment; every
 // conduit command uses it. It requires the three connection settings every
 // command needs — MONGODB_URI, MONGODB_DATABASE and REDIS_URI — plus the
-// optional PORT (default "8080") and SHUTDOWN_TIMEOUT (default 30s) tuning
-// knobs. There is deliberately a single loader: there is no longer a reason to
-// let some commands omit the broker configuration, so the whole CLI stays
-// consistent about the settings it reads.
+// optional PORT (default "8080"), the opt-in METRICS_ADDR (the worker's
+// Prometheus /metrics listen address; metrics are disabled when unset) and
+// SHUTDOWN_TIMEOUT (default 30s) tuning knobs. There is deliberately a single
+// loader: there is no longer a reason to let some commands omit the broker
+// configuration, so the whole CLI stays consistent about the settings it reads.
 func Load(logger *log.Logger) Config {
 	return Config{
 		MongoDBURI:      requiredEnv(logger, "MONGODB_URI"),
 		MongoDBDatabase: requiredEnv(logger, "MONGODB_DATABASE"),
 		RedisURI:        requiredEnv(logger, "REDIS_URI"),
 		Port:            getEnv("PORT", "8080"),
+		MetricsAddr:     getEnv("METRICS_ADDR", ""),
 		ShutdownTimeout: loadDuration(logger, "SHUTDOWN_TIMEOUT", getEnv("SHUTDOWN_TIMEOUT", "30s"), 30*time.Second),
 	}
 }

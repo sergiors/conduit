@@ -148,6 +148,39 @@ func TestRetryEventStructure(t *testing.T) {
 	})
 }
 
+// TestRegisteredCollections verifies the exported snapshot of registered
+// collections reflects register/unregister and returns a copy (unaffected by a
+// later mutation of the source).
+func TestRegisteredCollections(t *testing.T) {
+	p := NewProcessor(nil, nil, nil, DefaultConfig(), discardLogger)
+
+	assert.Empty(t, p.RegisteredCollections(), "nothing registered initially")
+
+	p.RegisterCollection("users")
+	p.RegisterCollection("orders")
+	p.RegisterCollection("users") // duplicates are idempotent
+
+	got := p.RegisteredCollections()
+	require.Len(t, got, 2)
+	assert.Contains(t, got, "users")
+	assert.Contains(t, got, "orders")
+
+	// It must be an independent snapshot: mutating the returned slice must not
+	// affect the processor's registry.
+	got[0] = "mutated"
+	after := p.RegisteredCollections()
+	assert.Contains(t, after, "users")
+	assert.Contains(t, after, "orders")
+
+	p.UnregisterCollection("users")
+	afterUnreg := p.RegisteredCollections()
+	assert.Len(t, afterUnreg, 1)
+	assert.Contains(t, afterUnreg, "orders")
+
+	p.UnregisterCollection("orders")
+	assert.Empty(t, p.RegisteredCollections())
+}
+
 func TestProcessorStop(t *testing.T) {
 	t.Run("Stop before Start is safe", func(t *testing.T) {
 		processor := NewProcessor(nil, nil, nil, DefaultConfig(), discardLogger)

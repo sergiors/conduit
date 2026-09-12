@@ -366,6 +366,9 @@ MONGODB_URI=mongodb://localhost:27017/?replicaSet=rs0
 MONGODB_DATABASE=conduit
 REDIS_URI=redis://localhost:6379
 PORT=8080
+# Optional: the worker's Prometheus /metrics listen address; metrics are
+# disabled when unset.
+# METRICS_ADDR=:9090
 # Optional: bounded by a 30s default; applies to the worker's graceful shutdown.
 # SHUTDOWN_TIMEOUT=45s
 # Optional: only needed for the EventBridge sink. AWS_ACCESS_KEY_ID,
@@ -403,6 +406,28 @@ make build
 ```
 
 Binaries are written to `./bin/`.
+
+### Prometheus metrics
+
+The worker exposes operational metrics on a dedicated Prometheus `/metrics`
+endpoint, **opt-in** via `METRICS_ADDR` (e.g. `:9090`); when `METRICS_ADDR` is
+unset, metrics are disabled and no metrics server is started. Scrape it from the
+worker process with Prometheus (or any OpenMetrics-compatible scraper). The
+exposed metric families are:
+
+- `conduit_watcher_running{collection}` — 1 when a collection's watcher is
+  running, 0 otherwise.
+- `conduit_events_processed_total{collection,event_type}` — events settled
+  (delivered or durably queued for retry), by collection and event type
+  (INSERT/MODIFY/REMOVE).
+- `conduit_sink_deliveries_total{collection,sink_type,outcome}` — per-sink
+  delivery attempts, with `outcome` bounded to `success`/`failure`.
+- `conduit_sink_delivery_duration_seconds{collection,sink_type}` — histogram of
+  per-sink delivery attempt durations.
+- `conduit_retry_queue_depth{collection}` — gauge of a collection's retry queue
+  depth (refreshed every 15s).
+- `conduit_dlq_entries{collection}` — gauge of a collection's dead-letter entry
+  count (refreshed every 15s).
 
 ---
 

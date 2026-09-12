@@ -498,7 +498,7 @@ func TestResumeTokenPreservation(t *testing.T) {
 func TestManagerCreation(t *testing.T) {
 	t.Run("new manager with correct configuration", func(t *testing.T) {
 		cfg := DefaultConfig()
-		manager := NewManager(nil, "conduit", nil, nil, nil, nil, cfg, discardLogger)
+		manager := NewManager(nil, "conduit", nil, nil, nil, nil, cfg, discardLogger, nil)
 
 		assert.NotNil(t, manager)
 		assert.Equal(t, "conduit", manager.database)
@@ -535,7 +535,7 @@ func TestManagerConfig(t *testing.T) {
 func TestManagerMarkProcessedTTL(t *testing.T) {
 	t.Run("handleEvent marks processed with the fixed 24h TTL", func(t *testing.T) {
 		fr := newFakeRedis()
-		manager := NewManager(nil, "conduit", nil, fr, &fakeDispatcher{}, nil, Config{}, discardLogger)
+		manager := NewManager(nil, "conduit", nil, fr, &fakeDispatcher{}, nil, Config{}, discardLogger, nil)
 		record := streams.StreamRecord{TableName: "users", EventID: "users:abc"}
 
 		err := manager.handleEvent(context.Background(), "users", record)
@@ -548,7 +548,7 @@ func TestManagerMarkProcessedTTL(t *testing.T) {
 
 func TestManagerStopIdempotent(t *testing.T) {
 	t.Run("Stop before Start is safe", func(t *testing.T) {
-		manager := NewManager(nil, "conduit", nil, nil, nil, nil, DefaultConfig(), discardLogger)
+		manager := NewManager(nil, "conduit", nil, nil, nil, nil, DefaultConfig(), discardLogger, nil)
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 
@@ -556,7 +556,7 @@ func TestManagerStopIdempotent(t *testing.T) {
 	})
 
 	t.Run("Stop twice returns nil", func(t *testing.T) {
-		manager := NewManager(nil, "conduit", nil, nil, nil, nil, DefaultConfig(), discardLogger)
+		manager := NewManager(nil, "conduit", nil, nil, nil, nil, DefaultConfig(), discardLogger, nil)
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 
@@ -625,7 +625,7 @@ func TestManagerStartWatcherDerivesFromRunCtx(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = client.Disconnect(context.Background()) })
 
-	manager := NewManager(client, "conduit", nil, nil, nil, nil, DefaultConfig(), discardLogger)
+	manager := NewManager(client, "conduit", nil, nil, nil, nil, DefaultConfig(), discardLogger, nil)
 	manager.runCtx, manager.runCancel = context.WithCancel(context.Background())
 
 	// startWatcher with a nil redisClient is tolerable here: watchOnce only
@@ -685,7 +685,7 @@ func TestManagerStartWatcherResumeTokenFailure(t *testing.T) {
 	// A sentinel representing a transient Redis outage (timeout / failover).
 	fr.getErr = errors.New("redis down")
 
-	manager := NewManager(client, "conduit", nil, fr, nil, nil, DefaultConfig(), discardLogger)
+	manager := NewManager(client, "conduit", nil, fr, nil, nil, DefaultConfig(), discardLogger, nil)
 	manager.runCtx, manager.runCancel = context.WithCancel(context.Background())
 	t.Cleanup(manager.runCancel)
 
@@ -712,7 +712,7 @@ func TestManagerStartWatcherResumeToken(t *testing.T) {
 		token := "existing-resume-token"
 		fr.resumeTokens["users"] = token
 
-		manager := NewManager(client, "conduit", nil, fr, nil, nil, DefaultConfig(), discardLogger)
+		manager := NewManager(client, "conduit", nil, fr, nil, nil, DefaultConfig(), discardLogger, nil)
 		manager.runCtx, manager.runCancel = context.WithCancel(context.Background())
 		t.Cleanup(manager.runCancel)
 
@@ -729,7 +729,7 @@ func TestManagerStartWatcherResumeToken(t *testing.T) {
 		client := newStartWatcherMongoClient(t)
 		fr := newFakeRedis()
 
-		manager := NewManager(client, "conduit", nil, fr, nil, nil, DefaultConfig(), discardLogger)
+		manager := NewManager(client, "conduit", nil, fr, nil, nil, DefaultConfig(), discardLogger, nil)
 		manager.runCtx, manager.runCancel = context.WithCancel(context.Background())
 		t.Cleanup(manager.runCancel)
 
@@ -747,7 +747,7 @@ func TestManagerStartWatcherResumeToken(t *testing.T) {
 		fr := newFakeRedis()
 		checkpoint := primitive.Timestamp{T: uint32(time.Now().Unix()), I: 1}
 
-		manager := NewManager(client, "conduit", nil, fr, nil, nil, DefaultConfig(), discardLogger)
+		manager := NewManager(client, "conduit", nil, fr, nil, nil, DefaultConfig(), discardLogger, nil)
 		manager.runCtx, manager.runCancel = context.WithCancel(context.Background())
 		t.Cleanup(manager.runCancel)
 
@@ -769,7 +769,7 @@ func TestManagerStartWatcherResumeToken(t *testing.T) {
 	t.Run("nil redis client skips the token read and still starts", func(t *testing.T) {
 		client := newStartWatcherMongoClient(t)
 
-		manager := NewManager(client, "conduit", nil, nil, nil, nil, DefaultConfig(), discardLogger)
+		manager := NewManager(client, "conduit", nil, nil, nil, nil, DefaultConfig(), discardLogger, nil)
 		manager.runCtx, manager.runCancel = context.WithCancel(context.Background())
 		t.Cleanup(manager.runCancel)
 
@@ -1023,7 +1023,7 @@ func TestHandleEventSettlement(t *testing.T) {
 
 	t.Run("dispatch succeeds returns nil", func(t *testing.T) {
 		fr := newFakeRedis()
-		manager := NewManager(nil, "conduit", nil, fr, &fakeDispatcher{}, nil, DefaultConfig(), discardLogger)
+		manager := NewManager(nil, "conduit", nil, fr, &fakeDispatcher{}, nil, DefaultConfig(), discardLogger, nil)
 
 		err := manager.handleEvent(context.Background(), "users", record)
 
@@ -1035,7 +1035,7 @@ func TestHandleEventSettlement(t *testing.T) {
 	t.Run("dispatch fails but enqueue succeeds returns nil", func(t *testing.T) {
 		fr := newFakeRedis()
 		dispatchErr := errors.New("sink down")
-		manager := NewManager(nil, "conduit", nil, fr, &fakeDispatcher{dispatchErr: dispatchErr}, nil, DefaultConfig(), discardLogger)
+		manager := NewManager(nil, "conduit", nil, fr, &fakeDispatcher{dispatchErr: dispatchErr}, nil, DefaultConfig(), discardLogger, nil)
 
 		err := manager.handleEvent(context.Background(), "users", record)
 
@@ -1050,7 +1050,7 @@ func TestHandleEventSettlement(t *testing.T) {
 		fr := newFakeRedis()
 		fr.enqueueResult = errors.New("redis down")
 		dispatchErr := errors.New("sink down")
-		manager := NewManager(nil, "conduit", nil, fr, &fakeDispatcher{dispatchErr: dispatchErr}, nil, DefaultConfig(), discardLogger)
+		manager := NewManager(nil, "conduit", nil, fr, &fakeDispatcher{dispatchErr: dispatchErr}, nil, DefaultConfig(), discardLogger, nil)
 
 		err := manager.handleEvent(context.Background(), "users", record)
 
@@ -1063,7 +1063,7 @@ func TestHandleEventSettlement(t *testing.T) {
 	t.Run("idempotency-skip returns nil (settled in a previous attempt)", func(t *testing.T) {
 		fr := newFakeRedis()
 		fr.processed[record.EventID] = true
-		manager := NewManager(nil, "conduit", nil, fr, &fakeDispatcher{}, nil, DefaultConfig(), discardLogger)
+		manager := NewManager(nil, "conduit", nil, fr, &fakeDispatcher{}, nil, DefaultConfig(), discardLogger, nil)
 
 		err := manager.handleEvent(context.Background(), "users", record)
 
@@ -1160,7 +1160,7 @@ func TestSyncWithCollectionsRecreatesDeadWatcher(t *testing.T) {
 		}))
 	}
 
-	manager := NewManager(client, db, settings, fr, nil, nil, DefaultConfig(), discardLogger)
+	manager := NewManager(client, db, settings, fr, nil, nil, DefaultConfig(), discardLogger, nil)
 	manager.runCtx, manager.runCancel = context.WithCancel(context.Background())
 	t.Cleanup(manager.runCancel)
 
@@ -1220,7 +1220,7 @@ func TestSyncWithCollectionsIdempotent(t *testing.T) {
 		StreamEnabled:  true,
 	}))
 
-	manager := NewManager(client, db, settings, fr, nil, nil, DefaultConfig(), discardLogger)
+	manager := NewManager(client, db, settings, fr, nil, nil, DefaultConfig(), discardLogger, nil)
 	manager.runCtx, manager.runCancel = context.WithCancel(context.Background())
 	t.Cleanup(manager.runCancel)
 
@@ -1271,7 +1271,7 @@ func TestHandleCollectionChangeDeletedStopsWatcher(t *testing.T) {
 		}))
 	}
 
-	manager := NewManager(client, db, settings, fr, nil, nil, DefaultConfig(), discardLogger)
+	manager := NewManager(client, db, settings, fr, nil, nil, DefaultConfig(), discardLogger, nil)
 	manager.runCtx, manager.runCancel = context.WithCancel(context.Background())
 	t.Cleanup(manager.runCancel)
 

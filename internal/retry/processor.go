@@ -216,6 +216,19 @@ func (p *Processor) IsCollectionRegistered(collectionName string) bool {
 	return p.collections[collectionName]
 }
 
+// RegisteredCollections returns a snapshot copy of the collections currently
+// registered for retry processing. Used by the worker's metrics refresher to
+// know which retry queues to sample; the order is not meaningful.
+func (p *Processor) RegisteredCollections() []string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	collections := make([]string, 0, len(p.collections))
+	for collection := range p.collections {
+		collections = append(collections, collection)
+	}
+	return collections
+}
+
 // ProcessCollectionQueue processes retry queue for a specific collection
 func (p *Processor) ProcessCollectionQueue(ctx context.Context, collectionName string) {
 	p.processCollectionQueue(ctx, collectionName)
