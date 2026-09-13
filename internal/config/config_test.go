@@ -13,10 +13,11 @@ var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 // TestParseLogLevel pins down the LOG_LEVEL value → slog.Level mapping: the
 // four documented uppercase values, case-insensitivity, whitespace trimming,
-// the WARNING alias for WARN, the empty default of INFO, and the clear error
-// on anything else. It tests the pure helper only — the caller (Load) exits on
-// the error path, which is why the invalid case is asserted here rather than by
-// invoking a process-exiting Load.
+// the empty default of INFO, WARNING being explicitly rejected as an invalid
+// value (it is not an alias for WARN), and the clear error on anything else.
+// It tests the pure helper only — the caller (Load) exits on the error path,
+// which is why the invalid case is asserted here rather than by invoking a
+// process-exiting Load.
 func TestParseLogLevel(t *testing.T) {
 	t.Run("maps documented values", func(t *testing.T) {
 		cases := []struct {
@@ -48,10 +49,10 @@ func TestParseLogLevel(t *testing.T) {
 		assert.Equal(t, slog.LevelDebug, got)
 	})
 
-	t.Run("accepts WARNING as an alias for WARN", func(t *testing.T) {
-		got, err := ParseLogLevel("WARNING")
-		assert.NoError(t, err)
-		assert.Equal(t, slog.LevelWarn, got)
+	t.Run("rejects WARNING as an alias for WARN", func(t *testing.T) {
+		_, err := ParseLogLevel("WARNING")
+		assert.Error(t, err)
+		assert.ErrorContains(t, err, "DEBUG, INFO, WARN, ERROR")
 	})
 
 	t.Run("empty defaults to INFO", func(t *testing.T) {
@@ -63,7 +64,7 @@ func TestParseLogLevel(t *testing.T) {
 	})
 
 	t.Run("rejects unknown values with a helpful error", func(t *testing.T) {
-		for _, v := range []string{"TRACE", "notice", "1", "debug2"} {
+		for _, v := range []string{"TRACE", "notice", "1", "debug2", "WARNING", "warning"} {
 			_, err := ParseLogLevel(v)
 			assert.Error(t, err)
 			assert.ErrorContains(t, err, "DEBUG, INFO, WARN, ERROR", "value %q", v)

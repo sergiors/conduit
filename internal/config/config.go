@@ -57,11 +57,10 @@ var logLevelNames = []string{"DEBUG", "INFO", "WARN", "ERROR"}
 // and trailing whitespace and is case-insensitive ("info"/"Info"/"INFO" all
 // work), though the documented form is uppercase. The accepted values map
 // 1:1 onto slog's built-in levels: DEBUG, INFO, WARN and ERROR. "WARNING" is
-// also accepted as an alias for WARN (slog names the constant Warn, but
-// operators commonly write "WARNING"). An empty value returns slog.LevelInfo
-// (the default). Any other value returns an error listing the valid values so
-// callers can render a clear configuration error rather than silently falling
-// back.
+// NOT accepted — it is treated as an invalid value, not an alias for WARN. An
+// empty value returns slog.LevelInfo (the default). Any other value returns an
+// error listing the valid values so callers can render a clear configuration
+// error rather than silently falling back.
 func ParseLogLevel(value string) (slog.Level, error) {
 	switch strings.ToUpper(strings.TrimSpace(value)) {
 	case "":
@@ -70,7 +69,7 @@ func ParseLogLevel(value string) (slog.Level, error) {
 		return slog.LevelDebug, nil
 	case "INFO":
 		return slog.LevelInfo, nil
-	case "WARN", "WARNING":
+	case "WARN":
 		return slog.LevelWarn, nil
 	case "ERROR":
 		return slog.LevelError, nil
