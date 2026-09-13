@@ -109,7 +109,7 @@ func init() {
 	dispatch.RegisterTransport(collections.SinkTypeHTTP, func(ctx context.Context, collectionName string, t collections.Type, rawSpec map[string]interface{}, logger *log.Logger) dispatch.Transport {
 		var spec HTTPSpec
 		if err := decodeSpec(rawSpec, &spec); err != nil {
-			logger.Printf("Failed to decode HTTP transport spec for %s: %v", collectionName, err)
+			logger.Printf("failed to decode HTTP transport spec for %s: %v", collectionName, err)
 			return nil
 		}
 

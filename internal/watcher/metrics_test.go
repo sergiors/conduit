@@ -81,7 +81,7 @@ func TestWatcherRunningGaugeSetByStartStop(t *testing.T) {
 	m := metrics.New()
 	client := newDeterministicWatcherClient(t)
 	fr := newFakeRedis()
-	disp := dispatch.NewDispatcher()
+	disp := dispatch.NewDispatcher(dispatch.Config{}, nil, nil)
 	proc := retry.NewProcessor(nil, nil, disp, retry.DefaultConfig(), discardLogger)
 
 	mgr := NewManager(client, "conduit", store, fr, disp, proc, DefaultConfig(), discardLogger, m)

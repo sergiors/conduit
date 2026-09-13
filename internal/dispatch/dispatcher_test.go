@@ -45,14 +45,14 @@ func newTestSink(transport Transport) *RuntimeSink {
 
 func TestDispatcherCreation(t *testing.T) {
 	t.Run("new dispatcher with empty sinks", func(t *testing.T) {
-		d := NewDispatcher()
+		d := NewDispatcher(Config{}, nil, nil)
 		assert.NotNil(t, d)
 	})
 }
 
 func TestDispatcherRegistration(t *testing.T) {
 	t.Run("register single sink", func(t *testing.T) {
-		d := NewDispatcher()
+		d := NewDispatcher(Config{}, nil, nil)
 		sink := newTestSink(&MockTransport{})
 
 		d.Register("table1", sink)
@@ -63,7 +63,7 @@ func TestDispatcherRegistration(t *testing.T) {
 	})
 
 	t.Run("register multiple sinks for same table", func(t *testing.T) {
-		d := NewDispatcher()
+		d := NewDispatcher(Config{}, nil, nil)
 		sink1 := newTestSink(&MockTransport{})
 		sink2 := newTestSink(&MockTransport{})
 
@@ -76,7 +76,7 @@ func TestDispatcherRegistration(t *testing.T) {
 	})
 
 	t.Run("register sinks for different tables", func(t *testing.T) {
-		d := NewDispatcher()
+		d := NewDispatcher(Config{}, nil, nil)
 		sink1 := newTestSink(&MockTransport{})
 		sink2 := newTestSink(&MockTransport{})
 
@@ -92,7 +92,7 @@ func TestDispatcherRegistration(t *testing.T) {
 
 func TestDispatcherDispatch(t *testing.T) {
 	t.Run("dispatch to registered sinks", func(t *testing.T) {
-		d := NewDispatcher()
+		d := NewDispatcher(Config{}, nil, nil)
 		transport := &MockTransport{}
 		d.Register("table1", newTestSink(transport))
 
@@ -109,7 +109,7 @@ func TestDispatcherDispatch(t *testing.T) {
 	})
 
 	t.Run("dispatch to unregistered table does nothing", func(t *testing.T) {
-		d := NewDispatcher()
+		d := NewDispatcher(Config{}, nil, nil)
 		ctx := context.Background()
 		record := streams.StreamRecord{
 			TableName:  "unknown",
@@ -121,7 +121,7 @@ func TestDispatcherDispatch(t *testing.T) {
 	})
 
 	t.Run("dispatch continues on failure", func(t *testing.T) {
-		d := NewDispatcher()
+		d := NewDispatcher(Config{}, nil, nil)
 		failDest := &MockTransport{shouldFail: true}
 		successDest := &MockTransport{}
 
@@ -142,7 +142,7 @@ func TestDispatcherDispatch(t *testing.T) {
 
 func TestDispatcherRemove(t *testing.T) {
 	t.Run("remove sink by key", func(t *testing.T) {
-		d := NewDispatcher()
+		d := NewDispatcher(Config{}, nil, nil)
 		sink := newTestSink(&MockTransport{})
 		d.Register("table1", sink)
 
@@ -154,7 +154,7 @@ func TestDispatcherRemove(t *testing.T) {
 	})
 
 	t.Run("remove missing key is a no-op", func(t *testing.T) {
-		d := NewDispatcher()
+		d := NewDispatcher(Config{}, nil, nil)
 		sink := newTestSink(&MockTransport{})
 		d.Register("table1", sink)
 
@@ -168,7 +168,7 @@ func TestDispatcherRemove(t *testing.T) {
 
 func TestDispatcherClear(t *testing.T) {
 	t.Run("clear removes all sinks for a collection", func(t *testing.T) {
-		d := NewDispatcher()
+		d := NewDispatcher(Config{}, nil, nil)
 		transport := &MockTransport{}
 		d.Register("table1", newTestSink(transport))
 
@@ -200,7 +200,7 @@ func (c *countingTransport) Close() error {
 
 func TestDispatcherUpdateKeepsTransport(t *testing.T) {
 	ctx := context.Background()
-	d := NewDispatcher()
+	d := NewDispatcher(Config{}, nil, nil)
 	transport := &countingTransport{}
 
 	// Register a sink that only accepts INSERT events.
@@ -261,7 +261,7 @@ func TestDispatcherUpdateKeepsTransport(t *testing.T) {
 }
 
 func TestDispatcherUpdateMissingReturnsFalse(t *testing.T) {
-	d := NewDispatcher()
+	d := NewDispatcher(Config{}, nil, nil)
 	d.Register("table1", newTestSink(&MockTransport{}))
 
 	// Updating an unregistered key returns false and does not panic.
@@ -271,7 +271,7 @@ func TestDispatcherUpdateMissingReturnsFalse(t *testing.T) {
 
 func TestDispatcherUpdateEventTypesNormalization(t *testing.T) {
 	ctx := context.Background()
-	d := NewDispatcher()
+	d := NewDispatcher(Config{}, nil, nil)
 	transport := &countingTransport{}
 
 	d.Register("table1", NewRuntimeSink(collections.Sink{ID: "s1"}, transport))
@@ -286,7 +286,7 @@ func TestDispatcherUpdateEventTypesNormalization(t *testing.T) {
 
 func TestDispatcherUpdateConcurrentSend(t *testing.T) {
 	ctx := context.Background()
-	d := NewDispatcher()
+	d := NewDispatcher(Config{}, nil, nil)
 	transport := &countingTransport{}
 
 	d.Register("table1", NewRuntimeSink(collections.Sink{ID: "s1", EventTypes: []string{"INSERT"}}, transport))
@@ -308,7 +308,7 @@ func TestDispatcherUpdateConcurrentSend(t *testing.T) {
 
 func TestDispatcherClose(t *testing.T) {
 	t.Run("close all sinks", func(t *testing.T) {
-		d := NewDispatcher()
+		d := NewDispatcher(Config{}, nil, nil)
 		transport1 := &MockTransport{}
 		transport2 := &MockTransport{}
 
@@ -372,7 +372,7 @@ func (a *atomicTransport) sent() bool { return a.sentFlag.Load() }
 // was touched, so the fast sink completing while the slow sink is still blocked
 // is a deterministic proof of concurrency (no sleeps).
 func TestDispatcherDispatchConcurrent(t *testing.T) {
-	d := NewDispatcher()
+	d := NewDispatcher(Config{}, nil, nil)
 	fast := &atomicTransport{}
 	slow := newBlockingTransport()
 
@@ -424,7 +424,7 @@ func TestDispatcherDispatchConcurrent(t *testing.T) {
 // worker frees capacity. A single worker and queue size 1 means a second
 // concurrent event cannot be accepted until the first is delivered.
 func TestDispatcherBackpressure(t *testing.T) {
-	d := NewDispatcherWithConfig(Config{QueueSize: 1, WorkerCount: 1})
+	d := NewDispatcher(Config{QueueSize: 1, WorkerCount: 1}, nil, nil)
 	slow := newBlockingTransport()
 	d.Register("table1", newTestSink(slow))
 
@@ -459,33 +459,33 @@ func TestDispatcherBackpressure(t *testing.T) {
 	assert.NoError(t, <-secondStarted)
 }
 
-// TestNewDispatcherWithConfigSanitization verifies zero/negative config values
+// TestNewDispatcherSanitization verifies zero/negative config values
 // fall back to the defaults instead of producing a degenerate lane.
-func TestNewDispatcherWithConfigSanitization(t *testing.T) {
+func TestNewDispatcherSanitization(t *testing.T) {
 	t.Run("zero config uses defaults", func(t *testing.T) {
-		d := NewDispatcherWithConfig(Config{})
+		d := NewDispatcher(Config{}, nil, nil)
 		assert.Equal(t, DefaultQueueSize, d.cfg.QueueSize)
 		assert.Equal(t, DefaultWorkerCount, d.cfg.WorkerCount)
 	})
 
 	t.Run("negative config uses defaults", func(t *testing.T) {
-		d := NewDispatcherWithConfig(Config{QueueSize: -1, WorkerCount: -5})
+		d := NewDispatcher(Config{QueueSize: -1, WorkerCount: -5}, nil, nil)
 		assert.Equal(t, DefaultQueueSize, d.cfg.QueueSize)
 		assert.Equal(t, DefaultWorkerCount, d.cfg.WorkerCount)
 	})
 
 	t.Run("partial config only overrides provided fields", func(t *testing.T) {
-		d := NewDispatcherWithConfig(Config{QueueSize: 8})
+		d := NewDispatcher(Config{QueueSize: 8}, nil, nil)
 		assert.Equal(t, 8, d.cfg.QueueSize)
 		assert.Equal(t, DefaultWorkerCount, d.cfg.WorkerCount)
 
-		d2 := NewDispatcherWithConfig(Config{WorkerCount: 2})
+		d2 := NewDispatcher(Config{WorkerCount: 2}, nil, nil)
 		assert.Equal(t, DefaultQueueSize, d2.cfg.QueueSize)
 		assert.Equal(t, 2, d2.cfg.WorkerCount)
 	})
 
 	t.Run("explicit values are preserved", func(t *testing.T) {
-		d := NewDispatcherWithConfig(Config{QueueSize: 16, WorkerCount: 8})
+		d := NewDispatcher(Config{QueueSize: 16, WorkerCount: 8}, nil, nil)
 		assert.Equal(t, 16, d.cfg.QueueSize)
 		assert.Equal(t, 8, d.cfg.WorkerCount)
 	})
@@ -498,7 +498,7 @@ func TestNewDispatcherWithConfigSanitization(t *testing.T) {
 // before Close in production, so a blocked slow transport during Close is not a
 // case the dispatcher must abort.
 func TestDispatcherCloseDuringDispatch(t *testing.T) {
-	d := NewDispatcher()
+	d := NewDispatcher(Config{}, nil, nil)
 	transport := &countingTransport{}
 	d.Register("table1", NewRuntimeSink(collections.Sink{ID: "s1"}, transport))
 
@@ -532,7 +532,7 @@ func TestDispatcherCloseDuringDispatch(t *testing.T) {
 // 1 and queueSize 1, two prior dispatches occupy the lone worker and its queue;
 // a third dispatch then blocks on submission and sees the context cancel.
 func TestDispatcherDispatchContextCancel(t *testing.T) {
-	d := NewDispatcherWithConfig(Config{QueueSize: 1, WorkerCount: 1})
+	d := NewDispatcher(Config{QueueSize: 1, WorkerCount: 1}, nil, nil)
 	slow := newBlockingTransport()
 	d.Register("table1", newTestSink(slow))
 
@@ -581,7 +581,7 @@ func TestDispatcherDispatchContextCancel(t *testing.T) {
 // for the in-flight worker to finish (the settlement contract), so the gate is
 // released after the backpressured submit is proven unblocked.
 func TestDispatcherCloseWhileBackpressured(t *testing.T) {
-	d := NewDispatcherWithConfig(Config{QueueSize: 1, WorkerCount: 1})
+	d := NewDispatcher(Config{QueueSize: 1, WorkerCount: 1}, nil, nil)
 	slow := newBlockingTransport()
 	d.Register("table1", newTestSink(slow))
 
@@ -639,7 +639,7 @@ func TestDispatcherCloseWhileBackpressured(t *testing.T) {
 // test hammers concurrent Dispatch calls against a Close and asserts every
 // Dispatch returns (nil or errLaneClosed) and Close returns.
 func TestDispatcherCloseOrphanRace(t *testing.T) {
-	d := NewDispatcherWithConfig(Config{QueueSize: 4, WorkerCount: 2})
+	d := NewDispatcher(Config{QueueSize: 4, WorkerCount: 2}, nil, nil)
 	transport := &atomicTransport{}
 	d.Register("table1", NewRuntimeSink(collections.Sink{ID: "s1"}, transport))
 
@@ -681,7 +681,7 @@ func TestDispatcherCloseOrphanRace(t *testing.T) {
 // deadlock test: removing a sink whose lane queue is full and has a blocked
 // submit must not deadlock, and the blocked submit must be rejected.
 func TestDispatcherRemoveWhileBackpressured(t *testing.T) {
-	d := NewDispatcherWithConfig(Config{QueueSize: 1, WorkerCount: 1})
+	d := NewDispatcher(Config{QueueSize: 1, WorkerCount: 1}, nil, nil)
 	slow := newBlockingTransport()
 	sink := newTestSink(slow)
 	d.Register("table1", sink)
@@ -766,7 +766,7 @@ func TestBuildTransportFailClosed(t *testing.T) {
 // and routes to retry) instead of silently settling them.
 func TestDispatcherUnavailableLaneFailClosed(t *testing.T) {
 	ctx := context.Background()
-	d := NewDispatcher()
+	d := NewDispatcher(Config{}, nil, nil)
 
 	tr := newUnavailableTransport(errors.New("no transport registered for sink type"))
 	require.NotNil(t, tr)
@@ -782,7 +782,7 @@ func TestDispatcherUnavailableLaneFailClosed(t *testing.T) {
 // sinks continues to Dispatch()==nil; the legitimate zero-sink case is not a
 // failure.
 func TestDispatcherZeroSinksStillSucceeds(t *testing.T) {
-	d := NewDispatcher()
+	d := NewDispatcher(Config{}, nil, nil)
 	ctx := context.Background()
 	err := d.Dispatch(ctx, "users", streams.StreamRecord{RecordType: streams.InsertRecord})
 	assert.NoError(t, err)

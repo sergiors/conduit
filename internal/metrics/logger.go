@@ -135,7 +135,7 @@ func (l *MetricsLogger) snapshot() {
 
 	families, err := l.metrics.Registry().Gather()
 	if err != nil {
-		l.logger.Printf("Failed to gather metrics snapshot: %v", err)
+		l.logger.Printf("failed to gather metrics snapshot: %v", err)
 		return
 	}
 

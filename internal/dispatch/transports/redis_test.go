@@ -249,7 +249,7 @@ func TestRedisTransportClose(t *testing.T) {
 // are reused, and delivery only happens for matching events.
 func TestRedisTransportThroughDispatcher(t *testing.T) {
 	ctx := context.Background()
-	d := dispatch.NewDispatcher()
+	d := dispatch.NewDispatcher(dispatch.Config{}, nil, nil)
 
 	fake := &fakeXAdder{result: redis.NewStringResult("1-1", nil)}
 	tr := &RedisTransport{RedisSpec: RedisSpec{URL: "redis://localhost:6379/0", Stream: "events"}, client: fake}

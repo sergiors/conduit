@@ -83,7 +83,7 @@ func (s *Server) Start(_ context.Context) error {
 		})
 	}()
 
-	s.logger.Printf("Metrics server listening on %s", s.addr)
+	s.logger.Printf("metrics server listening on %s", s.addr)
 	return nil
 }
 
@@ -112,6 +112,6 @@ func (s *Server) Stop(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	s.logger.Println("Metrics server stopped")
+	s.logger.Println("metrics server stopped")
 	return nil
 }

@@ -177,7 +177,7 @@ func (t *MeilisearchTransport) Close() error { return nil }
 func buildMeilisearch(ctx context.Context, collectionName string, t collections.Type, rawSpec map[string]interface{}, logger *log.Logger) dispatch.Transport {
 	var spec MeilisearchSpec
 	if err := decodeSpec(rawSpec, &spec); err != nil {
-		logger.Printf("Failed to decode Meilisearch transport spec for %s: %v", collectionName, err)
+		logger.Printf("failed to decode Meilisearch transport spec for %s: %v", collectionName, err)
 		return nil
 	}
 

@@ -17,8 +17,7 @@
 //
 // Usage:
 //
-//	d := dispatch.NewDispatcher() // default per-sink lane config; use
-//	// NewDispatcherWithConfig for a custom queue size / worker count.
+//	d := dispatch.NewDispatcher(dispatch.Config{}, nil, nil) // default per-sink lane config
 //	logger := log.New(os.Stdout, "", log.LstdFlags)
 //	transport := dispatch.BuildTransport(ctx, "collection", sink.Type, sink.Spec, logger)
 //	d.Register("collection", dispatch.NewRuntimeSink(sink, transport))

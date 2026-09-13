@@ -3,6 +3,7 @@ package dispatch
 import (
 	"context"
 	"errors"
+	"log"
 	"sync"
 	"time"
 
@@ -72,6 +73,10 @@ type lane struct {
 	// observer, when non-nil, receives each delivery attempt outcome (see
 	// SinkDeliveryObserver). It is nil in tests and when metrics are disabled.
 	observer SinkDeliveryObserver
+	// logger, when non-nil, logs each delivery attempt outcome at the delivery
+	// boundary (see deliver). It is nil when delivery logging is not wired, in
+	// which case the logs are silently skipped.
+	logger *log.Logger
 
 	// submitWG tracks in-flight submit calls so close can wait for every
 	// blocked/racing submit to settle before the workers drain and exit.
@@ -86,14 +91,16 @@ type lane struct {
 	closeOnce sync.Once
 }
 
-// newLaneFor creates a lane carrying a collection label and an optional
-// delivery observer, used by Register when the dispatcher has an observer.
+// newLaneFor creates a lane carrying a collection label, an optional delivery
+// observer, and an optional delivery logger, used by Register when the
+// dispatcher has them.
 func newLaneFor(
 	sink *RuntimeSink,
 	queueSize,
 	workerCount int,
 	collection string,
 	observer SinkDeliveryObserver,
+	logger *log.Logger,
 ) *lane {
 	l := &lane{
 		sink:       sink,
@@ -102,6 +109,7 @@ func newLaneFor(
 		stop:       make(chan struct{}),
 		collection: collection,
 		observer:   observer,
+		logger:     logger,
 	}
 	l.wg.Add(workerCount)
 	for i := 0; i < workerCount; i++ {
@@ -150,7 +158,32 @@ func (l *lane) deliver(j job) {
 	if l.observer != nil {
 		l.observer.ObserveSinkDelivery(l.collection, l.sink.Type, time.Since(start), err)
 	}
+	// Log the per-sink outcome at the delivery boundary, once per delivery
+	// attempt. Filtered no-ops (Send returned nil without reaching the
+	// transport) log as success, matching the lane's existing success semantics.
+	// The failure line includes the transport error verbatim (same text the
+	// retry queue and DLQ record in LastError): it may embed the destination
+	// endpoint but never credentials, which live in request headers.
+	if l.logger != nil {
+		if err != nil {
+			l.logger.Printf("sink delivery failed: collection=%s sink_id=%s sink_type=%s event_type=%s: %v",
+				l.collection, sinkIDOrDash(l.sink.ID), l.sink.Type, j.record.RecordType, err)
+		} else {
+			l.logger.Printf("sink delivery succeeded: collection=%s sink_id=%s sink_type=%s event_type=%s",
+				l.collection, sinkIDOrDash(l.sink.ID), l.sink.Type, j.record.RecordType)
+		}
+	}
 	j.done <- err
+}
+
+// sinkIDOrDash renders the sink ID for logs, substituting "-" when the sink
+// has no ID (e.g. tests constructing ID-less sinks) so the key=value line stays
+// readable instead of rendering an empty sink_id=.
+func sinkIDOrDash(id string) string {
+	if id == "" {
+		return "-"
+	}
+	return id
 }
 
 // submit enqueues a job onto the lane's bounded queue, applying bounded

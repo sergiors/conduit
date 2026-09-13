@@ -2,6 +2,7 @@ package dispatch
 
 import (
 	"context"
+	"log"
 	"sync"
 
 	"conduit/internal/collections"
@@ -9,9 +10,9 @@ import (
 )
 
 // DefaultQueueSize and DefaultWorkerCount are the per-sink lane defaults used
-// by NewDispatcher (and by NewDispatcherWithConfig when the config omits a
-// value). QueueSize bounds the number of events awaiting delivery by a sink's
-// worker pool; WorkerCount is the number of delivery workers per sink lane.
+// by NewDispatcher when the config omits a value. QueueSize bounds the number
+// of events awaiting delivery by a sink's worker pool; WorkerCount is the
+// number of delivery workers per sink lane.
 const (
 	DefaultQueueSize   = 1024
 	DefaultWorkerCount = 4
@@ -45,32 +46,27 @@ type Dispatcher struct {
 	// per-sink delivery metrics can be recorded. It is nil in tests and when
 	// metrics are disabled.
 	observer SinkDeliveryObserver
+	// logger, when non-nil, is used by each sink lane to log delivery outcomes
+	// at the delivery boundary (see lane.deliver). It is nil when delivery
+	// logging is not wired, in which case the logs are silently skipped.
+	logger *log.Logger
 }
 
-// NewDispatcher creates a new event dispatcher using default per-sink lane
-// configuration.
-func NewDispatcher() *Dispatcher {
-	return NewDispatcherWithConfig(Config{})
-}
-
-// NewDispatcherWithConfig creates a new event dispatcher with the given
-// per-sink lane configuration. Zero or negative values are sanitized to the
-// defaults.
-func NewDispatcherWithConfig(cfg Config) *Dispatcher {
+// NewDispatcher creates a new event dispatcher with the given per-sink lane
+// configuration (zero/negative values sanitized to the defaults), a per-sink
+// lane delivery observer (nil allowed) that records delivery outcomes, and a
+// logger used by each sink lane to emit per-sink delivery outcome logs at the
+// delivery boundary (nil disables delivery logging — each lane silently skips
+// it). The observer is independent of the logger and still records metrics
+// when non-nil. The worker wires *metrics.Metrics as the observer and the
+// process logger; tests pass what they need (often nils).
+func NewDispatcher(cfg Config, obs SinkDeliveryObserver, logger *log.Logger) *Dispatcher {
 	return &Dispatcher{
-		sinks: make(map[string][]*lane),
-		cfg:   sanitizeConfig(cfg),
+		sinks:    make(map[string][]*lane),
+		cfg:      sanitizeConfig(cfg),
+		observer: obs,
+		logger:   logger,
 	}
-}
-
-// NewDispatcherWithObserver creates a new event dispatcher with a per-sink lane
-// delivery observer (nil allowed). It behaves exactly like NewDispatcher but
-// records delivery outcomes through obs. The worker wires *metrics.Metrics here
-// (via an adapter); tests may pass a recording fake.
-func NewDispatcherWithObserver(cfg Config, obs SinkDeliveryObserver) *Dispatcher {
-	d := NewDispatcherWithConfig(cfg)
-	d.observer = obs
-	return d
 }
 
 // sanitizeConfig replaces zero/negative values with the dispatcher defaults so
@@ -102,7 +98,7 @@ func (d *Dispatcher) Register(collection string, sink *RuntimeSink) {
 	if d.sinks[collection] == nil {
 		d.sinks[collection] = make([]*lane, 0)
 	}
-	d.sinks[collection] = append(d.sinks[collection], newLaneFor(sink, queueSize, workerCount, collection, d.observer))
+	d.sinks[collection] = append(d.sinks[collection], newLaneFor(sink, queueSize, workerCount, collection, d.observer, d.logger))
 }
 
 // Dispatch sends a stream record to all runtime sinks for a collection.

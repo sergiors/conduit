@@ -89,13 +89,11 @@ func NewWorker(cfg config.Config, logger *log.Logger) (*Worker, error) {
 	}
 
 	// Initialize dispatcher. It records per-sink delivery metrics through the
-	// metrics instance when present.
-	var dispatcher *dispatch.Dispatcher
-	if metricsInstance != nil {
-		dispatcher = dispatch.NewDispatcherWithObserver(dispatch.Config{}, metricsInstance)
-	} else {
-		dispatcher = dispatch.NewDispatcher()
-	}
+	// metrics instance when present, and logs per-sink delivery outcomes through
+	// the worker's logger. Delivery logging is independent of metrics, so the
+	// logger is always wired; the observer (metricsInstance) may be a nil
+	// pointer, which is safe because ObserveSinkDelivery is nil-receiver safe.
+	dispatcher := dispatch.NewDispatcher(dispatch.Config{}, metricsInstance, logger)
 
 	// Initialize retry processor. The collections.Manager owns the MongoDB DLQ
 	// (config.dlq) and is passed as the DLQ dependency for exhausted retry
@@ -172,19 +170,19 @@ func (w *Worker) Shutdown(ctx context.Context) error {
 		return nil
 	}
 
-	w.logger.Println("Shutting down worker...")
+	w.logger.Println("shutting down worker...")
 
 	var errs []error
 
 	// Watcher manager goes first so no new events are dispatched while
 	// in-flight bookkeeping completes.
 	if err := w.watcherManager.Stop(ctx); err != nil {
-		w.logger.Printf("Error stopping watcher manager: %v", err)
+		w.logger.Printf("error stopping watcher manager: %v", err)
 		errs = append(errs, err)
 	}
 
 	if err := w.retryProcessor.Stop(ctx); err != nil {
-		w.logger.Printf("Error stopping retry processor: %v", err)
+		w.logger.Printf("error stopping retry processor: %v", err)
 		errs = append(errs, err)
 	}
 
@@ -192,7 +190,7 @@ func (w *Worker) Shutdown(ctx context.Context) error {
 	// while the gauge sources are torn down.
 	if w.metricsRefresher != nil {
 		if err := w.metricsRefresher.Stop(ctx); err != nil {
-			w.logger.Printf("Error stopping metrics refresher: %v", err)
+			w.logger.Printf("error stopping metrics refresher: %v", err)
 			errs = append(errs, err)
 		}
 	}
@@ -201,23 +199,23 @@ func (w *Worker) Shutdown(ctx context.Context) error {
 	// registry snapshots while the data plane tears down.
 	if w.metricsLogger != nil {
 		if err := w.metricsLogger.Stop(ctx); err != nil {
-			w.logger.Printf("Error stopping metrics logger: %v", err)
+			w.logger.Printf("error stopping metrics logger: %v", err)
 			errs = append(errs, err)
 		}
 	}
 
 	if err := w.dispatcher.Close(); err != nil {
-		w.logger.Printf("Error closing dispatcher: %v", err)
+		w.logger.Printf("error closing dispatcher: %v", err)
 		errs = append(errs, err)
 	}
 
 	if err := w.redisClient.Close(); err != nil {
-		w.logger.Printf("Error closing Redis: %v", err)
+		w.logger.Printf("error closing Redis: %v", err)
 		errs = append(errs, err)
 	}
 
 	if err := w.mongoClient.Close(ctx); err != nil {
-		w.logger.Printf("Error closing MongoDB: %v", err)
+		w.logger.Printf("error closing MongoDB: %v", err)
 		errs = append(errs, err)
 	}
 
@@ -225,19 +223,19 @@ func (w *Worker) Shutdown(ctx context.Context) error {
 	// through the whole data-plane drain.
 	if w.metricsServer != nil {
 		if err := w.metricsServer.Stop(ctx); err != nil {
-			w.logger.Printf("Error stopping metrics server: %v", err)
+			w.logger.Printf("error stopping metrics server: %v", err)
 			errs = append(errs, err)
 		}
 	}
 
-	w.logger.Println("Worker stopped")
+	w.logger.Println("worker stopped")
 	return errors.Join(errs...)
 }
 
 // start boots the worker's runtime components: the metrics server, the gauge
 // refresher, the watcher manager, and the retry processor.
 func (w *Worker) start(ctx context.Context) error {
-	w.logger.Println("Worker starting...")
+	w.logger.Println("worker starting...")
 
 	// Start the metrics server first so Prometheus can scrape from the moment
 	// the worker begins operating. A bind error (port conflict) fails startup
@@ -274,7 +272,7 @@ func (w *Worker) start(ctx context.Context) error {
 	}
 
 	w.logger.Printf(
-		"Worker started with %d active watchers", w.watcherManager.GetActiveWatchers(),
+		"worker started with %d active watchers", w.watcherManager.GetActiveWatchers(),
 	)
 
 	return nil
@@ -295,11 +293,11 @@ func Run(cfg config.Config, logger *log.Logger) error {
 	defer stop()
 
 	if err := worker.start(ctx); err != nil {
-		logger.Printf("Worker failed: %v", err)
+		logger.Printf("worker failed: %v", err)
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 		defer cancel()
 		if serr := worker.Shutdown(shutdownCtx); serr != nil {
-			logger.Printf("Error during shutdown after run failure: %v", serr)
+			logger.Printf("error during shutdown after run failure: %v", serr)
 		}
 		return err
 	}
@@ -309,7 +307,7 @@ func Run(cfg config.Config, logger *log.Logger) error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
 	if err := worker.Shutdown(shutdownCtx); err != nil {
-		logger.Printf("Error during shutdown: %v", err)
+		logger.Printf("error during shutdown: %v", err)
 		return err
 	}
 

@@ -103,7 +103,7 @@ func Run(cfg config.Config, logger *log.Logger) error {
 		APIKeys:     apiKeys,
 	})
 
-	logger.Printf("API server starting on port %s", cfg.Port)
+	logger.Printf("api server starting on port %s", cfg.Port)
 	if err := server.Router().Run(":" + cfg.Port); err != nil {
 		return fmt.Errorf("server failed: %w", err)
 	}
