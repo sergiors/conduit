@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"log"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var discardLogger = log.New(io.Discard, "", 0)
+var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 // newTestClient returns a Client with a discard logger for exercising
 // parseRetryMembers without touching the underlying redis client.

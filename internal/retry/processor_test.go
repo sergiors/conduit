@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"log"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -18,7 +18,7 @@ import (
 	"conduit/internal/streams"
 )
 
-var discardLogger = log.New(io.Discard, "", 0)
+var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 func TestDefaultConfig(t *testing.T) {
 	t.Run("returns sensible defaults", func(t *testing.T) {

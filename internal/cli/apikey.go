@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"text/tabwriter"
 	"time"
 
@@ -19,7 +19,7 @@ import (
 // and revoke subcommands. All subcommands load the same full config as every
 // conduit command and then drive the persisted apikey.Manager over MongoDB;
 // they never connect to Redis.
-func apikeyCommand(logger *log.Logger) *cli.Command {
+func apikeyCommand(logger *slog.Logger) *cli.Command {
 	return &cli.Command{
 		Name:  "apikey",
 		Usage: "Manage API keys",
@@ -32,7 +32,7 @@ func apikeyCommand(logger *log.Logger) *cli.Command {
 }
 
 // apikeyCreateCommand returns the "conduit apikey create" command.
-func apikeyCreateCommand(logger *log.Logger) *cli.Command {
+func apikeyCreateCommand(logger *slog.Logger) *cli.Command {
 	var name string
 	return &cli.Command{
 		Name:      "create",
@@ -55,7 +55,7 @@ func apikeyCreateCommand(logger *log.Logger) *cli.Command {
 
 // runAPIKeyCreate opens MongoDB, creates a key with the given name, and prints
 // its id, name, and full plaintext secret — the only time the secret is shown.
-func runAPIKeyCreate(ctx context.Context, logger *log.Logger, out io.Writer, name string) error {
+func runAPIKeyCreate(ctx context.Context, logger *slog.Logger, out io.Writer, name string) error {
 	client, cancel, err := openMongo(ctx, logger)
 	if err != nil {
 		return err
@@ -86,7 +86,7 @@ func runAPIKeyCreate(ctx context.Context, logger *log.Logger, out io.Writer, nam
 }
 
 // apikeyListCommand returns the "conduit apikey list" command.
-func apikeyListCommand(logger *log.Logger) *cli.Command {
+func apikeyListCommand(logger *slog.Logger) *cli.Command {
 	return &cli.Command{
 		Name:      "list",
 		Usage:     "List API keys",
@@ -99,7 +99,7 @@ func apikeyListCommand(logger *log.Logger) *cli.Command {
 
 // runAPIKeyList opens MongoDB and prints a bounded table of keys (id, name,
 // created, status) with no secret or hash.
-func runAPIKeyList(ctx context.Context, logger *log.Logger, out io.Writer) error {
+func runAPIKeyList(ctx context.Context, logger *slog.Logger, out io.Writer) error {
 	client, cancel, err := openMongo(ctx, logger)
 	if err != nil {
 		return err
@@ -130,7 +130,7 @@ func runAPIKeyList(ctx context.Context, logger *log.Logger, out io.Writer) error
 
 // apikeyRevokeCommand returns the "conduit apikey revoke" command. Revoking an
 // already-revoked key succeeds silently (idempotent).
-func apikeyRevokeCommand(logger *log.Logger) *cli.Command {
+func apikeyRevokeCommand(logger *slog.Logger) *cli.Command {
 	var id string
 	return &cli.Command{
 		Name:      "revoke",
@@ -152,7 +152,7 @@ func apikeyRevokeCommand(logger *log.Logger) *cli.Command {
 
 // runAPIKeyRevoke opens MongoDB and revokes the key with the given id,
 // confirming the action to the operator.
-func runAPIKeyRevoke(ctx context.Context, logger *log.Logger, out io.Writer, id string) error {
+func runAPIKeyRevoke(ctx context.Context, logger *slog.Logger, out io.Writer, id string) error {
 	client, cancel, err := openMongo(ctx, logger)
 	if err != nil {
 		return err
@@ -182,14 +182,14 @@ func runAPIKeyRevoke(ctx context.Context, logger *log.Logger, out io.Writer, id 
 // mongo.NewClient is given a discard logger so its readiness probes do not
 // pollute the command's own concise output; config-loader warnings still print
 // through the real logger.
-func openMongo(ctx context.Context, logger *log.Logger) (*mongo.Client, context.CancelFunc, error) {
+func openMongo(ctx context.Context, logger *slog.Logger) (*mongo.Client, context.CancelFunc, error) {
 	cfg := config.Load(logger)
 
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	client, err := mongo.NewClient(ctx, mongo.Config{
 		URI:      cfg.MongoDBURI,
 		Database: cfg.MongoDBDatabase,
-	}, log.New(io.Discard, "", 0))
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		cancel()
 		return nil, nil, fmt.Errorf("failed to connect to MongoDB: %w", err)

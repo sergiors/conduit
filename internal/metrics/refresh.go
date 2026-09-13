@@ -2,7 +2,7 @@ package metrics
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -29,7 +29,7 @@ type Refresher struct {
 	metrics  *Metrics
 	interval time.Duration
 	sources  []GaugeSource
-	logger   *log.Logger
+	logger   *slog.Logger
 
 	mu      sync.Mutex
 	srcMu   sync.RWMutex
@@ -40,7 +40,7 @@ type Refresher struct {
 
 // NewRefresher creates a refresher that re-samples the given sources every
 // interval. A zero interval falls back to DefaultRefreshInterval.
-func NewRefresher(m *Metrics, interval time.Duration, logger *log.Logger) *Refresher {
+func NewRefresher(m *Metrics, interval time.Duration, logger *slog.Logger) *Refresher {
 	if interval <= 0 {
 		interval = DefaultRefreshInterval
 	}
@@ -152,7 +152,7 @@ func (r *Refresher) refreshLoop(ctx context.Context, sources []GaugeSource) {
 				r.refreshAll(ctx, sources)
 				return nil
 			}); panicked {
-				r.logger.Println("Metrics refresh panicked; continuing loop")
+				r.logger.Error("Metrics refresh panicked; continuing loop")
 			}
 		}
 	}

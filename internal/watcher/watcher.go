@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -100,7 +100,7 @@ type Watcher struct {
 	// enablement; it anchors the stream only when no resume token exists.
 	startAtOperationTime *primitive.Timestamp
 	redisClient          RedisClient
-	logger               *log.Logger
+	logger               *slog.Logger
 
 	// Runtime state
 	ctx       context.Context
@@ -122,7 +122,7 @@ func NewWatcher(
 	resumeToken string,
 	startAtOperationTime *primitive.Timestamp,
 	redisClient RedisClient,
-	logger *log.Logger,
+	logger *slog.Logger,
 ) *Watcher {
 	return &Watcher{
 		mongoClient:          mongoClient,
@@ -189,7 +189,7 @@ func (w *Watcher) Start(ctx context.Context, handler func(streams.StreamRecord) 
 		w.isRunning.Store(false)
 	}()
 
-	w.logger.Printf("Watcher started for collection: %s", w.collectionName)
+	w.logger.Info("Watcher started", "collection", w.collectionName)
 	return nil
 }
 
@@ -199,7 +199,7 @@ func (w *Watcher) Stop(ctx context.Context) error {
 		return nil
 	}
 
-	w.logger.Printf("Stopping watcher for collection: %s", w.collectionName)
+	w.logger.Info("Stopping watcher", "collection", w.collectionName)
 	w.cancel()
 
 	// Wait for goroutine to finish with timeout
@@ -241,7 +241,8 @@ func (w *Watcher) watchLoop(handler func(streams.StreamRecord) error) {
 				// stream was invalidated. Stop the watcher; the manager will
 				// reconcile the watcher lifecycle.
 				if errors.Is(err, errCollectionDropped) || errors.Is(err, errChangeStreamInvalidated) {
-					w.logger.Printf("Watcher for %s exiting (terminal condition: %v); the manager's sync will recreate it if the collection is still enabled", w.collectionName, err)
+					w.logger.Error("Watcher exiting on terminal condition; the manager's sync will recreate it if the collection is still enabled",
+						"collection", w.collectionName, "error", err)
 					return
 				}
 
@@ -253,10 +254,12 @@ func (w *Watcher) watchLoop(handler func(streams.StreamRecord) error) {
 				// generic errors would silently skip every event that
 				// occurred while the watcher was down.
 				if isResumeTokenInvalid(err) {
-					w.logger.Printf("Resume token for %s rejected by MongoDB, invalidating: %v", w.collectionName, err)
+					w.logger.Warn("Resume token rejected by MongoDB, invalidating",
+						"collection", w.collectionName, "error", err)
 					w.resumeToken = ""
 					if delErr := w.redisClient.DeleteResumeToken(w.ctx, w.collectionName); delErr != nil {
-						w.logger.Printf("Failed to invalidate resume token: %v", delErr)
+						w.logger.Warn("Failed to invalidate resume token",
+							"collection", w.collectionName, "error", delErr)
 					}
 				}
 
@@ -306,7 +309,8 @@ func (w *Watcher) buildChangeStreamOptions() *options.ChangeStreamOptions {
 			// A corrupt stored token behaves as absent: fall through to the
 			// checkpoint or a fresh stream instead of stalling on a doomed
 			// resume.
-			w.logger.Printf("Resume token for %s is unparseable, falling through to checkpoint/fresh stream: %v", w.collectionName, err)
+			w.logger.Warn("Resume token is unparseable, falling through to checkpoint/fresh stream",
+				"collection", w.collectionName, "error", err)
 		} else {
 			opts.SetResumeAfter(resumeToken)
 			return opts
@@ -425,7 +429,8 @@ func (w *Watcher) processEvent(handler func(streams.StreamRecord) error, record 
 			err := w.redisClient.SetResumeToken(bkctx, w.collectionName, w.resumeToken)
 			bkCancel()
 			if err != nil {
-				w.logger.Printf("Failed to save resume token: %v", err)
+				w.logger.Warn("Failed to save resume token",
+					"collection", w.collectionName, "error", err)
 			}
 		}
 	}
@@ -449,7 +454,11 @@ func (w *Watcher) invokeHandler(handler func(streams.StreamRecord) error, record
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("handler panic: %v", r)
-			w.logger.Printf("Watcher %s: handler panic (event unsettled, event remains undelivered): %v\n%s", w.collectionName, r, debug.Stack())
+			w.logger.Error("Handler panic, event remains unsettled and undelivered",
+				"collection", w.collectionName,
+				"panic", r,
+				"stack", string(debug.Stack()),
+			)
 		}
 	}()
 	return handler(record)
@@ -464,7 +473,8 @@ func (w *Watcher) persistTerminalToken(token bson.Raw) {
 	}
 	tokenData, err := bson.Marshal(token)
 	if err != nil {
-		w.logger.Printf("Failed to marshal terminal resume token for %s: %v", w.collectionName, err)
+		w.logger.Warn("Failed to marshal terminal resume token",
+			"collection", w.collectionName, "error", err)
 		return
 	}
 
@@ -478,7 +488,8 @@ func (w *Watcher) persistTerminalToken(token bson.Raw) {
 	err = w.redisClient.SetResumeToken(bkctx, w.collectionName, w.resumeToken)
 	bkCancel()
 	if err != nil {
-		w.logger.Printf("Failed to save terminal resume token for %s: %v", w.collectionName, err)
+		w.logger.Warn("Failed to save terminal resume token",
+			"collection", w.collectionName, "error", err)
 	}
 }
 
@@ -533,14 +544,14 @@ func (w *Watcher) parseChange(change bson.M) (streams.StreamRecord, error) {
 		}
 	case "drop":
 		// Collection was dropped - stop watcher
-		w.logger.Printf("Collection %s was dropped, stopping watcher", w.collectionName)
+		w.logger.Error("Collection was dropped, stopping watcher", "collection", w.collectionName)
 		if w.cancel != nil {
 			w.cancel()
 		}
 		return streams.StreamRecord{}, errCollectionDropped
 	case "invalidate":
 		// Change stream invalidated - collection likely dropped or renamed
-		w.logger.Printf("Change stream for %s invalidated, stopping watcher", w.collectionName)
+		w.logger.Error("Change stream invalidated, stopping watcher", "collection", w.collectionName)
 		if w.cancel != nil {
 			w.cancel()
 		}
@@ -588,7 +599,8 @@ func (w *Watcher) recordError(err error) {
 	defer w.mu.Unlock()
 	w.stats.LastError = err
 	w.stats.LastErrorTime = time.Now()
-	w.logger.Printf("Watcher error for %s: %v", w.collectionName, err)
+	w.logger.Warn("Watcher retrying after watch error",
+		"collection", w.collectionName, "error", err)
 }
 
 // GetStats returns current watcher statistics

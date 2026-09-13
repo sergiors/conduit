@@ -371,6 +371,10 @@ PORT=8080
 # METRICS_ADDR=:9090
 # Optional: bounded by a 30s default; applies to the worker's graceful shutdown.
 # SHUTDOWN_TIMEOUT=45s
+# Optional: structured-logging level; one of DEBUG, INFO, WARN or ERROR
+# (case-insensitive; "WARNING" is accepted as an alias for WARN). Defaults to
+# INFO. An invalid value is a configuration error and aborts startup.
+# LOG_LEVEL=INFO
 # Optional: only needed for the EventBridge sink. AWS_ACCESS_KEY_ID,
 # AWS_SECRET_ACCESS_KEY, and AWS_REGION (plus optional AWS_SESSION_TOKEN) are
 # resolved via the AWS SDK default credential chain.

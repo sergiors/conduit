@@ -3,7 +3,7 @@ package dispatch
 import (
 	"context"
 	"errors"
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -76,7 +76,7 @@ type lane struct {
 	// logger, when non-nil, logs each delivery attempt outcome at the delivery
 	// boundary (see deliver). It is nil when delivery logging is not wired, in
 	// which case the logs are silently skipped.
-	logger *log.Logger
+	logger *slog.Logger
 
 	// submitWG tracks in-flight submit calls so close can wait for every
 	// blocked/racing submit to settle before the workers drain and exit.
@@ -100,7 +100,7 @@ func newLaneFor(
 	workerCount int,
 	collection string,
 	observer SinkDeliveryObserver,
-	logger *log.Logger,
+	logger *slog.Logger,
 ) *lane {
 	l := &lane{
 		sink:       sink,
@@ -157,24 +157,51 @@ func (l *lane) deliver(j job) {
 	// Log the dispatch and per-sink outcome at the delivery boundary, once per
 	// delivery attempt. Filtered no-ops (Send returned nil without reaching the
 	// transport) log as success, matching the lane's existing success semantics.
-	// The failure line includes the transport error verbatim (same text the
-	// retry queue and DLQ record in LastError): it may embed the destination
-	// endpoint but never credentials, which live in request headers.
+	//
+	// Levels: dispatch and delivered are DEBUG (per-event detail). A failure is
+	// WARN (recoverable — the dispatcher returns the error and the watcher/retry
+	// pipeline queues it), and carries the per-sink identity (sinkType/sinkID)
+	// the higher layers lack. The failure line includes the transport error
+	// verbatim (same text the retry queue and DLQ record in LastError): it may
+	// embed the destination endpoint but never credentials, which live in
+	// request headers.
 	if l.logger != nil {
-		l.logger.Printf("Dispatching event to sink: collection=%s sink_id=%s sink_type=%s event_type=%s",
-			l.collection, sinkIDOrDash(l.sink.ID), l.sink.Type, j.record.RecordType)
+		l.logger.Debug(
+			"Dispatching event",
+			"collection", l.collection,
+			"eventType", j.record.RecordType,
+			"sinkType", l.sink.Type,
+			"sinkID", sinkIDOrDash(l.sink.ID),
+			"eventID", j.record.EventID,
+		)
 	}
 	err := l.sink.Send(j.ctx, j.record)
+	duration := time.Since(start)
 	if l.observer != nil {
-		l.observer.ObserveSinkDelivery(l.collection, l.sink.Type, time.Since(start), err)
+		l.observer.ObserveSinkDelivery(l.collection, l.sink.Type, duration, err)
 	}
 	if l.logger != nil {
 		if err != nil {
-			l.logger.Printf("Failed to deliver event to sink: collection=%s sink_id=%s sink_type=%s event_type=%s: %v",
-				l.collection, sinkIDOrDash(l.sink.ID), l.sink.Type, j.record.RecordType, err)
+			l.logger.Warn(
+				"Sink delivery failed",
+				"collection", l.collection,
+				"eventType", j.record.RecordType,
+				"sinkType", l.sink.Type,
+				"sinkID", sinkIDOrDash(l.sink.ID),
+				"eventID", j.record.EventID,
+				"duration", slog.Duration("duration", duration),
+				"error", err,
+			)
 		} else {
-			l.logger.Printf("Event delivered to sink: collection=%s sink_id=%s sink_type=%s event_type=%s",
-				l.collection, sinkIDOrDash(l.sink.ID), l.sink.Type, j.record.RecordType)
+			l.logger.Debug(
+				"Event delivered",
+				"collection", l.collection,
+				"eventType", j.record.RecordType,
+				"sinkType", l.sink.Type,
+				"sinkID", sinkIDOrDash(l.sink.ID),
+				"eventID", j.record.EventID,
+				"duration", slog.Duration("duration", duration),
+			)
 		}
 	}
 	j.done <- err

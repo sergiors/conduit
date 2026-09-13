@@ -3,7 +3,7 @@ package metrics
 import (
 	"context"
 	"errors"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"sync"
@@ -22,7 +22,7 @@ import (
 type Server struct {
 	addr    string
 	handler http.Handler
-	logger  *log.Logger
+	logger  *slog.Logger
 
 	mu     sync.Mutex
 	server *http.Server
@@ -34,7 +34,7 @@ type Server struct {
 // not bound until Start, so construction never fails on a port conflict. The
 // /metrics endpoint is served for GET requests; any other method is rejected by
 // the ServeMux with a 405 Method Not Allowed carrying an Allow: GET header.
-func NewServer(addr string, handler http.Handler, logger *log.Logger) *Server {
+func NewServer(addr string, handler http.Handler, logger *slog.Logger) *Server {
 	mux := http.NewServeMux()
 	mux.Handle("GET /metrics", handler)
 
@@ -78,12 +78,12 @@ func (s *Server) Start(_ context.Context) error {
 		defer s.wg.Done()
 		recover.Protect(s.logger, "metrics:server", func() {
 			if serveErr := s.server.Serve(s.ln); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
-				s.logger.Printf("Metrics server error: %v", serveErr)
+				s.logger.Error("Metrics server error", "error", serveErr)
 			}
 		})
 	}()
 
-	s.logger.Printf("Metrics server listening on %s", s.addr)
+	s.logger.Info("Metrics server listening", "addr", s.addr)
 	return nil
 }
 
@@ -112,6 +112,6 @@ func (s *Server) Stop(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	s.logger.Println("Metrics server stopped")
+	s.logger.Info("Metrics server stopped")
 	return nil
 }

@@ -3,7 +3,7 @@ package metrics
 import (
 	"context"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var discardLogger = log.New(io.Discard, "", 0)
+var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 // freePort returns an allocated-and-released TCP port. There is a tiny race
 // between release and reuse, acceptable for tests.

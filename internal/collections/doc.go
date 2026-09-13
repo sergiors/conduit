@@ -47,7 +47,7 @@
 //
 // Usage:
 //
-//	logger := log.New(os.Stdout, "", log.LstdFlags)
+//	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 //	manager := collections.NewManager(mongoClient, database, logger)
 //
 //	// Create collection

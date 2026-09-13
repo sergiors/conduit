@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
-	"log"
+	"log/slog"
 	"sync"
 	"testing"
 	"time"
@@ -19,7 +19,7 @@ import (
 	"conduit/internal/retry"
 )
 
-var discardLogger = log.New(io.Discard, "", 0)
+var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 // fakeRetryStore is a minimal in-memory Store for the retry processor, exposing
 // GetRetryQueueLength plus the no-op methods the interface requires.

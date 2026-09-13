@@ -15,7 +15,7 @@
 //
 // Usage:
 //
-//	logger := log.New(os.Stdout, "", log.LstdFlags)
+//	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 //	manager := watcher.NewManager(mongoClient, database, collectionsManager, redisClient, dispatcher, retryProcessor, watcher.DefaultConfig(), logger)
 //	if err := manager.Start(ctx); err != nil {
 //	    log.Fatal(err)

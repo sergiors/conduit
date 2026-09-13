@@ -2,7 +2,7 @@ package cli
 
 import (
 	"context"
-	"log"
+	"log/slog"
 
 	"github.com/urfave/cli/v3"
 
@@ -17,7 +17,7 @@ var apiRun = api.Run
 
 // serverCommand returns the "conduit server" command that loads the full server
 // config and blocks in the API runtime.
-func serverCommand(logger *log.Logger) *cli.Command {
+func serverCommand(logger *slog.Logger) *cli.Command {
 	return &cli.Command{
 		Name:  "server",
 		Usage: "Start the API server",

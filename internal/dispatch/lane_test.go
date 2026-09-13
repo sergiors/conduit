@@ -3,7 +3,7 @@ package dispatch
 import (
 	"bytes"
 	"context"
-	"log"
+	"log/slog"
 	"sync"
 	"testing"
 
@@ -34,10 +34,13 @@ func (s *safeBuffer) String() string {
 	return s.b.String()
 }
 
-// bufferLogger returns a *log.Logger writing to a *safeBuffer so tests can
-// capture and inspect emitted delivery lines without racing the worker pool.
-func bufferLogger(buf *safeBuffer) *log.Logger {
-	return log.New(buf, "", 0)
+// bufferLogger returns a *slog.Logger writing DEBUG-level text to a *safeBuffer
+// so tests can capture and inspect emitted delivery lines without racing the
+// worker pool. DEBUG is used because the delivery boundary logs dispatch and
+// success at DEBUG; this helper deliberately keeps every level so the captured
+// output is complete.
+func bufferLogger(buf *safeBuffer) *slog.Logger {
+	return slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 }
 
 // dispatchInsert sends one INSERT record to the given dispatcher's collection
@@ -62,8 +65,12 @@ func TestLaneDeliveryLogging(t *testing.T) {
 
 		dispatchInsert(t, d, "users")
 		got := buf.String()
-		assert.Contains(t, got, "Dispatching event to sink: collection=users sink_id=s1 sink_type=http event_type=INSERT")
-		assert.Contains(t, got, "Event delivered to sink: collection=users sink_id=s1 sink_type=http event_type=INSERT")
+		assert.Contains(t, got, `msg="Dispatching event" collection=users eventType=INSERT sinkType=http sinkID=s1`)
+		assert.Contains(t, got, `msg="Event delivered" collection=users eventType=INSERT sinkType=http sinkID=s1`)
+		// Duration is a structured attribute on the delivered line, rendered as
+		// Go's readable duration string (e.g. `84ms`), not a bare float.
+		assert.Regexp(t, `duration=\d+(\.\d+)?(ns|µs|ms|s)\b`, got,
+			"the delivered line must carry a readable duration attribute")
 	})
 
 	t.Run("failure logs failed line with error", func(t *testing.T) {
@@ -77,8 +84,9 @@ func TestLaneDeliveryLogging(t *testing.T) {
 			streams.StreamRecord{RecordType: streams.InsertRecord}))
 
 		got := buf.String()
-		assert.Contains(t, got, "Dispatching event to sink: collection=users sink_id=s1 sink_type=http event_type=INSERT")
-		assert.Contains(t, got, "Failed to deliver event to sink: collection=users sink_id=s1 sink_type=http event_type=INSERT: "+assert.AnError.Error())
+		assert.Contains(t, got, `msg="Dispatching event" collection=users eventType=INSERT sinkType=http sinkID=s1`)
+		assert.Contains(t, got, `msg="Sink delivery failed" collection=users eventType=INSERT sinkType=http sinkID=s1`)
+		assert.Contains(t, got, `error="`+assert.AnError.Error()+`"`)
 	})
 
 	t.Run("empty sink id renders as dash", func(t *testing.T) {
@@ -90,8 +98,8 @@ func TestLaneDeliveryLogging(t *testing.T) {
 
 		dispatchInsert(t, d, "users")
 		got := buf.String()
-		assert.Contains(t, got, "Dispatching event to sink: collection=users sink_id=- sink_type=http event_type=INSERT")
-		assert.Contains(t, got, "Event delivered to sink: collection=users sink_id=- sink_type=http event_type=INSERT")
+		assert.Contains(t, got, `msg="Dispatching event" collection=users eventType=INSERT sinkType=http sinkID=-`)
+		assert.Contains(t, got, `msg="Event delivered" collection=users eventType=INSERT sinkType=http sinkID=-`)
 	})
 
 	t.Run("no logger produces no delivery output", func(t *testing.T) {
@@ -135,8 +143,8 @@ func TestLaneDeliveryLoggingFilteredNoOp(t *testing.T) {
 	require.NoError(t, err)
 
 	got := buf.String()
-	assert.Contains(t, got, "Dispatching event to sink: collection=users sink_id=s1 sink_type=redis event_type=MODIFY")
-	assert.Contains(t, got, "Event delivered to sink: collection=users sink_id=s1 sink_type=redis event_type=MODIFY",
+	assert.Contains(t, got, `msg="Dispatching event" collection=users eventType=MODIFY sinkType=redis sinkID=s1`)
+	assert.Contains(t, got, `msg="Event delivered" collection=users eventType=MODIFY sinkType=redis sinkID=s1`,
 		"a filtered no-op counts as success and is logged as succeeded")
 }
 

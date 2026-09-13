@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -42,19 +42,19 @@ type RedisTransport struct {
 }
 
 // NewRedis builds a Redis transport from its spec.
-func NewRedis(ctx context.Context, spec RedisSpec, logger *log.Logger) dispatch.Transport {
+func NewRedis(ctx context.Context, spec RedisSpec, logger *slog.Logger) dispatch.Transport {
 	if spec.URL == "" {
-		logger.Printf("Redis transport requires a url")
+		logger.Warn("Redis transport requires a url")
 		return nil
 	}
 	if spec.Stream == "" {
-		logger.Printf("Redis transport requires a stream")
+		logger.Warn("Redis transport requires a stream")
 		return nil
 	}
 
 	opts, err := redis.ParseURL(spec.URL)
 	if err != nil {
-		logger.Printf("Redis transport: invalid url %q: %v", spec.URL, err)
+		logger.Warn("Redis transport: invalid url", "url", spec.URL, "error", err)
 		return nil
 	}
 
@@ -106,10 +106,10 @@ func (t *RedisTransport) Close() error {
 // buildRedis decodes a raw spec and builds a Redis transport. Unlike
 // Meilisearch's optional indexName, the stream is required and is never
 // defaulted to the collection name.
-func buildRedis(ctx context.Context, collectionName string, t collections.Type, rawSpec map[string]interface{}, logger *log.Logger) dispatch.Transport {
+func buildRedis(ctx context.Context, collectionName string, t collections.Type, rawSpec map[string]interface{}, logger *slog.Logger) dispatch.Transport {
 	var spec RedisSpec
 	if err := decodeSpec(rawSpec, &spec); err != nil {
-		logger.Printf("Failed to decode Redis transport spec for %s: %v", collectionName, err)
+		logger.Warn("Failed to decode Redis transport spec", "collection", collectionName, "error", err)
 		return nil
 	}
 

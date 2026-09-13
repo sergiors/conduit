@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"sync"
 	"testing"
 	"time"
@@ -23,7 +23,7 @@ import (
 	"conduit/internal/streams"
 )
 
-var discardLogger = log.New(io.Discard, "", 0)
+var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 func TestWatcherCreation(t *testing.T) {
 	t.Run("new watcher with correct configuration", func(t *testing.T) {

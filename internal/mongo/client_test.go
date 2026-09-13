@@ -3,7 +3,7 @@ package mongo
 import (
 	"context"
 	"io"
-	"log"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -12,7 +12,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-var discardLogger = log.New(io.Discard, "", 0)
+var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 func TestConfig(t *testing.T) {
 	t.Run("default configuration", func(t *testing.T) {

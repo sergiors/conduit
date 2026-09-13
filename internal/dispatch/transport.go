@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 
 	"conduit/internal/collections"
 	"conduit/internal/streams"
@@ -28,7 +29,7 @@ type Transport interface {
 // returning nil if the spec is invalid or unsupported at runtime. The collection
 // name may feed transport-specific defaults (e.g. a Meilisearch index name);
 // event types, filters and sink identity must not be handled here.
-type TransportBuilder func(ctx context.Context, collectionName string, t collections.Type, spec map[string]interface{}, logger *log.Logger) Transport
+type TransportBuilder func(ctx context.Context, collectionName string, t collections.Type, spec map[string]interface{}, logger *slog.Logger) Transport
 
 var transportBuilders = make(map[collections.Type]TransportBuilder)
 
@@ -59,17 +60,19 @@ func RegisterTransport(t collections.Type, builder TransportBuilder) {
 // erroring transport. The sink still participates in dispatch and Send fails
 // every matching event, so the watcher treats it as unsettled and retries; a nil
 // return is never produced for a configured sink.
-func BuildTransport(ctx context.Context, collectionName string, t collections.Type, spec map[string]interface{}, logger *log.Logger) Transport {
+func BuildTransport(ctx context.Context, collectionName string, t collections.Type, spec map[string]interface{}, logger *slog.Logger) Transport {
 	builder, exists := transportBuilders[t]
 	if !exists {
 		err := fmt.Errorf("no transport registered for sink type %q (collection %s)", t, collectionName)
-		logger.Print(err)
+		logger.Warn("Sink transport unavailable for collection",
+			"collection", collectionName, "sinkType", t, "error", err)
 		return newUnavailableTransport(err)
 	}
 	transport := builder(ctx, collectionName, t, spec, logger)
 	if transport == nil {
 		err := fmt.Errorf("transport builder rejected spec for sink type %q (collection %s)", t, collectionName)
-		logger.Print(err)
+		logger.Warn("Sink transport spec rejected for collection",
+			"collection", collectionName, "sinkType", t, "error", err)
 		return newUnavailableTransport(err)
 	}
 	return transport

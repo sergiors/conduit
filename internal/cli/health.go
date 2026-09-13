@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"text/tabwriter"
 	"time"
 
@@ -28,7 +28,7 @@ var mongoProbe = checkMongo
 var redisProbe = checkRedis
 
 // healthCommand returns the "conduit health" command.
-func healthCommand(logger *log.Logger) *cli.Command {
+func healthCommand(logger *slog.Logger) *cli.Command {
 	return &cli.Command{
 		Name:  "health",
 		Usage: "Check service health",
@@ -42,7 +42,7 @@ func healthCommand(logger *log.Logger) *cli.Command {
 // "healthy" on success, otherwise the error text. On success the client is
 // closed before returning.
 func checkMongo(ctx context.Context, cfg mongo.Config) string {
-	probeLogger := log.New(io.Discard, "", 0)
+	probeLogger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	client, err := mongo.NewClient(ctx, cfg, probeLogger)
 	if err != nil {
 		return err.Error()
@@ -55,7 +55,7 @@ func checkMongo(ctx context.Context, cfg mongo.Config) string {
 // "healthy" on success, otherwise the error text. On success the client is
 // closed before returning.
 func checkRedis(ctx context.Context, cfg redis.Config) string {
-	probeLogger := log.New(io.Discard, "", 0)
+	probeLogger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	client, err := redis.NewClient(ctx, cfg, probeLogger)
 	if err != nil {
 		return err.Error()
@@ -68,7 +68,7 @@ func checkRedis(ctx context.Context, cfg redis.Config) string {
 // Every failing dependency is still checked and reported so the operator sees
 // the full picture, and an error is returned so the CLI exits non-zero on any
 // failure.
-func runHealth(ctx context.Context, out io.Writer, logger *log.Logger) error {
+func runHealth(ctx context.Context, out io.Writer, logger *slog.Logger) error {
 	cfg := config.Load(logger)
 
 	// Each check gets its own short timeout rather than sharing one context, so a

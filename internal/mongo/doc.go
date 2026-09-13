@@ -14,7 +14,7 @@
 //
 // Usage:
 //
-//	logger := log.New(os.Stdout, "", log.LstdFlags)
+//	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 //	client, err := mongo.NewClient(ctx, mongo.Config{
 //	    URI:      "mongodb://localhost:27017/?replicaSet=rs0",
 //	    Database: "conduit",

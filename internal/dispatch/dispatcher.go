@@ -2,7 +2,7 @@ package dispatch
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"sync"
 
 	"conduit/internal/collections"
@@ -49,7 +49,7 @@ type Dispatcher struct {
 	// logger, when non-nil, is used by each sink lane to log delivery outcomes
 	// at the delivery boundary (see lane.deliver). It is nil when delivery
 	// logging is not wired, in which case the logs are silently skipped.
-	logger *log.Logger
+	logger *slog.Logger
 }
 
 // NewDispatcher creates a new event dispatcher with the given per-sink lane
@@ -60,7 +60,7 @@ type Dispatcher struct {
 // it). The observer is independent of the logger and still records metrics
 // when non-nil. The worker wires *metrics.Metrics as the observer and the
 // process logger; tests pass what they need (often nils).
-func NewDispatcher(cfg Config, obs SinkDeliveryObserver, logger *log.Logger) *Dispatcher {
+func NewDispatcher(cfg Config, obs SinkDeliveryObserver, logger *slog.Logger) *Dispatcher {
 	return &Dispatcher{
 		sinks:    make(map[string][]*lane),
 		cfg:      sanitizeConfig(cfg),

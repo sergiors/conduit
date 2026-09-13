@@ -3,7 +3,7 @@ package collections
 import (
 	"context"
 	"io"
-	"log"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -14,7 +14,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-var discardLogger = log.New(io.Discard, "", 0)
+var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 // newTestDLQManager connects to MongoDB and returns a Manager whose DLQ is
 // backed by a dedicated test database. It skips the test if MongoDB is not

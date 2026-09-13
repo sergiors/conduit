@@ -3,7 +3,7 @@ package mongo
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -33,7 +33,7 @@ type Config struct {
 // The application never creates or modifies replica sets; it only waits for
 // readiness. Replica set topology is managed externally (by MongoDB
 // administrators or operators).
-func NewClient(ctx context.Context, cfg Config, logger *log.Logger) (*Client, error) {
+func NewClient(ctx context.Context, cfg Config, logger *slog.Logger) (*Client, error) {
 	if cfg.URI == "" {
 		return nil, fmt.Errorf("MONGODB_URI is required")
 	}
@@ -85,7 +85,7 @@ func (c *Client) Close(ctx context.Context) error {
 // waitForWritablePrimary polls the hello command until the node reports itself
 // as the writable PRIMARY. Transient errors while the node is recovering or
 // electing a PRIMARY are retried until the context is done.
-func waitForWritablePrimary(ctx context.Context, client *mongo.Client, logger *log.Logger) error {
+func waitForWritablePrimary(ctx context.Context, client *mongo.Client, logger *slog.Logger) error {
 	helloCmd := bson.D{{Key: "hello", Value: 1}}
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
@@ -98,7 +98,7 @@ func waitForWritablePrimary(ctx context.Context, client *mongo.Client, logger *l
 		err := client.Database("admin").RunCommand(ctx, helloCmd).Decode(&hello)
 
 		if err == nil && hello.OK == 1 && hello.IsWritablePrimary {
-			logger.Println("MongoDB node is writable PRIMARY")
+			logger.Info("MongoDB node is writable PRIMARY")
 			return nil
 		}
 
@@ -113,13 +113,13 @@ func waitForWritablePrimary(ctx context.Context, client *mongo.Client, logger *l
 // waitForClientReady pings the client until it can reach a server, ensuring the
 // replica-set-mode client has discovered the PRIMARY. Transient errors are
 // retried until the context is done.
-func waitForClientReady(ctx context.Context, client *mongo.Client, logger *log.Logger) error {
+func waitForClientReady(ctx context.Context, client *mongo.Client, logger *slog.Logger) error {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
 	for {
 		if err := client.Ping(ctx, nil); err == nil {
-			logger.Println("MongoDB client ready")
+			logger.Info("MongoDB client ready")
 			return nil
 		}
 

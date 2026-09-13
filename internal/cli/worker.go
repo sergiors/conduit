@@ -2,7 +2,7 @@ package cli
 
 import (
 	"context"
-	"log"
+	"log/slog"
 
 	"github.com/urfave/cli/v3"
 
@@ -17,7 +17,7 @@ var workerRun = worker.Run
 
 // workerCommand returns the "conduit worker" command that loads the full config
 // and blocks in the worker runtime.
-func workerCommand(logger *log.Logger) *cli.Command {
+func workerCommand(logger *slog.Logger) *cli.Command {
 	return &cli.Command{
 		Name:  "worker",
 		Usage: "Start the CDC worker",

@@ -6,7 +6,7 @@ package worker
 import (
 	"context"
 	"errors"
-	"log"
+	"log/slog"
 	"os/signal"
 	"sync/atomic"
 	"syscall"
@@ -34,12 +34,12 @@ type Worker struct {
 	metricsServer      *metrics.Server
 	metricsRefresher   *metrics.Refresher
 	metricsLogger      *metrics.MetricsLogger
-	logger             *log.Logger
+	logger             *slog.Logger
 
 	shutdownOnce atomic.Bool
 }
 
-func NewWorker(cfg config.Config, logger *log.Logger) (*Worker, error) {
+func NewWorker(cfg config.Config, logger *slog.Logger) (*Worker, error) {
 	// Use a generous timeout for startup: MongoDB may still be electing a PRIMARY
 	// after a restart, and NewClient waits for it before returning.
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -170,19 +170,19 @@ func (w *Worker) Shutdown(ctx context.Context) error {
 		return nil
 	}
 
-	w.logger.Println("Shutting down worker...")
+	w.logger.Info("Shutting down worker")
 
 	var errs []error
 
 	// Watcher manager goes first so no new events are dispatched while
 	// in-flight bookkeeping completes.
 	if err := w.watcherManager.Stop(ctx); err != nil {
-		w.logger.Printf("Error stopping watcher manager: %v", err)
+		w.logger.Error("Failed to stop watcher manager", "component", "watcherManager", "error", err)
 		errs = append(errs, err)
 	}
 
 	if err := w.retryProcessor.Stop(ctx); err != nil {
-		w.logger.Printf("Error stopping retry processor: %v", err)
+		w.logger.Error("Failed to stop retry processor", "component", "retryProcessor", "error", err)
 		errs = append(errs, err)
 	}
 
@@ -190,7 +190,7 @@ func (w *Worker) Shutdown(ctx context.Context) error {
 	// while the gauge sources are torn down.
 	if w.metricsRefresher != nil {
 		if err := w.metricsRefresher.Stop(ctx); err != nil {
-			w.logger.Printf("Error stopping metrics refresher: %v", err)
+			w.logger.Error("Failed to stop metrics refresher", "component", "metricsRefresher", "error", err)
 			errs = append(errs, err)
 		}
 	}
@@ -199,23 +199,23 @@ func (w *Worker) Shutdown(ctx context.Context) error {
 	// registry snapshots while the data plane tears down.
 	if w.metricsLogger != nil {
 		if err := w.metricsLogger.Stop(ctx); err != nil {
-			w.logger.Printf("Error stopping metrics logger: %v", err)
+			w.logger.Error("Failed to stop metrics logger", "component", "metricsLogger", "error", err)
 			errs = append(errs, err)
 		}
 	}
 
 	if err := w.dispatcher.Close(); err != nil {
-		w.logger.Printf("Error closing dispatcher: %v", err)
+		w.logger.Error("Failed to close dispatcher", "component", "dispatcher", "error", err)
 		errs = append(errs, err)
 	}
 
 	if err := w.redisClient.Close(); err != nil {
-		w.logger.Printf("Error closing Redis: %v", err)
+		w.logger.Error("Failed to close Redis", "component", "redis", "error", err)
 		errs = append(errs, err)
 	}
 
 	if err := w.mongoClient.Close(ctx); err != nil {
-		w.logger.Printf("Error closing MongoDB: %v", err)
+		w.logger.Error("Failed to close MongoDB", "component", "mongo", "error", err)
 		errs = append(errs, err)
 	}
 
@@ -223,19 +223,19 @@ func (w *Worker) Shutdown(ctx context.Context) error {
 	// through the whole data-plane drain.
 	if w.metricsServer != nil {
 		if err := w.metricsServer.Stop(ctx); err != nil {
-			w.logger.Printf("Error stopping metrics server: %v", err)
+			w.logger.Error("Failed to stop metrics server", "component", "metricsServer", "error", err)
 			errs = append(errs, err)
 		}
 	}
 
-	w.logger.Println("Worker stopped")
+	w.logger.Info("Worker stopped")
 	return errors.Join(errs...)
 }
 
 // start boots the worker's runtime components: the metrics server, the gauge
 // refresher, the watcher manager, and the retry processor.
 func (w *Worker) start(ctx context.Context) error {
-	w.logger.Println("Worker starting...")
+	w.logger.Info("Worker starting")
 
 	// Start the metrics server first so Prometheus can scrape from the moment
 	// the worker begins operating. A bind error (port conflict) fails startup
@@ -271,9 +271,7 @@ func (w *Worker) start(ctx context.Context) error {
 		return err
 	}
 
-	w.logger.Printf(
-		"Worker started with %d active watchers", w.watcherManager.GetActiveWatchers(),
-	)
+	w.logger.Info("Worker started", "activeWatchers", w.watcherManager.GetActiveWatchers())
 
 	return nil
 }
@@ -282,7 +280,7 @@ func (w *Worker) start(ctx context.Context) error {
 // until SIGINT/SIGTERM, and perform a graceful shutdown bounded by the
 // configured shutdown timeout. It returns an error (which the caller should log
 // and turn into a non-zero exit) rather than crashing the process.
-func Run(cfg config.Config, logger *log.Logger) error {
+func Run(cfg config.Config, logger *slog.Logger) error {
 	worker, err := NewWorker(cfg, logger)
 	if err != nil {
 		return err
@@ -293,11 +291,11 @@ func Run(cfg config.Config, logger *log.Logger) error {
 	defer stop()
 
 	if err := worker.start(ctx); err != nil {
-		logger.Printf("Worker failed: %v", err)
+		logger.Error("Worker failed", "error", err)
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 		defer cancel()
 		if serr := worker.Shutdown(shutdownCtx); serr != nil {
-			logger.Printf("Error during shutdown after run failure: %v", serr)
+			logger.Error("Error during shutdown after run failure", "error", serr)
 		}
 		return err
 	}
@@ -307,7 +305,7 @@ func Run(cfg config.Config, logger *log.Logger) error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
 	if err := worker.Shutdown(shutdownCtx); err != nil {
-		logger.Printf("Error during shutdown: %v", err)
+		logger.Error("Error during shutdown", "error", err)
 		return err
 	}
 

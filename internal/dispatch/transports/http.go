@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -35,13 +35,13 @@ type HTTPTransport struct {
 	HTTPSpec
 
 	client *http.Client
-	logger *log.Logger
+	logger *slog.Logger
 }
 
 // NewHTTP builds an HTTP transport from its spec.
-func NewHTTP(ctx context.Context, spec HTTPSpec, logger *log.Logger) dispatch.Transport {
+func NewHTTP(ctx context.Context, spec HTTPSpec, logger *slog.Logger) dispatch.Transport {
 	if spec.Endpoint == "" {
-		logger.Printf("HTTP transport requires an endpoint")
+		logger.Warn("HTTP transport requires an endpoint")
 		return nil
 	}
 
@@ -98,7 +98,7 @@ func (t *HTTPTransport) Send(ctx context.Context, record streams.StreamRecord) e
 	// consumed returns io.EOF — neither indicates a delivery problem, so ignore
 	// all drain errors. The body is never read into memory.
 	if _, err := io.CopyN(io.Discard, resp.Body, maxDrainBytes); err != nil && !errors.Is(err, io.EOF) {
-		t.logger.Printf("HTTP transport: drain response body: %v", err)
+		t.logger.Debug("HTTP transport: drain response body", "error", err)
 	}
 	return nil
 }
@@ -106,10 +106,10 @@ func (t *HTTPTransport) Send(ctx context.Context, record streams.StreamRecord) e
 func (t *HTTPTransport) Close() error { return nil }
 
 func init() {
-	dispatch.RegisterTransport(collections.SinkTypeHTTP, func(ctx context.Context, collectionName string, t collections.Type, rawSpec map[string]interface{}, logger *log.Logger) dispatch.Transport {
+	dispatch.RegisterTransport(collections.SinkTypeHTTP, func(ctx context.Context, collectionName string, t collections.Type, rawSpec map[string]interface{}, logger *slog.Logger) dispatch.Transport {
 		var spec HTTPSpec
 		if err := decodeSpec(rawSpec, &spec); err != nil {
-			logger.Printf("Failed to decode HTTP transport spec for %s: %v", collectionName, err)
+			logger.Warn("Failed to decode HTTP transport spec", "collection", collectionName, "error", err)
 			return nil
 		}
 

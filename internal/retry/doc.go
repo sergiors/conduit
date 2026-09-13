@@ -15,7 +15,7 @@
 //
 // Usage:
 //
-//	logger := log.New(os.Stdout, "", log.LstdFlags)
+//	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 //	processor := retry.NewProcessor(redisClient, collectionsManager, dispatcher, retry.DefaultConfig(), logger)
 //	if err := processor.Start(ctx); err != nil {
 //	    log.Fatal(err)

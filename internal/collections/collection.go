@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -38,7 +38,7 @@ type Manager struct {
 	collection *mongo.Collection
 	sinks      *mongo.Collection
 	dlq        *mongo.Collection
-	logger     *log.Logger
+	logger     *slog.Logger
 
 	// OnPublish is an optional hook invoked after any successful configuration
 	// mutation (collection created or deleted, stream/TTL enabled or disabled,
@@ -62,7 +62,7 @@ type Manager struct {
 }
 
 // NewManager creates a new collection manager
-func NewManager(client *mongo.Client, database string, logger *log.Logger) *Manager {
+func NewManager(client *mongo.Client, database string, logger *slog.Logger) *Manager {
 	return &Manager{
 		client:     client,
 		database:   database,
@@ -83,7 +83,7 @@ func (m *Manager) notifyPublish(ctx context.Context, name string) {
 		return
 	}
 	if err := m.OnPublish(ctx, name); err != nil {
-		m.logger.Printf("Failed to publish config change for %s: %v", name, err)
+		m.logger.Warn("Failed to publish config change", "collection", name, "error", err)
 	}
 }
 
@@ -98,7 +98,7 @@ func (m *Manager) purgeState(ctx context.Context, name string) {
 	purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	if err := m.OnPurge(purgeCtx, name); err != nil {
-		m.logger.Printf("Failed to purge CDC state after deleting collection %s: %v", name, err)
+		m.logger.Warn("Failed to purge CDC state after deleting collection", "collection", name, "error", err)
 	}
 }
 

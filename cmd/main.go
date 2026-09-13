@@ -6,16 +6,27 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"conduit/internal/cli"
+	"conduit/internal/config"
 )
 
 func main() {
-	logger := log.New(os.Stdout, "", log.LstdFlags)
+	// Bootstrap the process logger from LOG_LEVEL before any command runs, so
+	// all process-level logging follows the configured level. LOG_LEVEL is
+	// parsed here (fail-fast on an invalid value) and parsed again inside
+	// config.Load as the commands dispatch; both agree, so the value is
+	// validated exactly once at the executable boundary.
+	level, err := config.ParseLogLevel(os.Getenv("LOG_LEVEL"))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
 
 	ctx, stop := signal.NotifyContext(
 		context.Background(),

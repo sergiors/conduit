@@ -3,12 +3,12 @@ package recover
 import (
 	"errors"
 	"io"
-	"log"
+	"log/slog"
 	"strings"
 	"testing"
 )
 
-var discardLogger = log.New(io.Discard, "", 0)
+var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 func TestProtect(t *testing.T) {
 	t.Run("recovers a panic and reports it", func(t *testing.T) {

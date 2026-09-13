@@ -3,7 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"conduit/internal/apikey"
@@ -56,7 +56,7 @@ func (s *Server) Router() *gin.Engine {
 // The function returns an error instead of the original logger.Fatalf so the CLI
 // can exit non-zero on failure; fatal-on-invalid-config still happens earlier in
 // config.Load.
-func Run(cfg config.Config, logger *log.Logger) error {
+func Run(cfg config.Config, logger *slog.Logger) error {
 	// Use a generous timeout for startup: MongoDB may still be electing a PRIMARY
 	// after a restart, and NewClient waits for it before returning.
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -103,7 +103,7 @@ func Run(cfg config.Config, logger *log.Logger) error {
 		APIKeys:     apiKeys,
 	})
 
-	logger.Printf("API server starting on port %s", cfg.Port)
+	logger.Info("API server starting", "port", cfg.Port)
 	if err := server.Router().Run(":" + cfg.Port); err != nil {
 		return fmt.Errorf("server failed: %w", err)
 	}

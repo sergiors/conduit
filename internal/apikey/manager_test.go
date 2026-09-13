@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -18,7 +18,7 @@ import (
 
 const localMongoURI = "mongodb://localhost:27017/?directConnection=true"
 
-var discardLogger = log.New(io.Discard, "", 0)
+var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 // newTestManager connects to MongoDB, uses a unique database, and returns a
 // wired Manager plus helpers. It skips when MongoDB is unavailable or running

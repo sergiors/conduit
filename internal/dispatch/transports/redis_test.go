@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -19,7 +19,7 @@ import (
 	"conduit/internal/streams"
 )
 
-var discardLogger = log.New(io.Discard, "", 0)
+var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 // fakeXAdder is a test double for the XAdder seam. It records the last XAddArgs
 // and context it received and returns a canned result or error.

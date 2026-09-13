@@ -3,7 +3,7 @@ package watcher
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"reflect"
 
 	"conduit/internal/collections"
@@ -103,7 +103,7 @@ func mutableFieldsEqual(a, b collections.Sink) bool {
 }
 
 // ApplyChanges applies the reconciliation changes to a dispatcher.
-func (r *Reconciliation) ApplyChanges(ctx context.Context, logger *log.Logger, collectionName string, disp dispatcher) {
+func (r *Reconciliation) ApplyChanges(ctx context.Context, logger *slog.Logger, collectionName string, disp dispatcher) {
 	for _, change := range r.Changes {
 		switch change.Type {
 		case ChangeRemoved:
@@ -133,15 +133,15 @@ type dispatcher interface {
 }
 
 // LogChanges logs the changes at the appropriate level.
-func (r *Reconciliation) LogChanges(logger *log.Logger, collectionName string) {
+func (r *Reconciliation) LogChanges(logger *slog.Logger, collectionName string) {
 	for _, change := range r.Changes {
 		switch change.Type {
 		case ChangeAdded:
-			logger.Printf("Added sink %s for collection %s", change.Sink.ID, collectionName)
+			logger.Info("Added sink", "collection", collectionName, "sinkID", change.Sink.ID)
 		case ChangeRemoved:
-			logger.Printf("Removed sink %s for collection %s", change.Sink.ID, collectionName)
+			logger.Info("Removed sink", "collection", collectionName, "sinkID", change.Sink.ID)
 		case ChangeUpdated:
-			logger.Printf("Updated sink %s for collection %s", change.Sink.ID, collectionName)
+			logger.Info("Updated sink", "collection", collectionName, "sinkID", change.Sink.ID)
 		}
 	}
 }

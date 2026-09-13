@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"log"
+	"log/slog"
 	"testing"
 
 	"conduit/internal/config"
@@ -18,7 +18,7 @@ import (
 
 // discardLogger is shared by tests that only need a logger for config.Load; the
 // CLI commands' own output is captured in the root's Writer instead.
-var discardLogger = log.New(io.Discard, "", 0)
+var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 // newRootCommandForTest builds the real command tree with its Writer pointed at
 // a captured buffer so help output and command output can be asserted. It is
@@ -142,14 +142,14 @@ func TestServerCommandDispatch(t *testing.T) {
 	t.Setenv("REDIS_URI", "redis://dummy:6379")
 	t.Setenv("PORT", "9999")
 
-	logger := log.New(io.Discard, "", 0)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	root := New(logger, io.Discard)
 
 	sentinel := &sentinelErr{}
 	var capturedCfg config.Config
-	var capturedLogger *log.Logger
+	var capturedLogger *slog.Logger
 	orig := apiRun
-	apiRun = func(cfg config.Config, l *log.Logger) error {
+	apiRun = func(cfg config.Config, l *slog.Logger) error {
 		capturedCfg = cfg
 		capturedLogger = l
 		return sentinel
@@ -171,14 +171,14 @@ func TestWorkerCommandDispatch(t *testing.T) {
 	t.Setenv("MONGODB_DATABASE", "dummy")
 	t.Setenv("REDIS_URI", "redis://dummy:6379")
 
-	logger := log.New(io.Discard, "", 0)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	root := New(logger, io.Discard)
 
 	sentinel := &sentinelErr{}
 	var capturedCfg config.Config
-	var capturedLogger *log.Logger
+	var capturedLogger *slog.Logger
 	orig := workerRun
-	workerRun = func(cfg config.Config, l *log.Logger) error {
+	workerRun = func(cfg config.Config, l *slog.Logger) error {
 		capturedCfg = cfg
 		capturedLogger = l
 		return sentinel

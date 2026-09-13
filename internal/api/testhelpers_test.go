@@ -3,7 +3,7 @@ package api
 import (
 	"context"
 	"io"
-	"log"
+	"log/slog"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -22,7 +22,7 @@ import (
 // network.
 const localMongoURI = "mongodb://localhost:27017/?directConnection=true"
 
-var discardLogger = log.New(io.Discard, "", 0)
+var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 // testToken is the plaintext API key created for integration tests. It is set
 // by newMongoTestServer and consumed by doRequest.

@@ -2,7 +2,7 @@ package retry
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"math"
 	"sync"
 	"time"
@@ -43,7 +43,7 @@ type Processor struct {
 	maxDelay    time.Duration
 	collections map[string]bool
 	mu          sync.RWMutex
-	logger      *log.Logger
+	logger      *slog.Logger
 
 	// Runtime state
 	ctx     context.Context
@@ -77,7 +77,7 @@ func NewProcessor(
 	dlqStore DLQ,
 	dispatcher *dispatch.Dispatcher,
 	cfg Config,
-	logger *log.Logger,
+	logger *slog.Logger,
 ) *Processor {
 	return &Processor{
 		store:       store,
@@ -102,7 +102,7 @@ func (p *Processor) Start(ctx context.Context) error {
 		return nil
 	}
 
-	p.logger.Println("Retry processor starting...")
+	p.logger.Info("Retry processor starting")
 
 	p.ctx, p.cancel = context.WithCancel(ctx)
 	p.started = true
@@ -157,7 +157,7 @@ func (p *Processor) processLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			p.logger.Println("Retry processor stopping...")
+			p.logger.Info("Retry processor stopping")
 			return
 		case <-ticker.C:
 			// A panic while processing the queue must not kill the loop; the
@@ -166,7 +166,7 @@ func (p *Processor) processLoop(ctx context.Context) {
 				p.processQueue(ctx)
 				return nil
 			}); panicked {
-				p.logger.Println("Retry queue processing panicked; continuing loop")
+				p.logger.Error("Retry queue processing panicked; continuing loop")
 			}
 		}
 	}
@@ -238,7 +238,8 @@ func (p *Processor) processCollectionQueue(ctx context.Context, collectionName s
 	// Get events ready for retry
 	events, err := p.store.DequeueRetry(ctx, collectionName, 10)
 	if err != nil {
-		p.logger.Printf("Failed to dequeue retry events for %s: %v", collectionName, err)
+		p.logger.Error("Failed to dequeue retry events",
+			"collection", collectionName, "error", err)
 		return
 	}
 
@@ -257,9 +258,16 @@ func (p *Processor) processRetryEvent(ctx context.Context, collectionName string
 
 	// Check if max retries exceeded
 	if event.RetryCount >= event.MaxRetries {
-		p.logger.Printf("Event exceeded max retries (%d), persisting to DLQ: %s", event.MaxRetries, collectionName)
+		p.logger.Error("Retries exhausted, moving event to DLQ",
+			"collection", collectionName,
+			"eventID", event.ID,
+			"attempt", event.RetryCount,
+			"maxRetries", event.MaxRetries,
+			"lastError", event.LastError,
+		)
 		if p.dlq == nil {
-			p.logger.Printf("DLQ not available (nil store), event retained in queue: %s", collectionName)
+			p.logger.Error("DLQ unavailable, event retained in queue",
+				"collection", collectionName, "eventID", event.ID)
 			return
 		}
 		// Persist-first ordering: only remove the event after a successful DLQ
@@ -275,9 +283,12 @@ func (p *Processor) processRetryEvent(ctx context.Context, collectionName string
 			DedupKey:       event.ID,
 		}
 		if err := p.dlq.CreateDLQEntry(bkctx, entry); err != nil {
-			p.logger.Printf("Failed to persist to DLQ: %v", err)
+			p.logger.Error("Failed to persist event to DLQ",
+				"collection", collectionName, "eventID", event.ID, "error", err)
 			return
 		}
+		p.logger.Error("Event moved to DLQ",
+			"collection", collectionName, "eventID", event.ID)
 		// Remove from retry queue only after a successful DLQ write. If the
 		// removal itself fails, a stale duplicate remains in the retry queue;
 		// that is intentional under at-least-once semantics, since the event
@@ -285,7 +296,8 @@ func (p *Processor) processRetryEvent(ctx context.Context, collectionName string
 		// to a loss. The idempotent dedup key prevents the stale duplicate
 		// from creating unbounded DLQ entries on re-processing.
 		if err := p.store.RemoveRetryEvent(bkctx, collectionName, event); err != nil {
-			p.logger.Printf("Failed to remove event from retry queue: %v", err)
+			p.logger.Error("Failed to remove event from retry queue",
+				"collection", collectionName, "eventID", event.ID, "error", err)
 		}
 		return
 	}
@@ -293,18 +305,26 @@ func (p *Processor) processRetryEvent(ctx context.Context, collectionName string
 	// Try to dispatch again - parse event data from JSON
 	record, err := streams.ParseStreamRecord(event.EventData)
 	if err != nil {
-		p.logger.Printf("Failed to parse stream record from retry queue: %v", err)
+		p.logger.Error("Failed to parse stream record from retry queue",
+			"collection", collectionName, "eventID", event.ID, "error", err)
 		// Remove invalid event from queue
 		if p.store != nil {
 			if err := p.store.RemoveRetryEvent(bkctx, collectionName, event); err != nil {
-				p.logger.Printf("Failed to remove invalid event from retry queue: %v", err)
+				p.logger.Error("Failed to remove invalid event from retry queue",
+					"collection", collectionName, "eventID", event.ID, "error", err)
 			}
 		}
 		return
 	}
 
 	if err := p.dispatcher.Dispatch(ctx, collectionName, *record); err != nil {
-		p.logger.Printf("Retry %d/%d failed for %s: %v", event.RetryCount+1, event.MaxRetries, collectionName, err)
+		p.logger.Warn("Retry attempt failed",
+			"collection", collectionName,
+			"eventID", event.ID,
+			"attempt", event.RetryCount+1,
+			"maxRetries", event.MaxRetries,
+			"error", err,
+		)
 
 		if p.store == nil {
 			return
@@ -322,20 +342,24 @@ func (p *Processor) processRetryEvent(ctx context.Context, collectionName string
 		event.NextRetryAt = p.calculateNextRetry(event.RetryCount)
 		event.LastError = err.Error()
 		if err := p.store.EnqueueRetry(bkctx, event); err != nil {
-			p.logger.Printf("Failed to re-queue retry event: %v", err)
+			p.logger.Error("Failed to re-queue retry event",
+				"collection", collectionName, "eventID", event.ID, "error", err)
 			return
 		}
 		if err := p.store.RemoveRetryEvent(bkctx, collectionName, original); err != nil {
-			p.logger.Printf("Failed to remove old retry event: %v", err)
+			p.logger.Error("Failed to remove old retry event",
+				"collection", collectionName, "eventID", event.ID, "error", err)
 		}
 		return
 	}
 
 	// Success - event processed, remove from retry queue
-	p.logger.Printf("Retry succeeded for %s after %d attempts", collectionName, event.RetryCount+1)
+	p.logger.Info("Event delivered after retry",
+		"collection", collectionName, "eventID", event.ID, "attempts", event.RetryCount+1)
 	if p.store != nil {
 		if err := p.store.RemoveRetryEvent(bkctx, collectionName, event); err != nil {
-			p.logger.Printf("Failed to remove event from retry queue: %v", err)
+			p.logger.Error("Failed to remove event from retry queue",
+				"collection", collectionName, "eventID", event.ID, "error", err)
 		}
 	}
 }

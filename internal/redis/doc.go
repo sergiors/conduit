@@ -26,7 +26,7 @@
 //
 // Usage:
 //
-//	logger := log.New(os.Stdout, "", log.LstdFlags)
+//	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 //	client, err := redis.NewClient(ctx, redis.DefaultConfig(), logger)
 //	if err != nil {
 //	    log.Fatal(err)

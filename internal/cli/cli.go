@@ -7,7 +7,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"os"
 
 	"github.com/urfave/cli/v3"
@@ -22,7 +22,7 @@ import (
 // would os.Exit(1) inside the library for exit-coded errors (usage errors,
 // unknown commands). Keeping errors returning from Run lets cmd/main.go own
 // logging and the process exit code — a single place prints each failure.
-func New(logger *log.Logger, writer io.Writer) *cli.Command {
+func New(logger *slog.Logger, writer io.Writer) *cli.Command {
 	return &cli.Command{
 		Name:           "conduit",
 		Usage:          "Conduit CDC platform",
@@ -51,6 +51,6 @@ func New(logger *log.Logger, writer io.Writer) *cli.Command {
 // urfave/cli expects (binary name first, e.g. os.Args). The returned error —
 // a single failure — is logged and turned into the exit code by cmd/main.go;
 // urfave/cli prints usage errors to Writer itself.
-func Run(ctx context.Context, args []string, logger *log.Logger) error {
+func Run(ctx context.Context, args []string, logger *slog.Logger) error {
 	return New(logger, os.Stdout).Run(ctx, args)
 }

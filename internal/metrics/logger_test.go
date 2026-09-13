@@ -3,7 +3,7 @@ package metrics
 import (
 	"bytes"
 	"context"
-	"log"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
@@ -43,10 +43,12 @@ func (s *safeBuffer) Len() int {
 	return s.b.Len()
 }
 
-// bufferLogger returns a *log.Logger writing to a *safeBuffer so tests can
-// capture and inspect emitted lines without racing the background goroutine.
-func bufferLogger(buf *safeBuffer) *log.Logger {
-	return log.New(buf, "", 0)
+// bufferLogger returns a *slog.Logger writing INFO-level text to a *safeBuffer
+// so tests can capture and inspect emitted lines without racing the background
+// goroutine. The metrics snapshot logs at INFO, so an INFO threshold captures
+// every metrics line.
+func bufferLogger(buf *safeBuffer) *slog.Logger {
+	return slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
 }
 
 // TestSnapshotLinesFormat populates every metric type and asserts the exact
@@ -122,11 +124,11 @@ func TestMetricsLoggerLogsPeriodically(t *testing.T) {
 	require.NoError(t, l.Start(ctx))
 
 	require.Eventually(t, func() bool {
-		return strings.Contains(buf.String(), "Metrics conduit_")
+		return strings.Contains(buf.String(), `msg=Metrics series="conduit_`)
 	}, 2*time.Second, 5*time.Millisecond, "expected a periodic metrics log line")
 
 	// Live-format check: a gauge present before Start must surface as value=.
-	assert.Contains(t, buf.String(), `conduit_watcher_running{collection=users} value=1`)
+	assert.Contains(t, buf.String(), `series="conduit_watcher_running{collection=users} value=1"`)
 
 	require.NoError(t, l.Stop(context.Background()))
 }
@@ -145,7 +147,7 @@ func TestMetricsLoggerStopClean(t *testing.T) {
 	require.NoError(t, l.Start(ctx))
 
 	require.Eventually(t, func() bool {
-		return strings.Contains(buf.String(), "Metrics conduit_")
+		return strings.Contains(buf.String(), `msg=Metrics series="conduit_`)
 	}, 2*time.Second, 5*time.Millisecond, "expected at least one metrics log line")
 
 	require.NoError(t, l.Stop(context.Background()))

@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -42,12 +42,12 @@ const maxCreateAttempts = 3
 // material or hashes.
 type Manager struct {
 	coll   *mongo.Collection
-	logger *log.Logger
+	logger *slog.Logger
 }
 
 // NewManager creates a Manager for the config.apiKeys collection in the given
 // database.
-func NewManager(client *mongo.Client, database string, logger *log.Logger) *Manager {
+func NewManager(client *mongo.Client, database string, logger *slog.Logger) *Manager {
 	return &Manager{
 		coll:   client.Database(database).Collection("config.apiKeys"),
 		logger: logger,

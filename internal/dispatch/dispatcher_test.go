@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
-	"log"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -17,7 +17,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 )
 
-var discardLogger = log.New(io.Discard, "", 0)
+var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 // MockTransport is a test double for Transport.
 type MockTransport struct {
@@ -747,7 +747,7 @@ func TestBuildTransportFailClosed(t *testing.T) {
 		// returning nil, so the subtest exercises the registered-builder
 		// path rather than the "no registered builder" path.
 		testType := collections.Type("test-rejecting-builder")
-		RegisterTransport(testType, func(ctx context.Context, collectionName string, t collections.Type, spec map[string]interface{}, logger *log.Logger) Transport {
+		RegisterTransport(testType, func(ctx context.Context, collectionName string, t collections.Type, spec map[string]interface{}, logger *slog.Logger) Transport {
 			return nil
 		})
 		defer delete(transportBuilders, testType)

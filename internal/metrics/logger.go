@@ -3,7 +3,7 @@ package metrics
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,13 +19,13 @@ import (
 const DefaultLogInterval = 30 * time.Second
 
 // MetricsLogger periodically logs a snapshot of the worker's Prometheus
-// registry through the injected *log.Logger. It reads the exact same registry
+// registry through the injected *slog.Logger. It reads the exact same registry
 // served by /metrics (via Gather), so it introduces no duplicate counters or
 // state of its own.
 type MetricsLogger struct {
 	metrics  *Metrics
 	interval time.Duration
-	logger   *log.Logger
+	logger   *slog.Logger
 
 	mu      sync.Mutex
 	cancel  context.CancelFunc
@@ -35,7 +35,7 @@ type MetricsLogger struct {
 
 // NewMetricsLogger creates a logger that emits a metrics snapshot every interval.
 // A zero or negative interval falls back to DefaultLogInterval.
-func NewMetricsLogger(m *Metrics, interval time.Duration, logger *log.Logger) *MetricsLogger {
+func NewMetricsLogger(m *Metrics, interval time.Duration, logger *slog.Logger) *MetricsLogger {
 	if interval <= 0 {
 		interval = DefaultLogInterval
 	}
@@ -135,12 +135,12 @@ func (l *MetricsLogger) snapshot() {
 
 	families, err := l.metrics.Registry().Gather()
 	if err != nil {
-		l.logger.Printf("Failed to gather metrics snapshot: %v", err)
+		l.logger.Warn("Failed to gather metrics snapshot", "error", err)
 		return
 	}
 
 	for _, line := range snapshotLines(families) {
-		l.logger.Printf("Metrics %s", line)
+		l.logger.Info("Metrics", "series", line)
 	}
 }
 

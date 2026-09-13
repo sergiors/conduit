@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -13,7 +13,7 @@ import (
 // Client wraps Redis client with CDC-specific operations
 type Client struct {
 	client *redis.Client
-	logger *log.Logger
+	logger *slog.Logger
 }
 
 // Config holds Redis connection configuration
@@ -39,7 +39,7 @@ func DefaultConfig() Config {
 
 // NewClient creates a new Redis client
 // Supports both URI (DSN) and separate Addr/Password configurations
-func NewClient(ctx context.Context, cfg Config, logger *log.Logger) (*Client, error) {
+func NewClient(ctx context.Context, cfg Config, logger *slog.Logger) (*Client, error) {
 	var client *redis.Client
 
 	if cfg.URI != "" {
@@ -223,7 +223,7 @@ func (c *Client) parseRetryMembers(members []string) ([]RetryEvent, int) {
 	for _, member := range members {
 		var event RetryEvent
 		if err := json.Unmarshal([]byte(member), &event); err != nil {
-			c.logger.Printf("Skipping unparseable retry event member: %v", err)
+			c.logger.Warn("Skipping unparseable retry event member", "error", err)
 			skipped++
 			continue
 		}
