@@ -8,6 +8,11 @@
 // are opt-in: when METRICS_ADDR is unset, no metrics server is started and the
 // worker's instrumentation call sites are no-ops.
 //
+// When metrics are enabled, the package also logs a periodic snapshot of the
+// same registry (read via Gather) through the worker's logger at a fixed 30s
+// interval. This gives operators visibility into the registry without a
+// Prometheus scraper, while never adding duplicate counters or state.
+//
 // Implemented metrics (names + labels):
 //
 //   - conduit_watcher_running{collection} — 1 when the collection's watcher is

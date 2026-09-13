@@ -33,6 +33,7 @@ type Worker struct {
 	metrics            *metrics.Metrics
 	metricsServer      *metrics.Server
 	metricsRefresher   *metrics.Refresher
+	metricsLogger      *metrics.MetricsLogger
 	logger             *log.Logger
 
 	shutdownOnce atomic.Bool
@@ -125,10 +126,16 @@ func NewWorker(cfg config.Config, logger *log.Logger) (*Worker, error) {
 	// that periodically samples them so Prometheus does not pay for MongoDB /
 	// Redis round trips on every scrape.
 	var metricsRefresher *metrics.Refresher
+	var metricsLogger *metrics.MetricsLogger
 	if metricsInstance != nil {
 		metricsRefresher = metrics.NewRefresher(metricsInstance, metrics.DefaultRefreshInterval, logger)
 		metricsRefresher.AddSource(&retryQueueGaugeSource{processor: retryProcessor})
 		metricsRefresher.AddSource(&dlqGaugeSource{collectionsManager: collectionsManager})
+
+		// Periodically log a snapshot of the worker's registry. This runs only
+		// when metrics are enabled (same guard as the refresher) and reads the
+		// exact registry served by /metrics via Gather.
+		metricsLogger = metrics.NewMetricsLogger(metricsInstance, metrics.DefaultLogInterval, logger)
 	}
 
 	return &Worker{
@@ -141,6 +148,7 @@ func NewWorker(cfg config.Config, logger *log.Logger) (*Worker, error) {
 		metrics:            metricsInstance,
 		metricsServer:      metricsServer,
 		metricsRefresher:   metricsRefresher,
+		metricsLogger:      metricsLogger,
 		logger:             logger,
 	}, nil
 }
@@ -151,10 +159,11 @@ func NewWorker(cfg config.Config, logger *log.Logger) (*Worker, error) {
 //     watcher, closes pub/sub) — no new events flow while bookkeeping drains;
 //  2. retry processor (waits for the current processQueue pass to finish);
 //  3. metrics refresher (stops gauges from sampling while tearing down);
-//  4. dispatcher (closes all sinks/transports);
-//  5. redis client;
-//  6. mongo client;
-//  7. metrics server (last, so /metrics stays serving through the drain).
+//  4. metrics logger (stops emitting registry snapshots while tearing down);
+//  5. dispatcher (closes all sinks/transports);
+//  6. redis client;
+//  7. mongo client;
+//  8. metrics server (last, so /metrics stays serving through the drain).
 //
 // Individual errors are collected and logged; the combined error is returned.
 // Shutdown is idempotent: calling it more than once is a no-op.
@@ -184,6 +193,15 @@ func (w *Worker) Shutdown(ctx context.Context) error {
 	if w.metricsRefresher != nil {
 		if err := w.metricsRefresher.Stop(ctx); err != nil {
 			w.logger.Printf("Error stopping metrics refresher: %v", err)
+			errs = append(errs, err)
+		}
+	}
+
+	// Stop the metrics logger right after the refresher so it is not emitting
+	// registry snapshots while the data plane tears down.
+	if w.metricsLogger != nil {
+		if err := w.metricsLogger.Stop(ctx); err != nil {
+			w.logger.Printf("Error stopping metrics logger: %v", err)
 			errs = append(errs, err)
 		}
 	}
@@ -237,6 +255,14 @@ func (w *Worker) start(ctx context.Context) error {
 		}
 	}
 
+	// Start the periodic metrics logger right after the refresher so the
+	// registry is already populating before it begins emitting snapshots.
+	if w.metricsLogger != nil {
+		if err := w.metricsLogger.Start(ctx); err != nil {
+			return err
+		}
+	}
+
 	// Start watcher manager
 	if err := w.watcherManager.Start(ctx); err != nil {
 		return err
@@ -247,7 +273,9 @@ func (w *Worker) start(ctx context.Context) error {
 		return err
 	}
 
-	w.logger.Printf("Worker started with %d active watchers", w.watcherManager.GetActiveWatchers())
+	w.logger.Printf(
+		"Worker started with %d active watchers", w.watcherManager.GetActiveWatchers(),
+	)
 
 	return nil
 }
