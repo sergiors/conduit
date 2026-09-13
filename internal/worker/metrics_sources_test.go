@@ -9,12 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"conduit/internal/collections"
+	"conduit/internal/dispatch"
 	"conduit/internal/metrics"
 	"conduit/internal/redis"
 	"conduit/internal/retry"
@@ -60,8 +59,8 @@ func TestRetryQueueGaugeSource(t *testing.T) {
 		src := &retryQueueGaugeSource{processor: proc}
 		src.RefreshMetrics(context.Background(), m)
 
-		assert.Equal(t, 3.0, testutil.ToFloat64(m.RetryQueueDepth("users")))
-		assert.Equal(t, 7.0, testutil.ToFloat64(m.RetryQueueDepth("orders")))
+		assert.Equal(t, 3.0, gaugeValue(t, m, "conduit_retry_queue_depth", "collection", "users"))
+		assert.Equal(t, 7.0, gaugeValue(t, m, "conduit_retry_queue_depth", "collection", "orders"))
 	})
 
 	t.Run("leaves gauge untouched on read error", func(t *testing.T) {
@@ -77,7 +76,7 @@ func TestRetryQueueGaugeSource(t *testing.T) {
 		src := &retryQueueGaugeSource{processor: proc}
 		src.RefreshMetrics(context.Background(), m)
 
-		assert.Equal(t, 42.0, testutil.ToFloat64(m.RetryQueueDepth("users")),
+		assert.Equal(t, 42.0, gaugeValue(t, m, "conduit_retry_queue_depth", "collection", "users"),
 			"read error must not zero the gauge")
 	})
 }
@@ -122,8 +121,8 @@ func TestDLQGaugeSource(t *testing.T) {
 		src := &dlqGaugeSource{collectionsManager: dlq, collectionsLister: lister}
 		src.RefreshMetrics(context.Background(), m)
 
-		assert.Equal(t, 2.0, testutil.ToFloat64(m.DLQEntries("users")))
-		assert.Equal(t, 5.0, testutil.ToFloat64(m.DLQEntries("orders")))
+		assert.Equal(t, 2.0, gaugeValue(t, m, "conduit_dlq_entries", "collection", "users"))
+		assert.Equal(t, 5.0, gaugeValue(t, m, "conduit_dlq_entries", "collection", "orders"))
 	})
 
 	t.Run("leaves a gauge untouched when counting the collection errors", func(t *testing.T) {
@@ -139,9 +138,9 @@ func TestDLQGaugeSource(t *testing.T) {
 		src := &dlqGaugeSource{collectionsManager: dlq, collectionsLister: lister}
 		src.RefreshMetrics(context.Background(), m)
 
-		assert.Equal(t, 10.0, testutil.ToFloat64(m.DLQEntries("users")),
+		assert.Equal(t, 10.0, gaugeValue(t, m, "conduit_dlq_entries", "collection", "users"),
 			"Count error must leave the gauge untouched")
-		assert.Equal(t, 8.0, testutil.ToFloat64(m.DLQEntries("orders")))
+		assert.Equal(t, 8.0, gaugeValue(t, m, "conduit_dlq_entries", "collection", "orders"))
 	})
 
 	t.Run("leaves gauges untouched when enumeration fails", func(t *testing.T) {
@@ -154,7 +153,7 @@ func TestDLQGaugeSource(t *testing.T) {
 		src := &dlqGaugeSource{collectionsManager: dlq, collectionsLister: lister}
 		src.RefreshMetrics(context.Background(), m)
 
-		assert.Equal(t, 10.0, testutil.ToFloat64(m.DLQEntries("users")),
+		assert.Equal(t, 10.0, gaugeValue(t, m, "conduit_dlq_entries", "collection", "users"),
 			"enumeration error must leave the gauge untouched")
 	})
 }
@@ -207,23 +206,65 @@ func (s *signallingSource) RefreshMetrics(ctx context.Context, m *metrics.Metric
 	}
 }
 
-// TestMetricsObserverAdapter verifies the worker's dispatch observer adapter
-// forwards to the metrics instance and tolerates a nil metrics pointer.
-func TestMetricsObserverAdapter(t *testing.T) {
+// TestMetricsObserverIsMetrics verifies *metrics.Metrics satisfies
+// dispatch.SinkDeliveryObserver directly (the compile-time assertion in
+// metrics_sources.go) and forwards delivery observations to the metrics surface.
+func TestMetricsObserverIsMetrics(t *testing.T) {
 	m := metrics.New()
-	obs := metricsObserver{metrics: m}
+	var obs dispatch.SinkDeliveryObserver = m
 	obs.ObserveSinkDelivery("users", collections.SinkTypeHTTP, 0, nil)
 	obs.ObserveSinkDelivery("users", collections.SinkTypeHTTP, 0, errors.New("boom"))
 
-	c, ok := m.SinkDeliveries("users", collections.SinkTypeHTTP, metrics.OutcomeSuccess).(prometheus.Counter)
-	require.True(t, ok)
-	assert.Equal(t, 1.0, testutil.ToFloat64(c))
-	f, ok := m.SinkDeliveries("users", collections.SinkTypeHTTP, metrics.OutcomeFailure).(prometheus.Counter)
-	require.True(t, ok)
-	assert.Equal(t, 1.0, testutil.ToFloat64(f))
+	assert.Equal(t, 1.0, gaugeValue(t, m, "conduit_sink_deliveries_total",
+		"collection", "users", "sink_type", string(collections.SinkTypeHTTP), "outcome", "success"))
+	assert.Equal(t, 1.0, gaugeValue(t, m, "conduit_sink_deliveries_total",
+		"collection", "users", "sink_type", string(collections.SinkTypeHTTP), "outcome", "failure"))
 
-	// Nil metrics pointer is a no-op.
+	// Nil *Metrics is a no-op (nil-safety is covered by the metrics package).
+	var nilMetrics *metrics.Metrics
 	require.NotPanics(t, func() {
-		(metricsObserver{metrics: nil}).ObserveSinkDelivery("x", collections.SinkTypeHTTP, 0, errors.New("boom"))
+		nilMetrics.ObserveSinkDelivery("x", collections.SinkTypeHTTP, 0, errors.New("boom"))
 	})
+}
+
+// gaugeValue reads the current value of a counter/gauge family for the given
+// exact label pair set from the registry, returning 0 if the series is absent.
+func gaugeValue(t *testing.T, m *metrics.Metrics, family string, labels ...string) float64 {
+	t.Helper()
+	require.Equal(t, 0, len(labels)%2, "labels must be key/value pairs")
+	need := make(map[string]string, len(labels)/2)
+	for i := 0; i < len(labels); i += 2 {
+		need[labels[i]] = labels[i+1]
+	}
+
+	families, err := m.Registry().Gather()
+	require.NoError(t, err)
+	for _, mf := range families {
+		if mf.GetName() != family {
+			continue
+		}
+		for _, metric := range mf.GetMetric() {
+			labelsSet := map[string]string{}
+			for _, l := range metric.GetLabel() {
+				labelsSet[l.GetName()] = l.GetValue()
+			}
+			matched := true
+			for k, v := range need {
+				if labelsSet[k] != v {
+					matched = false
+					break
+				}
+			}
+			if !matched {
+				continue
+			}
+			if c := metric.GetCounter(); c != nil {
+				return c.GetValue()
+			}
+			if g := metric.GetGauge(); g != nil {
+				return g.GetValue()
+			}
+		}
+	}
+	return 0.0
 }

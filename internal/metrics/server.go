@@ -46,10 +46,11 @@ func NewServer(addr string, handler http.Handler, logger *log.Logger) *Server {
 }
 
 // Start binds the listen address and begins serving in a background goroutine.
-// A bind error (e.g. port already in use) is returned synchronously. Start is
-// idempotent per Server instance only insofar as a second call is a no-op after
-// a successful first start.
-func (s *Server) Start(ctx context.Context) error {
+// A bind error (e.g. port already in use) is returned synchronously. A second
+// Start on an already-started server is a no-op. The ctx parameter is accepted
+// only for lifecycle-signature consistency across the package's Start/Stop
+// components; it is not otherwise used by the server.
+func (s *Server) Start(_ context.Context) error {
 	if s == nil {
 		return nil
 	}
@@ -97,7 +98,6 @@ func (s *Server) Stop(ctx context.Context) error {
 	s.mu.Lock()
 	server := s.server
 	s.server = nil
-	s.ln = nil
 	s.mu.Unlock()
 
 	if server == nil {
@@ -106,15 +106,12 @@ func (s *Server) Stop(ctx context.Context) error {
 	}
 
 	err := server.Shutdown(ctx)
-	// Shutdown closes the listener and returns http.ErrServerClosed when the
-	// context expires mid-close in some paths; for a graceful close it returns
-	// nil. Either way our serve goroutine observes ErrServerClosed and exits.
-	if err != nil && !errors.Is(err, http.ErrServerClosed) {
-		s.wg.Wait()
+	// Shutdown closes the listener and waits for in-flight requests; the serve
+	// goroutine exits with http.ErrServerClosed, which it filters out.
+	s.wg.Wait()
+	if err != nil {
 		return err
 	}
-
-	s.wg.Wait()
 	s.logger.Println("Metrics server stopped")
 	return nil
 }

@@ -50,7 +50,7 @@ func NewMetricsLogger(m *Metrics, interval time.Duration, logger *log.Logger) *M
 // a no-op) and nil-safe: it does nothing when the receiver or its metrics source
 // is missing.
 func (l *MetricsLogger) Start(ctx context.Context) error {
-	if l == nil || l.metrics == nil || l.metrics.Registry() == nil {
+	if l == nil || l.metrics == nil {
 		return nil
 	}
 
@@ -111,7 +111,7 @@ func (l *MetricsLogger) Stop(ctx context.Context) error {
 // the logs promptly rather than only after the first interval elapses (matching
 // the refresher's convention of populating promptly).
 func (l *MetricsLogger) loop(ctx context.Context) {
-	l.snapshot(ctx)
+	l.snapshot()
 
 	ticker := time.NewTicker(l.interval)
 	defer ticker.Stop()
@@ -120,7 +120,7 @@ func (l *MetricsLogger) loop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			l.snapshot(ctx)
+			l.snapshot()
 		}
 	}
 }
@@ -128,8 +128,8 @@ func (l *MetricsLogger) loop(ctx context.Context) {
 // snapshot gathers the current registry and emits one log line per series.
 // On a gather error it logs a single warning and returns. If there are no series
 // yet, it logs nothing.
-func (l *MetricsLogger) snapshot(ctx context.Context) {
-	if l == nil || l.metrics == nil || l.metrics.Registry() == nil || l.logger == nil {
+func (l *MetricsLogger) snapshot() {
+	if l == nil || l.metrics == nil || l.logger == nil {
 		return
 	}
 
@@ -139,15 +139,8 @@ func (l *MetricsLogger) snapshot(ctx context.Context) {
 		return
 	}
 
-	for _, line := range l.snapshotLines(families) {
-		// Select on ctx so a cancelled context can abandon a long snapshot
-		// rather than blocking shutdown.
-		select {
-		case <-ctx.Done():
-			return
-		default:
-			l.logger.Printf("metrics %s", line)
-		}
+	for _, line := range snapshotLines(families) {
+		l.logger.Printf("metrics %s", line)
 	}
 }
 
@@ -155,7 +148,7 @@ func (l *MetricsLogger) snapshot(ctx context.Context) {
 // It is package-private and pure so tests can assert exact output without
 // timing. Histograms are rendered with only count and sum — buckets are never
 // logged. Any metric with none of counter/gauge/histogram set is skipped.
-func (l *MetricsLogger) snapshotLines(families []*promdto.MetricFamily) []string {
+func snapshotLines(families []*promdto.MetricFamily) []string {
 	var lines []string
 	for _, family := range families {
 		if family == nil || family.Name == nil {

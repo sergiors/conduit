@@ -49,6 +49,8 @@ const (
 // Every instrumentation method is nil-safe: it is a no-op when the receiver is
 // nil, so call sites can hold a nil *Metrics when metrics are disabled and
 // tests need not construct metrics everywhere.
+//
+// Metrics must be constructed with New; the zero value is not usable.
 type Metrics struct {
 	registry *prometheus.Registry
 
@@ -118,9 +120,9 @@ func (m *Metrics) Registry() *prometheus.Registry {
 // Handler returns an http.Handler serving the metrics in Prometheus exposition
 // format via promhttp.HandlerFor (not the global registry).
 func (m *Metrics) Handler() http.Handler {
-	if m == nil || m.registry == nil {
-		// A nil/zero Metrics cannot serve anything meaningful; return an empty
-		// handler rather than nil so callers can always route it.
+	if m == nil {
+		// A nil Metrics cannot serve anything meaningful; return an empty handler
+		// rather than nil so callers can always route it.
 		return http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
 	}
 	return promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{})
@@ -130,7 +132,7 @@ func (m *Metrics) Handler() http.Handler {
 // and event type. The event-type label uses the canonical stream record type.
 // An empty event type is skipped defensively to avoid an empty label value.
 func (m *Metrics) ObserveEventsProcessed(collection string, eventType streams.RecordType) {
-	if m == nil || m.eventsProcessed == nil || eventType == "" {
+	if m == nil || eventType == "" {
 		return
 	}
 	m.eventsProcessed.WithLabelValues(collection, string(eventType)).Inc()
@@ -149,30 +151,26 @@ func (m *Metrics) ObserveSinkDelivery(collection string, sinkType collections.Ty
 		outcome = OutcomeFailure
 	}
 	sinkTypeStr := string(sinkType)
-	if m.sinkDeliveries != nil {
-		m.sinkDeliveries.WithLabelValues(collection, sinkTypeStr, string(outcome)).Inc()
-	}
-	if m.sinkDeliveryDuration != nil {
-		m.sinkDeliveryDuration.WithLabelValues(collection, sinkTypeStr).Observe(duration.Seconds())
-	}
+	m.sinkDeliveries.WithLabelValues(collection, sinkTypeStr, string(outcome)).Inc()
+	m.sinkDeliveryDuration.WithLabelValues(collection, sinkTypeStr).Observe(duration.Seconds())
 }
 
 // SetWatcherRunning sets the watcher-running gauge for a collection to 1
 // (running) or 0 (not running/absent).
 func (m *Metrics) SetWatcherRunning(collection string, running bool) {
-	if m == nil || m.watcherRunning == nil {
+	if m == nil {
 		return
 	}
+	v := 0.0
 	if running {
-		m.watcherRunning.WithLabelValues(collection).Set(1)
-		return
+		v = 1
 	}
-	m.watcherRunning.WithLabelValues(collection).Set(0)
+	m.watcherRunning.WithLabelValues(collection).Set(v)
 }
 
 // SetRetryQueueDepth sets the retry-queue-depth gauge for a collection.
 func (m *Metrics) SetRetryQueueDepth(collection string, depth int64) {
-	if m == nil || m.retryQueueDepth == nil {
+	if m == nil {
 		return
 	}
 	m.retryQueueDepth.WithLabelValues(collection).Set(float64(depth))
@@ -180,69 +178,8 @@ func (m *Metrics) SetRetryQueueDepth(collection string, depth int64) {
 
 // SetDLQEntries sets the dead-letter-entries gauge for a collection.
 func (m *Metrics) SetDLQEntries(collection string, count int64) {
-	if m == nil || m.dlqEntries == nil {
+	if m == nil {
 		return
 	}
 	m.dlqEntries.WithLabelValues(collection).Set(float64(count))
-}
-
-// --- Test accessors -----------------------------------------------------------
-//
-// These exposed child collectors let tests assert exact values with
-// prometheus/testutil without importing the concrete metric types. They are
-// part of the package's public surface for verification.
-
-// EventsProcessedTotal returns the events-processed counter child for a
-// collection/event-type pair.
-func (m *Metrics) EventsProcessedTotal(collection, eventType string) prometheus.Counter {
-	if m == nil || m.eventsProcessed == nil {
-		return nil
-	}
-	return m.eventsProcessed.WithLabelValues(collection, eventType)
-}
-
-// SinkDeliveries returns the sink-deliveries counter child for a
-// collection/sink-type/outcome triple.
-func (m *Metrics) SinkDeliveries(collection string, sinkType collections.Type, outcome Outcome) prometheus.Counter {
-	if m == nil || m.sinkDeliveries == nil {
-		return nil
-	}
-	return m.sinkDeliveries.WithLabelValues(collection, string(sinkType), string(outcome))
-}
-
-// SinkDeliveryDuration returns the sink-delivery-duration histogram child for a
-// collection/sink-type pair.
-func (m *Metrics) SinkDeliveryDuration(collection string, sinkType collections.Type) prometheus.Histogram {
-	if m == nil || m.sinkDeliveryDuration == nil {
-		return nil
-	}
-	obs := m.sinkDeliveryDuration.WithLabelValues(collection, string(sinkType))
-	if h, ok := obs.(prometheus.Histogram); ok {
-		return h
-	}
-	return nil
-}
-
-// WatcherRunning returns the watcher-running gauge child for a collection.
-func (m *Metrics) WatcherRunning(collection string) prometheus.Gauge {
-	if m == nil || m.watcherRunning == nil {
-		return nil
-	}
-	return m.watcherRunning.WithLabelValues(collection)
-}
-
-// RetryQueueDepth returns the retry-queue-depth gauge child for a collection.
-func (m *Metrics) RetryQueueDepth(collection string) prometheus.Gauge {
-	if m == nil || m.retryQueueDepth == nil {
-		return nil
-	}
-	return m.retryQueueDepth.WithLabelValues(collection)
-}
-
-// DLQEntries returns the dead-letter-entries gauge child for a collection.
-func (m *Metrics) DLQEntries(collection string) prometheus.Gauge {
-	if m == nil || m.dlqEntries == nil {
-		return nil
-	}
-	return m.dlqEntries.WithLabelValues(collection)
 }

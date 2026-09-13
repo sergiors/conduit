@@ -51,8 +51,8 @@ func NewRefresher(m *Metrics, interval time.Duration, logger *log.Logger) *Refre
 	}
 }
 
-// AddSource registers a gauge source to be sampled each refresh. It may be
-// called before Start (wiring time) and is safe to call concurrently.
+// AddSource registers a gauge source to be sampled each refresh. It must be
+// called before Start; sources added after Start are ignored.
 func (r *Refresher) AddSource(s GaugeSource) {
 	if r == nil || s == nil {
 		return
@@ -65,7 +65,7 @@ func (r *Refresher) AddSource(s GaugeSource) {
 // Start launches the periodic refresh loop. It is idempotent: a second Start is
 // a no-op.
 func (r *Refresher) Start(ctx context.Context) error {
-	if r == nil {
+	if r == nil || r.metrics == nil {
 		return nil
 	}
 
@@ -75,6 +75,10 @@ func (r *Refresher) Start(ctx context.Context) error {
 		return nil
 	}
 
+	r.srcMu.RLock()
+	sources := r.sources
+	r.srcMu.RUnlock()
+
 	rctx, cancel := context.WithCancel(ctx)
 	r.cancel = cancel
 	r.started = true
@@ -83,7 +87,7 @@ func (r *Refresher) Start(ctx context.Context) error {
 	go func() {
 		defer r.wg.Done()
 		recover.Protect(r.logger, "metrics:refresher", func() {
-			r.refreshLoop(rctx)
+			r.refreshLoop(rctx, sources)
 		})
 	}()
 
@@ -122,15 +126,7 @@ func (r *Refresher) Stop(ctx context.Context) error {
 }
 
 // refreshAll runs every registered source once.
-func (r *Refresher) refreshAll(ctx context.Context) {
-	r.srcMu.RLock()
-	sources := make([]GaugeSource, len(r.sources))
-	copy(sources, r.sources)
-	r.srcMu.RUnlock()
-
-	if r.metrics == nil {
-		return
-	}
+func (r *Refresher) refreshAll(ctx context.Context, sources []GaugeSource) {
 	for _, s := range sources {
 		s.RefreshMetrics(ctx, r.metrics)
 	}
@@ -139,13 +135,13 @@ func (r *Refresher) refreshAll(ctx context.Context) {
 // refreshLoop ticks on the interval and refreshes the sources until the context
 // is cancelled. A panic inside a source must not kill the loop; the next tick
 // retries.
-func (r *Refresher) refreshLoop(ctx context.Context) {
+func (r *Refresher) refreshLoop(ctx context.Context, sources []GaugeSource) {
 	ticker := time.NewTicker(r.interval)
 	defer ticker.Stop()
 
 	// Refresh once immediately so the gauges are populated promptly rather
 	// than only after the first interval elapses.
-	r.refreshAll(ctx)
+	r.refreshAll(ctx, sources)
 
 	for {
 		select {
@@ -153,7 +149,7 @@ func (r *Refresher) refreshLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			if _, panicked := recover.ProtectErr(r.logger, "metrics:refresher", func() error {
-				r.refreshAll(ctx)
+				r.refreshAll(ctx, sources)
 				return nil
 			}); panicked {
 				r.logger.Println("Metrics refresh panicked; continuing loop")

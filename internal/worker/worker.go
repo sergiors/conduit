@@ -92,7 +92,7 @@ func NewWorker(cfg config.Config, logger *log.Logger) (*Worker, error) {
 	// metrics instance when present.
 	var dispatcher *dispatch.Dispatcher
 	if metricsInstance != nil {
-		dispatcher = dispatch.NewDispatcherWithObserver(dispatch.Config{}, metricsObserver{metrics: metricsInstance})
+		dispatcher = dispatch.NewDispatcherWithObserver(dispatch.Config{}, metricsInstance)
 	} else {
 		dispatcher = dispatch.NewDispatcher()
 	}

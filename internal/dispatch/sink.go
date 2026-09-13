@@ -12,10 +12,10 @@ import (
 
 // SinkDeliveryObserver receives per-delivery outcomes from sink lanes. It is a
 // consumer-side interface defined here so dispatch stays decoupled from any
-// concrete observability implementation; *metrics.Metrics satisfies it via a
-// thin adapter in the worker package. When nil, no delivery metrics are
-// recorded. Retry deliveries re-dispatch through the same Dispatcher.Dispatch,
-// so retry attempts are observed identically.
+// concrete observability implementation; *metrics.Metrics satisfies it directly
+// and the worker passes the concrete type as the interface value. When nil, no
+// delivery metrics are recorded. Retry deliveries re-dispatch through the same
+// Dispatcher.Dispatch, so retry attempts are observed identically.
 type SinkDeliveryObserver interface {
 	// ObserveSinkDelivery is called for every delivery attempt made by a sink
 	// lane: it carries the collection, the sink type, the measured delivery

@@ -70,7 +70,7 @@ func TestSnapshotLinesFormat(t *testing.T) {
 
 	families, err := m.Registry().Gather()
 	require.NoError(t, err)
-	lines := NewMetricsLogger(m, DefaultLogInterval, discardLogger).snapshotLines(families)
+	lines := snapshotLines(families)
 
 	// Events-processed counter, labels preserved in registration order.
 	assert.Contains(t, lines, `conduit_events_processed_total{collection=users,event_type=INSERT} count=2`)
@@ -98,12 +98,11 @@ func TestSnapshotLinesEmptyRegistry(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, families)
 
-	l := NewMetricsLogger(m, DefaultLogInterval, discardLogger)
-	assert.Empty(t, l.snapshotLines(families))
+	assert.Empty(t, snapshotLines(families))
 
 	var buf safeBuffer
 	l2 := NewMetricsLogger(m, DefaultLogInterval, bufferLogger(&buf))
-	l2.snapshot(context.Background())
+	l2.snapshot()
 	assert.Equal(t, "", buf.String(), "snapshot with no series must log nothing")
 }
 
@@ -157,9 +156,9 @@ func TestMetricsLoggerStopClean(t *testing.T) {
 	assert.Equal(t, before, buf.Len(), "no new lines may be emitted after Stop")
 }
 
-// TestMetricsLoggerStopBeforeStart verifies Stop on a never-started logger is a
-// no-op and does not panic.
-func TestMetricsLoggerStopBeforeStart(t *testing.T) {
+// TestMetricsLoggerStopIdempotent verifies a Start-then-Stop-twice sequence is
+// clean: the first Stop returns, the second is a no-op.
+func TestMetricsLoggerStopIdempotent(t *testing.T) {
 	m := New()
 	l := NewMetricsLogger(m, DefaultLogInterval, discardLogger)
 	require.NoError(t, l.Start(context.Background()))
@@ -185,7 +184,7 @@ func TestMetricsLoggerNilSafety(t *testing.T) {
 	l := NewMetricsLogger(nil, DefaultLogInterval, bufferLogger(&buf))
 	require.NoError(t, l.Start(context.Background()))
 	require.NoError(t, l.Stop(context.Background()))
-	l.snapshot(context.Background())
+	l.snapshot()
 	assert.Equal(t, "", buf.String(), "nil-metrics logger must produce no output")
 }
 

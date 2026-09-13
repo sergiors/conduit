@@ -2,27 +2,12 @@ package worker
 
 import (
 	"context"
-	"time"
 
 	"conduit/internal/collections"
 	"conduit/internal/dispatch"
 	"conduit/internal/metrics"
 	"conduit/internal/retry"
 )
-
-// metricsObserver adapts *metrics.Metrics to dispatch.SinkDeliveryObserver so
-// the dispatcher records per-sink delivery metrics without dispatch depending
-// on the metrics package. A nil metrics pointer is tolerated (no-op).
-type metricsObserver struct {
-	metrics *metrics.Metrics
-}
-
-func (o metricsObserver) ObserveSinkDelivery(collection string, sinkType collections.Type, duration time.Duration, err error) {
-	if o.metrics == nil {
-		return
-	}
-	o.metrics.ObserveSinkDelivery(collection, sinkType, duration, err)
-}
 
 // retryQueueGaugeSource samples the retry-queue-depth gauge for every
 // collection registered with the retry processor. A read error leaves the gauge
@@ -39,7 +24,6 @@ func (s *retryQueueGaugeSource) RefreshMetrics(ctx context.Context, m *metrics.M
 	for _, coll := range s.processor.RegisteredCollections() {
 		depth, err := s.processor.GetRetryQueueLength(ctx, coll)
 		if err != nil {
-			// Leave the gauge untouched on a read error.
 			continue
 		}
 		m.SetRetryQueueDepth(coll, depth)
@@ -89,7 +73,7 @@ func (s *dlqGaugeSource) RefreshMetrics(ctx context.Context, m *metrics.Metrics)
 
 // Compile-time interface assertions.
 var (
-	_ dispatch.SinkDeliveryObserver = metricsObserver{}
+	_ dispatch.SinkDeliveryObserver = (*metrics.Metrics)(nil)
 	_ metrics.GaugeSource           = (*retryQueueGaugeSource)(nil)
 	_ metrics.GaugeSource           = (*dlqGaugeSource)(nil)
 )

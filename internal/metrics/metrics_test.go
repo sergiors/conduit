@@ -24,7 +24,7 @@ func TestRegistration(t *testing.T) {
 	// vector with no series is omitted from Gather output).
 	m.ObserveEventsProcessed("users", streams.InsertRecord)
 	m.ObserveSinkDelivery("users", collections.SinkTypeHTTP, 0, nil)
-	m.SinkDeliveryDuration("users", collections.SinkTypeHTTP).Observe(0.01)
+	m.sinkDeliveryDuration.WithLabelValues("users", string(collections.SinkTypeHTTP)).Observe(0.01)
 	m.SetWatcherRunning("users", true)
 	m.SetRetryQueueDepth("users", 1)
 	m.SetDLQEntries("users", 1)
@@ -72,15 +72,15 @@ func TestEventsProcessedCounter(t *testing.T) {
 	m.ObserveEventsProcessed("users", streams.ModifyRecord)
 	m.ObserveEventsProcessed("orders", streams.RemoveRecord)
 
-	assert.Equal(t, 2.0, testutil.ToFloat64(m.EventsProcessedTotal("users", string(streams.InsertRecord))))
-	assert.Equal(t, 1.0, testutil.ToFloat64(m.EventsProcessedTotal("users", string(streams.ModifyRecord))))
-	assert.Equal(t, 1.0, testutil.ToFloat64(m.EventsProcessedTotal("orders", string(streams.RemoveRecord))))
+	assert.Equal(t, 2.0, testutil.ToFloat64(m.eventsProcessed.WithLabelValues("users", string(streams.InsertRecord))))
+	assert.Equal(t, 1.0, testutil.ToFloat64(m.eventsProcessed.WithLabelValues("users", string(streams.ModifyRecord))))
+	assert.Equal(t, 1.0, testutil.ToFloat64(m.eventsProcessed.WithLabelValues("orders", string(streams.RemoveRecord))))
 
 	// An empty event type is skipped defensively (no empty-label series).
 	m.ObserveEventsProcessed("users", "")
-	assert.Equal(t, 2.0, testutil.ToFloat64(m.EventsProcessedTotal("users", string(streams.InsertRecord))),
+	assert.Equal(t, 2.0, testutil.ToFloat64(m.eventsProcessed.WithLabelValues("users", string(streams.InsertRecord))),
 		"empty event type must not increment the series")
-	assert.Equal(t, 0.0, testutil.ToFloat64(m.EventsProcessedTotal("users", "")))
+	assert.Equal(t, 0.0, testutil.ToFloat64(m.eventsProcessed.WithLabelValues("users", "")))
 }
 
 // TestSinkDeliveries verifies the outcome label stays bounded to
@@ -94,15 +94,15 @@ func TestSinkDeliveries(t *testing.T) {
 
 	m.ObserveSinkDelivery("orders", collections.SinkTypeEventBridge, 0, assert.AnError)
 
-	success := m.SinkDeliveries("users", collections.SinkTypeHTTP, OutcomeSuccess)
-	failure := m.SinkDeliveries("users", collections.SinkTypeHTTP, OutcomeFailure)
+	success := m.sinkDeliveries.WithLabelValues("users", string(collections.SinkTypeHTTP), string(OutcomeSuccess))
+	failure := m.sinkDeliveries.WithLabelValues("users", string(collections.SinkTypeHTTP), string(OutcomeFailure))
 	require.NotNil(t, success)
 	require.NotNil(t, failure)
 
 	assert.Equal(t, 2.0, testutil.ToFloat64(success))
 	assert.Equal(t, 1.0, testutil.ToFloat64(failure))
-	assert.Equal(t, 1.0, testutil.ToFloat64(m.SinkDeliveries("orders", collections.SinkTypeEventBridge, OutcomeFailure)))
-	assert.Zero(t, testutil.ToFloat64(m.SinkDeliveries("orders", collections.SinkTypeEventBridge, OutcomeSuccess)))
+	assert.Equal(t, 1.0, testutil.ToFloat64(m.sinkDeliveries.WithLabelValues("orders", string(collections.SinkTypeEventBridge), string(OutcomeFailure))))
+	assert.Zero(t, testutil.ToFloat64(m.sinkDeliveries.WithLabelValues("orders", string(collections.SinkTypeEventBridge), string(OutcomeSuccess))))
 
 	// The outcome label cardinality is exactly the two bounded values.
 	gathered, err := m.Registry().Gather()
@@ -130,7 +130,7 @@ func TestSinkDeliveries(t *testing.T) {
 func TestSinkDeliveryDurationHistogram(t *testing.T) {
 	m := New()
 
-	h := m.SinkDeliveryDuration("users", collections.SinkTypeHTTP)
+	h := m.sinkDeliveryDuration.WithLabelValues("users", string(collections.SinkTypeHTTP))
 	require.NotNil(t, h)
 
 	h.Observe(0.01)
@@ -185,18 +185,18 @@ func TestGauges(t *testing.T) {
 
 	m.SetWatcherRunning("users", true)
 	m.SetWatcherRunning("orders", false)
-	assert.Equal(t, 1.0, testutil.ToFloat64(m.WatcherRunning("users")))
-	assert.Equal(t, 0.0, testutil.ToFloat64(m.WatcherRunning("orders")))
+	assert.Equal(t, 1.0, testutil.ToFloat64(m.watcherRunning.WithLabelValues("users")))
+	assert.Equal(t, 0.0, testutil.ToFloat64(m.watcherRunning.WithLabelValues("orders")))
 
 	// Flip users back to not-running.
 	m.SetWatcherRunning("users", false)
-	assert.Equal(t, 0.0, testutil.ToFloat64(m.WatcherRunning("users")))
+	assert.Equal(t, 0.0, testutil.ToFloat64(m.watcherRunning.WithLabelValues("users")))
 
 	m.SetRetryQueueDepth("users", 42)
-	assert.Equal(t, 42.0, testutil.ToFloat64(m.RetryQueueDepth("users")))
+	assert.Equal(t, 42.0, testutil.ToFloat64(m.retryQueueDepth.WithLabelValues("users")))
 
 	m.SetDLQEntries("users", 7)
-	assert.Equal(t, 7.0, testutil.ToFloat64(m.DLQEntries("users")))
+	assert.Equal(t, 7.0, testutil.ToFloat64(m.dlqEntries.WithLabelValues("users")))
 }
 
 // TestNilSafety verifies every method is a no-op (no panic) on a nil receiver.
