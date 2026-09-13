@@ -16,7 +16,7 @@ import (
 func Protect(logger *log.Logger, name string, fn func()) (recovered any, panicked bool) {
 	defer func() {
 		if r := recover(); r != nil {
-			logger.Printf("panic in %s: %v\n%s", name, r, debug.Stack())
+			logger.Printf("Panic in %s: %v\n%s", name, r, debug.Stack())
 			recovered, panicked = r, true
 		}
 	}()
@@ -34,7 +34,7 @@ func Protect(logger *log.Logger, name string, fn func()) (recovered any, panicke
 func ProtectErr(logger *log.Logger, name string, fn func() error) (err error, panicked bool) {
 	defer func() {
 		if r := recover(); r != nil {
-			logger.Printf("panic in %s: %v\n%s", name, r, debug.Stack())
+			logger.Printf("Panic in %s: %v\n%s", name, r, debug.Stack())
 			err, panicked = fmt.Errorf("panic in %s: %v", name, r), true
 		}
 	}()

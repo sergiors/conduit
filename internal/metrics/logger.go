@@ -135,12 +135,12 @@ func (l *MetricsLogger) snapshot() {
 
 	families, err := l.metrics.Registry().Gather()
 	if err != nil {
-		l.logger.Printf("failed to gather metrics snapshot: %v", err)
+		l.logger.Printf("Failed to gather metrics snapshot: %v", err)
 		return
 	}
 
 	for _, line := range snapshotLines(families) {
-		l.logger.Printf("metrics %s", line)
+		l.logger.Printf("Metrics %s", line)
 	}
 }
 

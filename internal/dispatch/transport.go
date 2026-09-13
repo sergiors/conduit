@@ -43,11 +43,11 @@ var transportBuilders = make(map[collections.Type]TransportBuilder)
 // policy.
 func RegisterTransport(t collections.Type, builder TransportBuilder) {
 	if builder == nil {
-		log.Printf("attempted to register nil builder for type: %s", t)
+		log.Printf("Attempted to register nil builder for type: %s", t)
 		return
 	}
 	if _, exists := transportBuilders[t]; exists {
-		log.Printf("transport builder for type %s already registered, overwriting", t)
+		log.Printf("Transport builder for type %s already registered, overwriting", t)
 	}
 	transportBuilders[t] = builder
 }

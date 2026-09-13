@@ -107,7 +107,7 @@ func TestSnapshotLinesEmptyRegistry(t *testing.T) {
 }
 
 // TestMetricsLoggerLogsPeriodically starts a logger with a tiny interval and
-// asserts it emits a `metrics conduit_` line within a generous window, then
+// asserts it emits a `Metrics conduit_` line within a generous window, then
 // stops cleanly.
 func TestMetricsLoggerLogsPeriodically(t *testing.T) {
 	m := New()
@@ -122,7 +122,7 @@ func TestMetricsLoggerLogsPeriodically(t *testing.T) {
 	require.NoError(t, l.Start(ctx))
 
 	require.Eventually(t, func() bool {
-		return strings.Contains(buf.String(), "metrics conduit_")
+		return strings.Contains(buf.String(), "Metrics conduit_")
 	}, 2*time.Second, 5*time.Millisecond, "expected a periodic metrics log line")
 
 	// Live-format check: a gauge present before Start must surface as value=.
@@ -145,7 +145,7 @@ func TestMetricsLoggerStopClean(t *testing.T) {
 	require.NoError(t, l.Start(ctx))
 
 	require.Eventually(t, func() bool {
-		return strings.Contains(buf.String(), "metrics conduit_")
+		return strings.Contains(buf.String(), "Metrics conduit_")
 	}, 2*time.Second, 5*time.Millisecond, "expected at least one metrics log line")
 
 	require.NoError(t, l.Stop(context.Background()))

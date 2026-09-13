@@ -223,7 +223,7 @@ func (c *Client) parseRetryMembers(members []string) ([]RetryEvent, int) {
 	for _, member := range members {
 		var event RetryEvent
 		if err := json.Unmarshal([]byte(member), &event); err != nil {
-			c.logger.Printf("skipping unparseable retry event member: %v", err)
+			c.logger.Printf("Skipping unparseable retry event member: %v", err)
 			skipped++
 			continue
 		}

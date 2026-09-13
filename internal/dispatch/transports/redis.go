@@ -109,7 +109,7 @@ func (t *RedisTransport) Close() error {
 func buildRedis(ctx context.Context, collectionName string, t collections.Type, rawSpec map[string]interface{}, logger *log.Logger) dispatch.Transport {
 	var spec RedisSpec
 	if err := decodeSpec(rawSpec, &spec); err != nil {
-		logger.Printf("failed to decode Redis transport spec for %s: %v", collectionName, err)
+		logger.Printf("Failed to decode Redis transport spec for %s: %v", collectionName, err)
 		return nil
 	}
 

@@ -178,7 +178,7 @@ func (t *EventBridgeTransport) Close() error { return nil }
 func buildEventBridge(ctx context.Context, collectionName string, t collections.Type, rawSpec map[string]interface{}, logger *log.Logger) dispatch.Transport {
 	var spec EventBridgeSpec
 	if err := decodeSpec(rawSpec, &spec); err != nil {
-		logger.Printf("failed to decode EventBridge transport spec for %s: %v", collectionName, err)
+		logger.Printf("Failed to decode EventBridge transport spec for %s: %v", collectionName, err)
 		return nil
 	}
 

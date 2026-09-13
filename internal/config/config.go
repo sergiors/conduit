@@ -50,11 +50,11 @@ func loadDuration(logger *log.Logger, name, value string, fallback time.Duration
 	}
 	d, err := time.ParseDuration(value)
 	if err != nil {
-		logger.Printf("invalid %s %q, using default %s: %v", name, value, fallback, err)
+		logger.Printf("Invalid %s %q, using default %s: %v", name, value, fallback, err)
 		return fallback
 	}
 	if d <= 0 {
-		logger.Printf("invalid %s %q (must be positive), using default %s", name, value, fallback)
+		logger.Printf("Invalid %s %q (must be positive), using default %s", name, value, fallback)
 		return fallback
 	}
 	return d

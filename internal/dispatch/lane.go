@@ -154,22 +154,26 @@ func (l *lane) run() {
 // dispatcher's submit path instead.
 func (l *lane) deliver(j job) {
 	start := time.Now()
-	err := l.sink.Send(j.ctx, j.record)
-	if l.observer != nil {
-		l.observer.ObserveSinkDelivery(l.collection, l.sink.Type, time.Since(start), err)
-	}
-	// Log the per-sink outcome at the delivery boundary, once per delivery
-	// attempt. Filtered no-ops (Send returned nil without reaching the
+	// Log the dispatch and per-sink outcome at the delivery boundary, once per
+	// delivery attempt. Filtered no-ops (Send returned nil without reaching the
 	// transport) log as success, matching the lane's existing success semantics.
 	// The failure line includes the transport error verbatim (same text the
 	// retry queue and DLQ record in LastError): it may embed the destination
 	// endpoint but never credentials, which live in request headers.
 	if l.logger != nil {
+		l.logger.Printf("Dispatching event to sink: collection=%s sink_id=%s sink_type=%s event_type=%s",
+			l.collection, sinkIDOrDash(l.sink.ID), l.sink.Type, j.record.RecordType)
+	}
+	err := l.sink.Send(j.ctx, j.record)
+	if l.observer != nil {
+		l.observer.ObserveSinkDelivery(l.collection, l.sink.Type, time.Since(start), err)
+	}
+	if l.logger != nil {
 		if err != nil {
-			l.logger.Printf("sink delivery failed: collection=%s sink_id=%s sink_type=%s event_type=%s: %v",
+			l.logger.Printf("Failed to deliver event to sink: collection=%s sink_id=%s sink_type=%s event_type=%s: %v",
 				l.collection, sinkIDOrDash(l.sink.ID), l.sink.Type, j.record.RecordType, err)
 		} else {
-			l.logger.Printf("sink delivery succeeded: collection=%s sink_id=%s sink_type=%s event_type=%s",
+			l.logger.Printf("Event delivered to sink: collection=%s sink_id=%s sink_type=%s event_type=%s",
 				l.collection, sinkIDOrDash(l.sink.ID), l.sink.Type, j.record.RecordType)
 		}
 	}

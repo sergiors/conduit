@@ -137,11 +137,11 @@ func (r *Reconciliation) LogChanges(logger *log.Logger, collectionName string) {
 	for _, change := range r.Changes {
 		switch change.Type {
 		case ChangeAdded:
-			logger.Printf("added sink %s for collection %s", change.Sink.ID, collectionName)
+			logger.Printf("Added sink %s for collection %s", change.Sink.ID, collectionName)
 		case ChangeRemoved:
-			logger.Printf("removed sink %s for collection %s", change.Sink.ID, collectionName)
+			logger.Printf("Removed sink %s for collection %s", change.Sink.ID, collectionName)
 		case ChangeUpdated:
-			logger.Printf("updated sink %s for collection %s", change.Sink.ID, collectionName)
+			logger.Printf("Updated sink %s for collection %s", change.Sink.ID, collectionName)
 		}
 	}
 }

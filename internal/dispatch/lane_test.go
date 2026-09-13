@@ -48,9 +48,10 @@ func dispatchInsert(t *testing.T, d *Dispatcher, collection string) {
 	require.NoError(t, err)
 }
 
-// TestLaneDeliveryLogging verifies the delivery-boundary logging emits one
-// success/failure line per delivery attempt with the collection, sink ID, sink
-// type and event type, and that it is skipped entirely when no logger is wired.
+// TestLaneDeliveryLogging verifies the delivery-boundary logging emits a
+// dispatching line before Send and one success/failure line per delivery attempt
+// with the collection, sink ID, sink type and event type, and that it is
+// skipped entirely when no logger is wired.
 func TestLaneDeliveryLogging(t *testing.T) {
 	t.Run("success logs succeeded line", func(t *testing.T) {
 		var buf safeBuffer
@@ -60,8 +61,9 @@ func TestLaneDeliveryLogging(t *testing.T) {
 		d.Register("users", sink)
 
 		dispatchInsert(t, d, "users")
-		assert.Contains(t, buf.String(),
-			"sink delivery succeeded: collection=users sink_id=s1 sink_type=http event_type=INSERT")
+		got := buf.String()
+		assert.Contains(t, got, "Dispatching event to sink: collection=users sink_id=s1 sink_type=http event_type=INSERT")
+		assert.Contains(t, got, "Event delivered to sink: collection=users sink_id=s1 sink_type=http event_type=INSERT")
 	})
 
 	t.Run("failure logs failed line with error", func(t *testing.T) {
@@ -74,8 +76,9 @@ func TestLaneDeliveryLogging(t *testing.T) {
 		require.Error(t, d.Dispatch(context.Background(), "users",
 			streams.StreamRecord{RecordType: streams.InsertRecord}))
 
-		assert.Contains(t, buf.String(),
-			"sink delivery failed: collection=users sink_id=s1 sink_type=http event_type=INSERT: "+assert.AnError.Error())
+		got := buf.String()
+		assert.Contains(t, got, "Dispatching event to sink: collection=users sink_id=s1 sink_type=http event_type=INSERT")
+		assert.Contains(t, got, "Failed to deliver event to sink: collection=users sink_id=s1 sink_type=http event_type=INSERT: "+assert.AnError.Error())
 	})
 
 	t.Run("empty sink id renders as dash", func(t *testing.T) {
@@ -86,8 +89,9 @@ func TestLaneDeliveryLogging(t *testing.T) {
 		d.Register("users", sink)
 
 		dispatchInsert(t, d, "users")
-		assert.Contains(t, buf.String(),
-			"sink delivery succeeded: collection=users sink_id=- sink_type=http event_type=INSERT")
+		got := buf.String()
+		assert.Contains(t, got, "Dispatching event to sink: collection=users sink_id=- sink_type=http event_type=INSERT")
+		assert.Contains(t, got, "Event delivered to sink: collection=users sink_id=- sink_type=http event_type=INSERT")
 	})
 
 	t.Run("no logger produces no delivery output", func(t *testing.T) {
@@ -130,8 +134,9 @@ func TestLaneDeliveryLoggingFilteredNoOp(t *testing.T) {
 	err := d.Dispatch(context.Background(), "users", streams.StreamRecord{RecordType: streams.ModifyRecord})
 	require.NoError(t, err)
 
-	assert.Contains(t, buf.String(),
-		"sink delivery succeeded: collection=users sink_id=s1 sink_type=redis event_type=MODIFY",
+	got := buf.String()
+	assert.Contains(t, got, "Dispatching event to sink: collection=users sink_id=s1 sink_type=redis event_type=MODIFY")
+	assert.Contains(t, got, "Event delivered to sink: collection=users sink_id=s1 sink_type=redis event_type=MODIFY",
 		"a filtered no-op counts as success and is logged as succeeded")
 }
 

@@ -152,7 +152,7 @@ func (r *Refresher) refreshLoop(ctx context.Context, sources []GaugeSource) {
 				r.refreshAll(ctx, sources)
 				return nil
 			}); panicked {
-				r.logger.Println("metrics refresh panicked; continuing loop")
+				r.logger.Println("Metrics refresh panicked; continuing loop")
 			}
 		}
 	}

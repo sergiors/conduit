@@ -83,7 +83,7 @@ func (m *Manager) notifyPublish(ctx context.Context, name string) {
 		return
 	}
 	if err := m.OnPublish(ctx, name); err != nil {
-		m.logger.Printf("failed to publish config change for %s: %v", name, err)
+		m.logger.Printf("Failed to publish config change for %s: %v", name, err)
 	}
 }
 
@@ -98,7 +98,7 @@ func (m *Manager) purgeState(ctx context.Context, name string) {
 	purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	if err := m.OnPurge(purgeCtx, name); err != nil {
-		m.logger.Printf("failed to purge CDC state after deleting collection %s: %v", name, err)
+		m.logger.Printf("Failed to purge CDC state after deleting collection %s: %v", name, err)
 	}
 }
 

@@ -78,12 +78,12 @@ func (s *Server) Start(_ context.Context) error {
 		defer s.wg.Done()
 		recover.Protect(s.logger, "metrics:server", func() {
 			if serveErr := s.server.Serve(s.ln); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
-				s.logger.Printf("metrics server error: %v", serveErr)
+				s.logger.Printf("Metrics server error: %v", serveErr)
 			}
 		})
 	}()
 
-	s.logger.Printf("metrics server listening on %s", s.addr)
+	s.logger.Printf("Metrics server listening on %s", s.addr)
 	return nil
 }
 
@@ -112,6 +112,6 @@ func (s *Server) Stop(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	s.logger.Println("metrics server stopped")
+	s.logger.Println("Metrics server stopped")
 	return nil
 }
