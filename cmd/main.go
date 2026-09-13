@@ -13,6 +13,8 @@ import (
 
 	"conduit/internal/cli"
 	"conduit/internal/config"
+
+	"github.com/lmittmann/tint"
 )
 
 func main() {
@@ -26,7 +28,12 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
+	logger := slog.New(
+		tint.NewTextHandler(os.Stdout, &tint.Options{
+			Level:      level,
+			TimeFormat: "2006-01-02 15:04:05",
+		}),
+	)
 
 	ctx, stop := signal.NotifyContext(
 		context.Background(),
