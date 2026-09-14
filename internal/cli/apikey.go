@@ -21,8 +21,9 @@ import (
 // they never connect to Redis.
 func apikeyCommand(logger *slog.Logger) *cli.Command {
 	return &cli.Command{
-		Name:  "apikey",
-		Usage: "Manage API keys",
+		Name:   "apikey",
+		Usage:  "Manage API keys",
+		Action: namespaceAction(),
 		Commands: []*cli.Command{
 			apikeyCreateCommand(logger),
 			apikeyListCommand(logger),
