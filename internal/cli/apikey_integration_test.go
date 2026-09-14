@@ -92,7 +92,7 @@ func TestAPIKeyList_HidesSensitiveData(t *testing.T) {
 
 	// List must show the key row but never the secret material.
 	root2, listBuf := newRootCommandForTest(t)
-	err = root2.Run(context.Background(), []string{"conduit", "apikey", "list"})
+	err = root2.Run(context.Background(), []string{"conduit", "apikey", "ls"})
 	require.NoError(t, err)
 	out := listBuf.String()
 	require.Contains(t, out, id)
@@ -109,7 +109,7 @@ func TestAPIKeyList_HidesSensitiveData(t *testing.T) {
 	require.NoError(t, err)
 
 	root4, list2Buf := newRootCommandForTest(t)
-	err = root4.Run(context.Background(), []string{"conduit", "apikey", "list"})
+	err = root4.Run(context.Background(), []string{"conduit", "apikey", "ls"})
 	require.NoError(t, err)
 	out2 := list2Buf.String()
 	require.Contains(t, out2, "revoked")

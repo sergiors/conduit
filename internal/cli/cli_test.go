@@ -68,7 +68,7 @@ func TestAPIKeySubcommandRegistration(t *testing.T) {
 		}
 	}
 	require.NotNil(t, apikey, "apikey command must be registered")
-	assert.ElementsMatch(t, []string{"create", "list", "revoke"}, commandNames(apikey.Commands))
+	assert.ElementsMatch(t, []string{"create", "ls", "revoke"}, commandNames(apikey.Commands))
 
 	for _, sub := range apikey.Commands {
 		switch sub.Name {
@@ -123,7 +123,7 @@ func TestRunHelp(t *testing.T) {
 	require.NoError(t, err)
 	help = string(out)
 	assert.Contains(t, help, "create")
-	assert.Contains(t, help, "list")
+	assert.Contains(t, help, "ls")
 	assert.Contains(t, help, "revoke")
 }
 

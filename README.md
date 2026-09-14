@@ -206,7 +206,7 @@ conduit apikey create --name my-key
 - Create a key with `conduit apikey create --name <name>`. The full `sk-...`
   secret is shown **exactly once** at creation; only a hash is stored, so it
   cannot be recovered later.
-- List keys with `conduit apikey list`, and revoke one with
+- List keys with `conduit apikey ls`, and revoke one with
   `conduit apikey revoke --id <id>`.
 - Send the key as `Authorization: Bearer <sk-...>` on every `/api/*` request.
 - `/health` is exempt and requires no token.

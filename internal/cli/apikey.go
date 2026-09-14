@@ -15,7 +15,7 @@ import (
 	"conduit/internal/mongo"
 )
 
-// apikeyCommand returns the "conduit apikey" parent command with create, list,
+// apikeyCommand returns the "conduit apikey" parent command with create, ls,
 // and revoke subcommands. All subcommands load the same full config as every
 // conduit command and then drive the persisted apikey.Manager over MongoDB;
 // they never connect to Redis.
@@ -85,10 +85,10 @@ func runAPIKeyCreate(ctx context.Context, logger *slog.Logger, out io.Writer, na
 	return nil
 }
 
-// apikeyListCommand returns the "conduit apikey list" command.
+// apikeyListCommand returns the "conduit apikey ls" command.
 func apikeyListCommand(logger *slog.Logger) *cli.Command {
 	return &cli.Command{
-		Name:      "list",
+		Name:      "ls",
 		Usage:     "List API keys",
 		ArgsUsage: " ",
 		Action: func(ctx context.Context, cmd *cli.Command) error {
