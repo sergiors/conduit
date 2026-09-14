@@ -27,6 +27,13 @@
 //     queue depth.
 //   - conduit_sink_queue_depth{collection,sink_type,sink_id} — gauge of the
 //     current number of events waiting in a sink lane's bounded queue.
+//   - conduit_sink_queue_capacity{collection,sink_type,sink_id} — configured
+//     capacity of a sink lane's bounded queue.
+//   - conduit_sink_enqueue_wait_duration_seconds{collection,sink_type,sink_id}
+//     — histogram of the time the dispatcher waited to place an event into a
+//     sink lane's bounded queue.
+//   - conduit_sink_queue_full_total{collection,sink_type,sink_id} — count of
+//     enqueue attempts that hit an already-full sink lane queue.
 //   - conduit_dlq_entries{collection} — gauge of a collection's dead-letter
 //     entry count.
 //

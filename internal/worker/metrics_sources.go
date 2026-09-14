@@ -73,8 +73,8 @@ func (s *dlqGaugeSource) RefreshMetrics(ctx context.Context, m *metrics.Metrics)
 
 // Compile-time interface assertions.
 var (
-	_ dispatch.SinkDeliveryObserver   = (*metrics.Metrics)(nil)
-	_ dispatch.SinkQueueDepthObserver = (*metrics.Metrics)(nil)
-	_ metrics.GaugeSource             = (*retryQueueGaugeSource)(nil)
-	_ metrics.GaugeSource             = (*dlqGaugeSource)(nil)
+	_ dispatch.SinkDeliveryObserver     = (*metrics.Metrics)(nil)
+	_ dispatch.SinkBackpressureObserver = (*metrics.Metrics)(nil)
+	_ metrics.GaugeSource               = (*retryQueueGaugeSource)(nil)
+	_ metrics.GaugeSource               = (*dlqGaugeSource)(nil)
 )

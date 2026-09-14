@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
@@ -29,6 +30,9 @@ func TestRegistration(t *testing.T) {
 	m.SetRetryQueueDepth("users", 1)
 	m.SetDLQEntries("users", 1)
 	m.ObserveSinkQueueDepth("users", collections.SinkTypeHTTP, "s1", 3)
+	m.SetSinkQueueCapacity("users", collections.SinkTypeHTTP, "s1", 1024)
+	m.ObserveSinkEnqueueWait("users", collections.SinkTypeHTTP, "s1", 5*time.Millisecond)
+	m.IncSinkQueueFull("users", collections.SinkTypeHTTP, "s1")
 
 	gathered, err := m.registry.Gather()
 	require.NoError(t, err)
@@ -45,6 +49,9 @@ func TestRegistration(t *testing.T) {
 		watcherRunningName,
 		retryQueueDepthName,
 		sinkQueueDepthName,
+		sinkQueueCapacityName,
+		sinkEnqueueWaitName,
+		sinkQueueFullName,
 		dlqEntriesName,
 	} {
 		assert.True(t, names[name], "metric family %s must be registered", name)
@@ -246,6 +253,183 @@ func TestSinkQueueDepth(t *testing.T) {
 		"deleting a removed series must report false")
 }
 
+// TestSinkQueueCapacity verifies the capacity gauge records per
+// (collection, sink_type, sink_id) as an overwriting gauge (not an accumulator),
+// keeps the label set exactly {collection, sink_type, sink_id}, and that a
+// distinct sink id is a distinct series.
+func TestSinkQueueCapacity(t *testing.T) {
+	m := New()
+
+	m.SetSinkQueueCapacity("users", collections.SinkTypeHTTP, "s1", 128)
+	assert.Equal(t, 128.0, testutil.ToFloat64(
+		m.sinkQueueCapacity.WithLabelValues("users", string(collections.SinkTypeHTTP), "s1")))
+	assert.Equal(t, 0.0, testutil.ToFloat64(
+		m.sinkQueueCapacity.WithLabelValues("users", string(collections.SinkTypeHTTP), "s2")),
+		"a distinct sink id must be a distinct series")
+
+	// The gauge overwrites rather than accumulates.
+	m.SetSinkQueueCapacity("users", collections.SinkTypeHTTP, "s1", 512)
+	m.SetSinkQueueCapacity("users", collections.SinkTypeHTTP, "s1", 64)
+	assert.Equal(t, 64.0, testutil.ToFloat64(
+		m.sinkQueueCapacity.WithLabelValues("users", string(collections.SinkTypeHTTP), "s1")),
+		"capacity is a gauge, not an accumulator")
+
+	// Assert the exact label set via a gathered metric slice.
+	families, err := m.Registry().Gather()
+	require.NoError(t, err)
+	for _, mf := range families {
+		if mf.GetName() != sinkQueueCapacityName {
+			continue
+		}
+		metric := mf.GetMetric()[0]
+		labels := map[string]string{}
+		for _, l := range metric.GetLabel() {
+			labels[l.GetName()] = l.GetValue()
+		}
+		assert.Equal(t, map[string]string{
+			collectionLabel: "users",
+			sinkTypeLabel:   string(collections.SinkTypeHTTP),
+			sinkIDLabel:     "s1",
+		}, labels, "the sink queue capacity gauge must expose exactly collection/sink_type/sink_id")
+	}
+}
+
+// TestSinkEnqueueWaitHistogram verifies the enqueue-wait histogram records
+// observations, reports a positive sum, and exposes the sink_id label.
+func TestSinkEnqueueWaitHistogram(t *testing.T) {
+	m := New()
+
+	m.ObserveSinkEnqueueWait("users", collections.SinkTypeHTTP, "s1", 5*time.Millisecond)
+	m.ObserveSinkEnqueueWait("users", collections.SinkTypeHTTP, "s1", 10*time.Millisecond)
+	m.ObserveSinkEnqueueWait("users", collections.SinkTypeHTTP, "s1", 20*time.Millisecond)
+
+	total := totalHistogramCount(t, m, sinkEnqueueWaitName, map[string]string{
+		collectionLabel: "users",
+		sinkTypeLabel:   string(collections.SinkTypeHTTP),
+		sinkIDLabel:     "s1",
+	})
+	assert.Equal(t, uint64(3), total, "histogram must record 3 observations")
+
+	families, err := m.Registry().Gather()
+	require.NoError(t, err)
+	for _, mf := range families {
+		if mf.GetName() != sinkEnqueueWaitName {
+			continue
+		}
+		metric := mf.GetMetric()[0]
+		assert.Greater(t, metric.GetHistogram().GetSampleSum(), 0.0, "sum of recorded waits must be positive")
+		labels := map[string]string{}
+		for _, l := range metric.GetLabel() {
+			labels[l.GetName()] = l.GetValue()
+		}
+		assert.Contains(t, labels, sinkIDLabel, "the enqueue-wait histogram must expose sink_id")
+		assert.Equal(t, map[string]string{
+			collectionLabel: "users",
+			sinkTypeLabel:   string(collections.SinkTypeHTTP),
+			sinkIDLabel:     "s1",
+		}, labels, "the enqueue-wait histogram must expose exactly collection/sink_type/sink_id")
+	}
+}
+
+// TestSinkQueueFullCounter verifies the queue-full counter accumulates across
+// calls and records distinct per-sink-id series.
+func TestSinkQueueFullCounter(t *testing.T) {
+	m := New()
+
+	m.IncSinkQueueFull("users", collections.SinkTypeHTTP, "s1")
+	m.IncSinkQueueFull("users", collections.SinkTypeHTTP, "s1")
+	m.IncSinkQueueFull("users", collections.SinkTypeHTTP, "s1")
+	assert.Equal(t, 3.0, testutil.ToFloat64(
+		m.sinkQueueFull.WithLabelValues("users", string(collections.SinkTypeHTTP), "s1")),
+		"queue-full is a counter, accumulating across calls")
+
+	m.IncSinkQueueFull("users", collections.SinkTypeHTTP, "s2")
+	assert.Equal(t, 1.0, testutil.ToFloat64(
+		m.sinkQueueFull.WithLabelValues("users", string(collections.SinkTypeHTTP), "s2")),
+		"a distinct sink id must be a distinct series")
+	assert.Equal(t, 0.0, testutil.ToFloat64(
+		m.sinkQueueFull.WithLabelValues("orders", string(collections.SinkTypeHTTP), "s1")),
+		"a distinct collection must be a distinct series")
+}
+
+// TestDeleteSinkLaneMetrics verifies deleting a lane removes every per-lane
+// series across all four backpressure families, each underlying Vec reports a
+// successful first delete then false, and a second delete of an already-removed
+// lane leaves Gather unchanged.
+func TestDeleteSinkLaneMetrics(t *testing.T) {
+	m := New()
+	labels := func() map[string]string {
+		return map[string]string{
+			collectionLabel: "users",
+			sinkTypeLabel:   string(collections.SinkTypeHTTP),
+			sinkIDLabel:     "s1",
+		}
+	}
+
+	// Seed all four families for one lane.
+	m.ObserveSinkQueueDepth("users", collections.SinkTypeHTTP, "s1", 3)
+	m.SetSinkQueueCapacity("users", collections.SinkTypeHTTP, "s1", 1024)
+	m.ObserveSinkEnqueueWait("users", collections.SinkTypeHTTP, "s1", 5*time.Millisecond)
+	m.IncSinkQueueFull("users", collections.SinkTypeHTTP, "s1")
+
+	// Every family must be present before deletion.
+	for _, name := range []string{sinkQueueDepthName, sinkQueueCapacityName, sinkEnqueueWaitName, sinkQueueFullName} {
+		require.True(t, familyHasSeries(t, m, name, labels()), "family %s must be seeded", name)
+	}
+
+	m.DeleteSinkLaneMetrics("users", collections.SinkTypeHTTP, "s1")
+
+	// No family should expose the lane's series after deletion.
+	for _, name := range []string{sinkQueueDepthName, sinkQueueCapacityName, sinkEnqueueWaitName, sinkQueueFullName} {
+		assert.False(t, familyHasSeries(t, m, name, labels()), "family %s must have no series after deletion", name)
+	}
+
+	// Each underlying Vec reports no series present (it was already removed by
+	// DeleteSinkLaneMetrics, so a direct DeleteLabelValues reports false).
+	assert.False(t, m.sinkQueueDepth.DeleteLabelValues("users", string(collections.SinkTypeHTTP), "s1"))
+	assert.False(t, m.sinkQueueCapacity.DeleteLabelValues("users", string(collections.SinkTypeHTTP), "s1"))
+	assert.False(t, m.sinkEnqueueWait.DeleteLabelValues("users", string(collections.SinkTypeHTTP), "s1"))
+	assert.False(t, m.sinkQueueFull.DeleteLabelValues("users", string(collections.SinkTypeHTTP), "s1"))
+
+	// A second DeleteSinkLaneMetrics leaves Gather unchanged (still no series).
+	before, err := m.Registry().Gather()
+	require.NoError(t, err)
+	m.DeleteSinkLaneMetrics("users", collections.SinkTypeHTTP, "s1")
+	after, err := m.Registry().Gather()
+	require.NoError(t, err)
+	assert.Len(t, after, len(before), "a second delete of an already-removed lane must not change the registry")
+}
+
+// familyHasSeries reports whether the given family exposes a series carrying at
+// least the given label subset.
+func familyHasSeries(t *testing.T, m *Metrics, name string, wantLabels map[string]string) bool {
+	t.Helper()
+	families, err := m.Registry().Gather()
+	require.NoError(t, err)
+	for _, mf := range families {
+		if mf.GetName() != name {
+			continue
+		}
+		for _, metric := range mf.GetMetric() {
+			labels := map[string]string{}
+			for _, l := range metric.GetLabel() {
+				labels[l.GetName()] = l.GetValue()
+			}
+			matched := true
+			for k, v := range wantLabels {
+				if labels[k] != v {
+					matched = false
+					break
+				}
+			}
+			if matched {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // TestNilSafety verifies every method is a no-op (no panic) on a nil receiver.
 func TestNilSafety(t *testing.T) {
 	var m *Metrics
@@ -256,7 +440,10 @@ func TestNilSafety(t *testing.T) {
 		m.SetRetryQueueDepth("users", 1)
 		m.SetDLQEntries("users", 1)
 		m.ObserveSinkQueueDepth("users", collections.SinkTypeHTTP, "s1", 1)
-		m.DeleteSinkQueueDepth("users", collections.SinkTypeHTTP, "s1")
+		m.SetSinkQueueCapacity("users", collections.SinkTypeHTTP, "s1", 1024)
+		m.ObserveSinkEnqueueWait("users", collections.SinkTypeHTTP, "s1", time.Millisecond)
+		m.IncSinkQueueFull("users", collections.SinkTypeHTTP, "s1")
+		m.DeleteSinkLaneMetrics("users", collections.SinkTypeHTTP, "s1")
 		m.ObserveSinkDelivery("users", collections.SinkTypeHTTP, 0, assert.AnError)
 	})
 	assert.Nil(t, m.Registry())

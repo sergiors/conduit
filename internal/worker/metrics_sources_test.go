@@ -228,11 +228,11 @@ func TestMetricsObserverIsMetrics(t *testing.T) {
 }
 
 // TestMetricsQueueDepthObserverIsMetrics verifies the same *metrics.Metrics
-// instance satisfies dispatch.SinkQueueDepthObserver and forwards queue-depth
+// instance satisfies dispatch.SinkBackpressureObserver and forwards queue-depth
 // observations to the per-lane sink queue gauge.
 func TestMetricsQueueDepthObserverIsMetrics(t *testing.T) {
 	m := metrics.New()
-	var obs dispatch.SinkQueueDepthObserver = m
+	var obs dispatch.SinkBackpressureObserver = m
 	obs.ObserveSinkQueueDepth("users", collections.SinkTypeHTTP, "s1", 3)
 
 	assert.Equal(t, 3.0, gaugeValue(t, m, "conduit_sink_queue_depth",
@@ -246,9 +246,12 @@ func TestMetricsQueueDepthObserverIsMetrics(t *testing.T) {
 	// A nil *Metrics wrapped in the interface is a no-op (its own nil check).
 	var nilMetrics *metrics.Metrics
 	require.NotPanics(t, func() {
-		var nillObs dispatch.SinkQueueDepthObserver = nilMetrics
+		var nillObs dispatch.SinkBackpressureObserver = nilMetrics
 		nillObs.ObserveSinkQueueDepth("users", collections.SinkTypeHTTP, "s1", 3)
-		nillObs.DeleteSinkQueueDepth("users", collections.SinkTypeHTTP, "s1")
+		nillObs.SetSinkQueueCapacity("users", collections.SinkTypeHTTP, "s1", 1024)
+		nillObs.ObserveSinkEnqueueWait("users", collections.SinkTypeHTTP, "s1", time.Millisecond)
+		nillObs.IncSinkQueueFull("users", collections.SinkTypeHTTP, "s1")
+		nillObs.DeleteSinkLaneMetrics("users", collections.SinkTypeHTTP, "s1")
 	})
 }
 

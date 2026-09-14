@@ -22,19 +22,45 @@ type depthCall struct {
 	depth      int
 }
 
-// delCall is a single deletion recorded by queueDepthRecorder.
+// delCall is a single lane-metrics deletion recorded by queueDepthRecorder.
 type delCall struct {
 	collection string
 	sinkType   collections.Type
 	sinkID     string
 }
 
-// queueDepthRecorder is a thread-safe fake SinkQueueDepthObserver that records
-// every observation and deletion for later assertion.
+// capCall is a single capacity observation recorded by queueDepthRecorder.
+type capCall struct {
+	collection string
+	sinkType   collections.Type
+	sinkID     string
+	capacity   int
+}
+
+// waitCall is a single enqueue-wait observation recorded by queueDepthRecorder.
+type waitCall struct {
+	collection string
+	sinkType   collections.Type
+	sinkID     string
+	wait       time.Duration
+}
+
+// fullCall is a single queue-full count recorded by queueDepthRecorder.
+type fullCall struct {
+	collection string
+	sinkType   collections.Type
+	sinkID     string
+}
+
+// queueDepthRecorder is a thread-safe fake SinkBackpressureObserver that
+// records every observation and deletion for later assertion.
 type queueDepthRecorder struct {
 	mu     sync.Mutex
 	depths []depthCall
 	dels   []delCall
+	caps   []capCall
+	waits  []waitCall
+	fulls  []fullCall
 }
 
 func (r *queueDepthRecorder) ObserveSinkQueueDepth(collection string, sinkType collections.Type, sinkID string, depth int) {
@@ -43,7 +69,25 @@ func (r *queueDepthRecorder) ObserveSinkQueueDepth(collection string, sinkType c
 	r.depths = append(r.depths, depthCall{collection: collection, sinkType: sinkType, sinkID: sinkID, depth: depth})
 }
 
-func (r *queueDepthRecorder) DeleteSinkQueueDepth(collection string, sinkType collections.Type, sinkID string) {
+func (r *queueDepthRecorder) SetSinkQueueCapacity(collection string, sinkType collections.Type, sinkID string, capacity int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.caps = append(r.caps, capCall{collection: collection, sinkType: sinkType, sinkID: sinkID, capacity: capacity})
+}
+
+func (r *queueDepthRecorder) ObserveSinkEnqueueWait(collection string, sinkType collections.Type, sinkID string, wait time.Duration) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.waits = append(r.waits, waitCall{collection: collection, sinkType: sinkType, sinkID: sinkID, wait: wait})
+}
+
+func (r *queueDepthRecorder) IncSinkQueueFull(collection string, sinkType collections.Type, sinkID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.fulls = append(r.fulls, fullCall{collection: collection, sinkType: sinkType, sinkID: sinkID})
+}
+
+func (r *queueDepthRecorder) DeleteSinkLaneMetrics(collection string, sinkType collections.Type, sinkID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.dels = append(r.dels, delCall{collection: collection, sinkType: sinkType, sinkID: sinkID})
@@ -80,6 +124,62 @@ func (r *queueDepthRecorder) deleteCalls() []delCall {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return append([]delCall(nil), r.dels...)
+}
+
+// capacityFor returns the most recent capacity observation for a lane and
+// whether any was seen.
+func (r *queueDepthRecorder) capacityFor(collection, sinkID string) (int, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	last := -1
+	seen := false
+	for _, c := range r.caps {
+		if c.collection == collection && c.sinkID == sinkID {
+			last = c.capacity
+			seen = true
+		}
+	}
+	return last, seen
+}
+
+// capCalls returns the total number of capacity observations recorded.
+func (r *queueDepthRecorder) capCalls() []capCall {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]capCall(nil), r.caps...)
+}
+
+// waitsFor returns the enqueue-wait observations for a lane, in observation order.
+func (r *queueDepthRecorder) waitsFor(collection, sinkID string) []time.Duration {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []time.Duration
+	for _, c := range r.waits {
+		if c.collection == collection && c.sinkID == sinkID {
+			out = append(out, c.wait)
+		}
+	}
+	return out
+}
+
+// fullCount returns the number of queue-full observations for a lane.
+func (r *queueDepthRecorder) fullCount(collection, sinkID string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for _, c := range r.fulls {
+		if c.collection == collection && c.sinkID == sinkID {
+			n++
+		}
+	}
+	return n
+}
+
+// fullCalls returns all recorded queue-full observations, in order.
+func (r *queueDepthRecorder) fullCalls() []fullCall {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]fullCall(nil), r.fulls...)
 }
 
 // gatedTransport is a transport whose Send blocks on a release channel so tests

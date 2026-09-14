@@ -46,21 +46,23 @@ type Dispatcher struct {
 	// per-sink delivery metrics can be recorded. It is nil in tests and when
 	// metrics are disabled.
 	observer SinkDeliveryObserver
-	// depthObs, when non-nil, is notified of each lane's bounded-queue depth at
-	// queue transitions and of permanent lane removal (see SinkQueueDepthObserver).
-	// It is nil in tests and when metrics are disabled.
-	depthObs SinkQueueDepthObserver
+	// backpressureObs, when non-nil, is notified of each lane's bounded-queue
+	// depth at queue transitions, of its backpressure signals (capacity, enqueue
+	// wait, queue full), and of permanent lane removal (see
+	// SinkBackpressureObserver). It is nil in tests and when metrics are disabled.
+	backpressureObs SinkBackpressureObserver
 	// logger, when non-nil, is used by each sink lane to log delivery outcomes
 	// at the delivery boundary (see lane.deliver). It is nil when delivery
 	// logging is not wired, in which case the logs are silently skipped.
 	logger *slog.Logger
 }
 
-// deleteQueueDepth removes the queue-depth series of a permanently closed lane
-// so removed/reconfigured sinks do not leave stale series behind.
-func (d *Dispatcher) deleteQueueDepth(l *lane) {
-	if d.depthObs != nil {
-		d.depthObs.DeleteSinkQueueDepth(l.collection, l.sink.Type, l.sink.ID)
+// deleteLaneMetrics removes all per-lane metric series (queue depth, queue
+// capacity, enqueue wait duration, queue full total) of a permanently closed
+// lane so removed/reconfigured sinks do not leave stale series behind.
+func (d *Dispatcher) deleteLaneMetrics(l *lane) {
+	if d.backpressureObs != nil {
+		d.backpressureObs.DeleteSinkLaneMetrics(l.collection, l.sink.Type, l.sink.ID)
 	}
 }
 
@@ -69,17 +71,17 @@ func (d *Dispatcher) deleteQueueDepth(l *lane) {
 // lane delivery observer (nil allowed) that records delivery outcomes, and a
 // logger used by each sink lane to emit per-sink delivery outcome logs at the
 // delivery boundary (nil disables delivery logging — each lane silently skips
-// it). The depth observer is independent of both and records per-lane queue
-// depth gauges when non-nil. The worker wires *metrics.Metrics as both the
-// observer and the depth observer, and the process logger; tests pass what they
-// need (often nils).
-func NewDispatcher(cfg Config, obs SinkDeliveryObserver, depthObs SinkQueueDepthObserver, logger *slog.Logger) *Dispatcher {
+// it). The backpressure observer is independent of both and records per-lane
+// queue depth and backpressure gauges when non-nil. The worker wires
+// *metrics.Metrics as both the observer and the backpressure observer, and the
+// process logger; tests pass what they need (often nils).
+func NewDispatcher(cfg Config, obs SinkDeliveryObserver, backpressureObs SinkBackpressureObserver, logger *slog.Logger) *Dispatcher {
 	return &Dispatcher{
-		sinks:    make(map[string][]*lane),
-		cfg:      sanitizeConfig(cfg),
-		observer: obs,
-		depthObs: depthObs,
-		logger:   logger,
+		sinks:           make(map[string][]*lane),
+		cfg:             sanitizeConfig(cfg),
+		observer:        obs,
+		backpressureObs: backpressureObs,
+		logger:          logger,
 	}
 }
 
@@ -112,7 +114,7 @@ func (d *Dispatcher) Register(collection string, sink *RuntimeSink) {
 	if d.sinks[collection] == nil {
 		d.sinks[collection] = make([]*lane, 0)
 	}
-	d.sinks[collection] = append(d.sinks[collection], newLaneFor(sink, queueSize, workerCount, collection, d.observer, d.depthObs, d.logger))
+	d.sinks[collection] = append(d.sinks[collection], newLaneFor(sink, queueSize, workerCount, collection, d.observer, d.backpressureObs, d.logger))
 }
 
 // Dispatch sends a stream record to all runtime sinks for a collection.
@@ -197,7 +199,7 @@ func (d *Dispatcher) Close() error {
 			if err := l.close(); err != nil {
 				lastErr = err
 			}
-			d.deleteQueueDepth(l)
+			d.deleteLaneMetrics(l)
 		}
 	}
 	d.sinks = make(map[string][]*lane)
@@ -243,7 +245,7 @@ func (d *Dispatcher) Remove(collection, key string) {
 	for i, l := range lanes {
 		if l.sink.Key() == key {
 			l.close()
-			d.deleteQueueDepth(l)
+			d.deleteLaneMetrics(l)
 			d.sinks[collection] = append(lanes[:i], lanes[i+1:]...)
 			if len(d.sinks[collection]) == 0 {
 				delete(d.sinks, collection)
@@ -262,7 +264,7 @@ func (d *Dispatcher) Clear(collection string) {
 	if lanes, ok := d.sinks[collection]; ok {
 		for _, l := range lanes {
 			l.close()
-			d.deleteQueueDepth(l)
+			d.deleteLaneMetrics(l)
 		}
 		delete(d.sinks, collection)
 	}

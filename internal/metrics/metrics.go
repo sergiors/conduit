@@ -36,6 +36,9 @@ const (
 	retryQueueDepthName      = "conduit_retry_queue_depth"
 	dlqEntriesName           = "conduit_dlq_entries"
 	sinkQueueDepthName       = "conduit_sink_queue_depth"
+	sinkQueueCapacityName    = "conduit_sink_queue_capacity"
+	sinkEnqueueWaitName      = "conduit_sink_enqueue_wait_duration_seconds"
+	sinkQueueFullName        = "conduit_sink_queue_full_total"
 	collectionLabel          = "collection"
 	eventTypeLabel           = "event_type"
 	sinkTypeLabel            = "sink_type"
@@ -62,6 +65,9 @@ type Metrics struct {
 	watcherRunning       *prometheus.GaugeVec
 	retryQueueDepth      *prometheus.GaugeVec
 	sinkQueueDepth       *prometheus.GaugeVec
+	sinkQueueCapacity    *prometheus.GaugeVec
+	sinkEnqueueWait      *prometheus.HistogramVec
+	sinkQueueFull        *prometheus.CounterVec
 	dlqEntries           *prometheus.GaugeVec
 }
 
@@ -101,6 +107,24 @@ func New() *Metrics {
 			Name: sinkQueueDepthName,
 			Help: "Current number of events waiting in a sink lane's bounded queue, by collection, sink type and sink id.",
 		}, []string{collectionLabel, sinkTypeLabel, sinkIDLabel}),
+		sinkQueueCapacity: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: sinkQueueCapacityName,
+			Help: "Configured capacity of a sink lane's bounded queue, by collection, sink type and sink id.",
+		}, []string{collectionLabel, sinkTypeLabel, sinkIDLabel}),
+		// Queue waits under real backpressure can far exceed the 10s ceiling of
+		// prometheus.DefBuckets (the delivery-latency convention), which would
+		// collapse all meaningful backpressure observations into +Inf; an
+		// exponential scale from 1ms covers both the no-contention fast path and
+		// long blocked waits.
+		sinkEnqueueWait: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    sinkEnqueueWaitName,
+			Help:    "Duration the dispatcher waited before an event was successfully placed into a sink lane's bounded queue, by collection, sink type and sink id.",
+			Buckets: prometheus.ExponentialBuckets(0.001, 2, 16),
+		}, []string{collectionLabel, sinkTypeLabel, sinkIDLabel}),
+		sinkQueueFull: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: sinkQueueFullName,
+			Help: "Total number of enqueue attempts that encountered an already-full sink lane queue and had to apply backpressure.",
+		}, []string{collectionLabel, sinkTypeLabel, sinkIDLabel}),
 	}
 
 	registry.MustRegister(
@@ -110,6 +134,9 @@ func New() *Metrics {
 		m.watcherRunning,
 		m.retryQueueDepth,
 		m.sinkQueueDepth,
+		m.sinkQueueCapacity,
+		m.sinkEnqueueWait,
+		m.sinkQueueFull,
 		m.dlqEntries,
 	)
 
@@ -194,7 +221,8 @@ func (m *Metrics) SetDLQEntries(collection string, count int64) {
 
 // ObserveSinkQueueDepth sets the sink queue depth gauge for a sink lane to the
 // current number of queued events. It matches the interface method name used by
-// dispatch's queue-depth observation so *Metrics satisfies SinkQueueDepthObserver.
+// dispatch's backpressure observation so *Metrics satisfies
+// SinkBackpressureObserver.
 func (m *Metrics) ObserveSinkQueueDepth(collection string, sinkType collections.Type, sinkID string, depth int) {
 	if m == nil {
 		return
@@ -202,11 +230,44 @@ func (m *Metrics) ObserveSinkQueueDepth(collection string, sinkType collections.
 	m.sinkQueueDepth.WithLabelValues(collection, string(sinkType), sinkID).Set(float64(depth))
 }
 
-// DeleteSinkQueueDepth removes the sink queue depth gauge series for a
-// permanently removed sink lane so stale series do not linger.
-func (m *Metrics) DeleteSinkQueueDepth(collection string, sinkType collections.Type, sinkID string) {
+// SetSinkQueueCapacity sets the configured capacity gauge for a sink lane to
+// the bounded-queue size used at lane creation. It is a gauge (not an
+// accumulator): setting it again overwrites the previous value.
+func (m *Metrics) SetSinkQueueCapacity(collection string, sinkType collections.Type, sinkID string, capacity int) {
 	if m == nil {
 		return
 	}
-	m.sinkQueueDepth.DeleteLabelValues(collection, string(sinkType), sinkID)
+	m.sinkQueueCapacity.WithLabelValues(collection, string(sinkType), sinkID).Set(float64(capacity))
+}
+
+// ObserveSinkEnqueueWait records how long a submit waited before an event was
+// successfully placed into a sink lane's bounded queue, in seconds.
+func (m *Metrics) ObserveSinkEnqueueWait(collection string, sinkType collections.Type, sinkID string, wait time.Duration) {
+	if m == nil {
+		return
+	}
+	m.sinkEnqueueWait.WithLabelValues(collection, string(sinkType), sinkID).Observe(wait.Seconds())
+}
+
+// IncSinkQueueFull increments the per-lane counter of enqueue attempts that
+// encountered an already-full queue and had to apply backpressure.
+func (m *Metrics) IncSinkQueueFull(collection string, sinkType collections.Type, sinkID string) {
+	if m == nil {
+		return
+	}
+	m.sinkQueueFull.WithLabelValues(collection, string(sinkType), sinkID).Inc()
+}
+
+// DeleteSinkLaneMetrics removes all per-lane metric series (queue depth, queue
+// capacity, enqueue wait duration, queue full total) for a permanently removed
+// sink lane so stale series do not linger.
+func (m *Metrics) DeleteSinkLaneMetrics(collection string, sinkType collections.Type, sinkID string) {
+	if m == nil {
+		return
+	}
+	sinkTypeStr := string(sinkType)
+	m.sinkQueueDepth.DeleteLabelValues(collection, sinkTypeStr, sinkID)
+	m.sinkQueueCapacity.DeleteLabelValues(collection, sinkTypeStr, sinkID)
+	m.sinkEnqueueWait.DeleteLabelValues(collection, sinkTypeStr, sinkID)
+	m.sinkQueueFull.DeleteLabelValues(collection, sinkTypeStr, sinkID)
 }

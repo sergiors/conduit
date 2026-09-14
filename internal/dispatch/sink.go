@@ -23,17 +23,30 @@ type SinkDeliveryObserver interface {
 	ObserveSinkDelivery(collection string, sinkType collections.Type, duration time.Duration, err error)
 }
 
-// SinkQueueDepthObserver receives periodic queue-depth observations from sink
-// lanes. It is optional and separate from SinkDeliveryObserver so only
-// implementations that track per-lane queue gauges need to implement it
-// (satisfied by *metrics.Metrics; fakes in tests may ignore it).
-type SinkQueueDepthObserver interface {
+// SinkBackpressureObserver receives per-lane queue-depth and backpressure
+// observations from sink lanes. It is optional and separate from
+// SinkDeliveryObserver so only implementations that track per-lane queue metrics
+// need to implement it (satisfied by *metrics.Metrics; fakes in tests may ignore
+// it).
+type SinkBackpressureObserver interface {
 	// ObserveSinkQueueDepth records the current number of jobs waiting in a
 	// sink lane's bounded queue.
 	ObserveSinkQueueDepth(collection string, sinkType collections.Type, sinkID string, depth int)
-	// DeleteSinkQueueDepth removes the queue-depth series of a permanently
-	// removed sink lane so stale series do not linger after removal.
-	DeleteSinkQueueDepth(collection string, sinkType collections.Type, sinkID string)
+	// SetSinkQueueCapacity records the configured capacity of a sink lane's bounded
+	// queue. It is set once when the lane is created, never per event.
+	SetSinkQueueCapacity(collection string, sinkType collections.Type, sinkID string, capacity int)
+	// ObserveSinkEnqueueWait records how long a submit waited before an event was
+	// successfully placed into the lane's bounded queue (zero when capacity was
+	// immediately available).
+	ObserveSinkEnqueueWait(collection string, sinkType collections.Type, sinkID string, wait time.Duration)
+	// IncSinkQueueFull increments the per-lane counter of enqueue attempts that
+	// encountered an already-full queue. It is incremented once per such enqueue,
+	// not while the same enqueue remains blocked.
+	IncSinkQueueFull(collection string, sinkType collections.Type, sinkID string)
+	// DeleteSinkLaneMetrics removes ALL per-lane series (queue depth, queue
+	// capacity, enqueue wait duration, queue full total) of a permanently removed
+	// sink lane so stale series do not linger after removal.
+	DeleteSinkLaneMetrics(collection string, sinkType collections.Type, sinkID string)
 }
 
 // sinkSnapshot is an immutable copy of a sink's persisted configuration,

@@ -73,10 +73,11 @@ type lane struct {
 	// observer, when non-nil, receives each delivery attempt outcome (see
 	// SinkDeliveryObserver). It is nil in tests and when metrics are disabled.
 	observer SinkDeliveryObserver
-	// depthObs, when non-nil, receives the current bounded-queue depth at each
-	// queue transition (see SinkQueueDepthObserver). It is nil in tests and
-	// when metrics are disabled.
-	depthObs SinkQueueDepthObserver
+	// backpressureObs, when non-nil, receives the current bounded-queue depth at
+	// each queue transition plus the backpressure signals (capacity, enqueue
+	// wait, queue full) of this lane (see SinkBackpressureObserver). It is nil
+	// in tests and when metrics are disabled.
+	backpressureObs SinkBackpressureObserver
 	// logger, when non-nil, logs each delivery attempt outcome at the delivery
 	// boundary (see deliver). It is nil when delivery logging is not wired, in
 	// which case the logs are silently skipped.
@@ -96,7 +97,7 @@ type lane struct {
 }
 
 // newLaneFor creates a lane carrying a collection label, an optional delivery
-// observer, an optional queue-depth observer, and an optional delivery logger,
+// observer, an optional backpressure observer, and an optional delivery logger,
 // used by Register when the dispatcher has them.
 func newLaneFor(
 	sink *RuntimeSink,
@@ -104,18 +105,25 @@ func newLaneFor(
 	workerCount int,
 	collection string,
 	observer SinkDeliveryObserver,
-	depthObs SinkQueueDepthObserver,
+	backpressureObs SinkBackpressureObserver,
 	logger *slog.Logger,
 ) *lane {
 	l := &lane{
-		sink:       sink,
-		jobs:       make(chan job, queueSize),
-		reject:     make(chan struct{}),
-		stop:       make(chan struct{}),
-		collection: collection,
-		observer:   observer,
-		depthObs:   depthObs,
-		logger:     logger,
+		sink:            sink,
+		jobs:            make(chan job, queueSize),
+		reject:          make(chan struct{}),
+		stop:            make(chan struct{}),
+		collection:      collection,
+		observer:        observer,
+		backpressureObs: backpressureObs,
+		logger:          logger,
+	}
+	// Set the configured capacity once, before the workers start, so the lane
+	// reports its bounded-queue capacity exactly once at registration. Runs
+	// while Register holds the dispatcher mutex: the observer never calls back
+	// into the dispatcher.
+	if l.backpressureObs != nil {
+		l.backpressureObs.SetSinkQueueCapacity(l.collection, l.sink.Type, l.sink.ID, queueSize)
 	}
 	l.wg.Add(workerCount)
 	for i := 0; i < workerCount; i++ {
@@ -125,12 +133,12 @@ func newLaneFor(
 }
 
 // setQueueDepth publishes the current queue depth (len of the jobs channel) to
-// the optional depth observer. len is safe to read at any time because the
-// jobs channel is never closed. depth can never be negative (channel length),
-// so no clamping is required.
+// the optional backpressure observer. len is safe to read at any time because
+// the jobs channel is never closed. depth can never be negative (channel
+// length), so no clamping is required.
 func (l *lane) setQueueDepth() {
-	if l.depthObs != nil {
-		l.depthObs.ObserveSinkQueueDepth(l.collection, l.sink.Type, l.sink.ID, len(l.jobs))
+	if l.backpressureObs != nil {
+		l.backpressureObs.ObserveSinkQueueDepth(l.collection, l.sink.Type, l.sink.ID, len(l.jobs))
 	}
 }
 
@@ -242,6 +250,14 @@ func sinkIDOrDash(id string) string {
 // any error means the job was not accepted and should be treated as a
 // per-sink delivery failure.
 //
+// Backpressure observability: submit first probes the queue with a single
+// non-blocking send (one extra non-blocking select; no behavior change). If it
+// wins, the job is placed immediately and the (near-zero) enqueue wait is
+// observed. If the queue is full at probe time, the queue-full counter is
+// incremented once and submit blocks exactly as before in the slow-path select,
+// observing the enqueue wait only on successful placement. Wait duration is
+// never observed when the submit fails (ctx cancelled / lane closed).
+//
 // stateMu is released before the potentially blocking enqueue so a full queue
 // never holds close hostage: close flips closed and closes reject, which
 // unblocks this select with errLaneClosed. The in-flight registration in
@@ -263,9 +279,34 @@ func (l *lane) submit(ctx context.Context, j job) error {
 
 	defer l.submitWG.Done()
 
+	start := time.Now()
+
+	// Probe once, non-blocking, to detect an already-full queue. A full queue
+	// must keep blocking exactly as before; this only records the backpressure
+	// condition once per enqueue attempt (it does not spin or re-check while
+	// blocked). The non-blocking select is race-free: it either wins a send or
+	// observes a full queue at this instant.
 	select {
 	case l.jobs <- j:
 		l.setQueueDepth()
+		if l.backpressureObs != nil {
+			l.backpressureObs.ObserveSinkEnqueueWait(l.collection, l.sink.Type, l.sink.ID, time.Since(start))
+		}
+		return nil
+	default:
+		if l.backpressureObs != nil {
+			l.backpressureObs.IncSinkQueueFull(l.collection, l.sink.Type, l.sink.ID)
+		}
+	}
+
+	// Slow path: the queue was full at probe time. Block exactly as before,
+	// observing the enqueue wait only when the job is successfully placed.
+	select {
+	case l.jobs <- j:
+		l.setQueueDepth()
+		if l.backpressureObs != nil {
+			l.backpressureObs.ObserveSinkEnqueueWait(l.collection, l.sink.Type, l.sink.ID, time.Since(start))
+		}
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
