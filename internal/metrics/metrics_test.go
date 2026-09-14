@@ -28,6 +28,7 @@ func TestRegistration(t *testing.T) {
 	m.SetWatcherRunning("users", true)
 	m.SetRetryQueueDepth("users", 1)
 	m.SetDLQEntries("users", 1)
+	m.ObserveSinkQueueDepth("users", collections.SinkTypeHTTP, "s1", 3)
 
 	gathered, err := m.registry.Gather()
 	require.NoError(t, err)
@@ -43,6 +44,7 @@ func TestRegistration(t *testing.T) {
 		sinkDeliveryDurationName,
 		watcherRunningName,
 		retryQueueDepthName,
+		sinkQueueDepthName,
 		dlqEntriesName,
 	} {
 		assert.True(t, names[name], "metric family %s must be registered", name)
@@ -199,6 +201,51 @@ func TestGauges(t *testing.T) {
 	assert.Equal(t, 7.0, testutil.ToFloat64(m.dlqEntries.WithLabelValues("users")))
 }
 
+// TestSinkQueueDepth verifies the sink queue depth gauge records per
+// (collection, sink_type, sink_id), overwrites on re-set, keeps the label set
+// exactly {collection, sink_type, sink_id}, and that a delete removes the
+// series (DeleteLabelValues returns true once then false).
+func TestSinkQueueDepth(t *testing.T) {
+	m := New()
+
+	m.ObserveSinkQueueDepth("users", collections.SinkTypeHTTP, "s1", 3)
+	assert.Equal(t, 3.0, testutil.ToFloat64(
+		m.sinkQueueDepth.WithLabelValues("users", string(collections.SinkTypeHTTP), "s1")))
+	assert.Equal(t, 0.0, testutil.ToFloat64(
+		m.sinkQueueDepth.WithLabelValues("users", string(collections.SinkTypeHTTP), "s2")),
+		"a distinct sink id must be a distinct series")
+
+	// The gauge overwrites rather than accumulates (it is a gauge, not a counter).
+	m.ObserveSinkQueueDepth("users", collections.SinkTypeHTTP, "s1", 5)
+	m.ObserveSinkQueueDepth("users", collections.SinkTypeHTTP, "s1", 2)
+	assert.Equal(t, 2.0, testutil.ToFloat64(
+		m.sinkQueueDepth.WithLabelValues("users", string(collections.SinkTypeHTTP), "s1")))
+
+	// Assert the exact label set (names + values) via a gathered metric slice.
+	families, err := m.Registry().Gather()
+	require.NoError(t, err)
+	for _, mf := range families {
+		if mf.GetName() != sinkQueueDepthName {
+			continue
+		}
+		metric := mf.GetMetric()[0]
+		labels := map[string]string{}
+		for _, l := range metric.GetLabel() {
+			labels[l.GetName()] = l.GetValue()
+		}
+		assert.Equal(t, map[string]string{
+			collectionLabel: "users",
+			sinkTypeLabel:   string(collections.SinkTypeHTTP),
+			sinkIDLabel:     "s1",
+		}, labels, "the sink queue depth gauge must expose exactly collection/sink_type/sink_id")
+	}
+
+	// Delete removes the series: DeleteLabelValues reports true once, then false.
+	assert.True(t, m.sinkQueueDepth.DeleteLabelValues("users", string(collections.SinkTypeHTTP), "s1"))
+	assert.False(t, m.sinkQueueDepth.DeleteLabelValues("users", string(collections.SinkTypeHTTP), "s1"),
+		"deleting a removed series must report false")
+}
+
 // TestNilSafety verifies every method is a no-op (no panic) on a nil receiver.
 func TestNilSafety(t *testing.T) {
 	var m *Metrics
@@ -208,6 +255,8 @@ func TestNilSafety(t *testing.T) {
 		m.SetWatcherRunning("users", true)
 		m.SetRetryQueueDepth("users", 1)
 		m.SetDLQEntries("users", 1)
+		m.ObserveSinkQueueDepth("users", collections.SinkTypeHTTP, "s1", 1)
+		m.DeleteSinkQueueDepth("users", collections.SinkTypeHTTP, "s1")
 		m.ObserveSinkDelivery("users", collections.SinkTypeHTTP, 0, assert.AnError)
 	})
 	assert.Nil(t, m.Registry())

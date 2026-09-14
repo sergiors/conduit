@@ -17,7 +17,7 @@
 //
 // Usage:
 //
-//	d := dispatch.NewDispatcher(dispatch.Config{}, nil, nil) // default per-sink lane config
+//	d := dispatch.NewDispatcher(dispatch.Config{}, nil, nil, nil) // default per-sink lane config
 //	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 //	transport := dispatch.BuildTransport(ctx, "collection", sink.Type, sink.Spec, logger)
 //	d.Register("collection", dispatch.NewRuntimeSink(sink, transport))

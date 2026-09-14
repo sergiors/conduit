@@ -58,7 +58,7 @@ func dispatchInsert(t *testing.T, d *Dispatcher, collection string) {
 func TestLaneDeliveryLogging(t *testing.T) {
 	t.Run("success logs succeeded line", func(t *testing.T) {
 		var buf safeBuffer
-		d := NewDispatcher(Config{}, nil, bufferLogger(&buf))
+		d := NewDispatcher(Config{}, nil, nil, bufferLogger(&buf))
 
 		sink := NewRuntimeSink(collections.Sink{ID: "s1", Type: collections.SinkTypeHTTP}, &MockTransport{})
 		d.Register("users", sink)
@@ -75,7 +75,7 @@ func TestLaneDeliveryLogging(t *testing.T) {
 
 	t.Run("failure logs failed line with error", func(t *testing.T) {
 		var buf safeBuffer
-		d := NewDispatcher(Config{}, nil, bufferLogger(&buf))
+		d := NewDispatcher(Config{}, nil, nil, bufferLogger(&buf))
 
 		sink := NewRuntimeSink(collections.Sink{ID: "s1", Type: collections.SinkTypeHTTP}, &MockTransport{shouldFail: true})
 		d.Register("users", sink)
@@ -91,7 +91,7 @@ func TestLaneDeliveryLogging(t *testing.T) {
 
 	t.Run("empty sink id renders as dash", func(t *testing.T) {
 		var buf safeBuffer
-		d := NewDispatcher(Config{}, nil, bufferLogger(&buf))
+		d := NewDispatcher(Config{}, nil, nil, bufferLogger(&buf))
 
 		sink := NewRuntimeSink(collections.Sink{ID: "", Type: collections.SinkTypeHTTP}, &MockTransport{})
 		d.Register("users", sink)
@@ -105,7 +105,7 @@ func TestLaneDeliveryLogging(t *testing.T) {
 	t.Run("no logger produces no delivery output", func(t *testing.T) {
 		var buf safeBuffer
 		// Observer present, logger nil: delivery metrics still flow but no logs.
-		d := NewDispatcher(Config{}, &recordingObserver{}, nil)
+		d := NewDispatcher(Config{}, &recordingObserver{}, nil, nil)
 
 		sink := NewRuntimeSink(collections.Sink{ID: "s1", Type: collections.SinkTypeHTTP}, &MockTransport{})
 		d.Register("users", sink)
@@ -115,7 +115,7 @@ func TestLaneDeliveryLogging(t *testing.T) {
 	})
 
 	t.Run("nil logger with failing delivery does not panic", func(t *testing.T) {
-		d := NewDispatcher(Config{}, nil, nil) // nil observer and nil logger
+		d := NewDispatcher(Config{}, nil, nil, nil) // nil observer, nil depth observer and nil logger
 		sink := NewRuntimeSink(collections.Sink{ID: "s1", Type: collections.SinkTypeHTTP}, &MockTransport{shouldFail: true})
 		d.Register("users", sink)
 
@@ -129,7 +129,7 @@ func TestLaneDeliveryLogging(t *testing.T) {
 // success semantics.
 func TestLaneDeliveryLoggingFilteredNoOp(t *testing.T) {
 	var buf safeBuffer
-	d := NewDispatcher(Config{}, nil, bufferLogger(&buf))
+	d := NewDispatcher(Config{}, nil, nil, bufferLogger(&buf))
 
 	// Sink accepts only INSERT; dispatch MODIFY so Send returns nil without a
 	// transport reach. Outcome is success.

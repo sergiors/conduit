@@ -80,7 +80,7 @@ func TestCalculateNextRetry(t *testing.T) {
 
 func TestProcessRetryEvent(t *testing.T) {
 	t.Run("successful dispatch skips retry", func(t *testing.T) {
-		dispatcher := dispatch.NewDispatcher(dispatch.Config{}, nil, nil)
+		dispatcher := dispatch.NewDispatcher(dispatch.Config{}, nil, nil, nil)
 		// Register a mock transport that always succeeds wrapped in a runtime sink.
 		dispatcher.Register("users", dispatch.NewRuntimeSink(collections.Sink{}, &successTransport{}))
 
@@ -106,7 +106,7 @@ func TestProcessRetryEvent(t *testing.T) {
 	})
 
 	t.Run("max retries exceeded skips DLQ when dlq store is nil", func(t *testing.T) {
-		dispatcher := dispatch.NewDispatcher(dispatch.Config{}, nil, nil)
+		dispatcher := dispatch.NewDispatcher(dispatch.Config{}, nil, nil, nil)
 		processor := NewProcessor(nil, nil, dispatcher, DefaultConfig(), discardLogger)
 
 		ctx := context.Background()
@@ -363,7 +363,7 @@ func (f *fakeDLQ) CreateDLQEntry(ctx context.Context, entry collections.DLQEntry
 
 func TestProcessRetryEventDispatchFailure(t *testing.T) {
 	newDispatcher := func() *dispatch.Dispatcher {
-		d := dispatch.NewDispatcher(dispatch.Config{}, nil, nil)
+		d := dispatch.NewDispatcher(dispatch.Config{}, nil, nil, nil)
 		d.Register("users", dispatch.NewRuntimeSink(collections.Sink{}, &failingTransport{}))
 		return d
 	}
@@ -456,7 +456,7 @@ func TestProcessRetryEventDispatchFailure(t *testing.T) {
 		store := newFakeStore()
 		original := makeEvent(0, 5, time.Now().Add(-time.Second))
 
-		dispatcher := dispatch.NewDispatcher(dispatch.Config{}, nil, nil)
+		dispatcher := dispatch.NewDispatcher(dispatch.Config{}, nil, nil, nil)
 		dispatcher.Register("users", dispatch.NewRuntimeSink(collections.Sink{}, &successTransport{}))
 
 		p := NewProcessor(store, nil, dispatcher, DefaultConfig(), discardLogger)
@@ -471,7 +471,7 @@ func TestProcessRetryEventDispatchFailure(t *testing.T) {
 
 func TestProcessRetryEventMaxRetries(t *testing.T) {
 	newDispatcher := func() *dispatch.Dispatcher {
-		d := dispatch.NewDispatcher(dispatch.Config{}, nil, nil)
+		d := dispatch.NewDispatcher(dispatch.Config{}, nil, nil, nil)
 		d.Register("users", dispatch.NewRuntimeSink(collections.Sink{}, &successTransport{}))
 		return d
 	}

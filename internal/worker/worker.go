@@ -93,7 +93,7 @@ func NewWorker(cfg config.Config, logger *slog.Logger) (*Worker, error) {
 	// the worker's logger. Delivery logging is independent of metrics, so the
 	// logger is always wired; the observer (metricsInstance) may be a nil
 	// pointer, which is safe because ObserveSinkDelivery is nil-receiver safe.
-	dispatcher := dispatch.NewDispatcher(dispatch.Config{}, metricsInstance, logger)
+	dispatcher := dispatch.NewDispatcher(dispatch.Config{}, metricsInstance, metricsInstance, logger)
 
 	// Initialize retry processor. The collections.Manager owns the MongoDB DLQ
 	// (config.dlq) and is passed as the DLQ dependency for exhausted retry

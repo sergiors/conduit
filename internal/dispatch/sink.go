@@ -23,6 +23,19 @@ type SinkDeliveryObserver interface {
 	ObserveSinkDelivery(collection string, sinkType collections.Type, duration time.Duration, err error)
 }
 
+// SinkQueueDepthObserver receives periodic queue-depth observations from sink
+// lanes. It is optional and separate from SinkDeliveryObserver so only
+// implementations that track per-lane queue gauges need to implement it
+// (satisfied by *metrics.Metrics; fakes in tests may ignore it).
+type SinkQueueDepthObserver interface {
+	// ObserveSinkQueueDepth records the current number of jobs waiting in a
+	// sink lane's bounded queue.
+	ObserveSinkQueueDepth(collection string, sinkType collections.Type, sinkID string, depth int)
+	// DeleteSinkQueueDepth removes the queue-depth series of a permanently
+	// removed sink lane so stale series do not linger after removal.
+	DeleteSinkQueueDepth(collection string, sinkType collections.Type, sinkID string)
+}
+
 // sinkSnapshot is an immutable copy of a sink's persisted configuration,
 // swapped atomically so Send evaluates against a consistent view without a
 // lock.

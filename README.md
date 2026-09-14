@@ -430,6 +430,8 @@ exposed metric families are:
   per-sink delivery attempt durations.
 - `conduit_retry_queue_depth{collection}` — gauge of a collection's retry queue
   depth (refreshed every 15s).
+- `conduit_sink_queue_depth{collection,sink_type,sink_id}` — gauge of the current
+  number of events waiting in a sink lane's bounded queue.
 - `conduit_dlq_entries{collection}` — gauge of a collection's dead-letter entry
   count (refreshed every 15s).
 

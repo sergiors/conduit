@@ -227,6 +227,31 @@ func TestMetricsObserverIsMetrics(t *testing.T) {
 	})
 }
 
+// TestMetricsQueueDepthObserverIsMetrics verifies the same *metrics.Metrics
+// instance satisfies dispatch.SinkQueueDepthObserver and forwards queue-depth
+// observations to the per-lane sink queue gauge.
+func TestMetricsQueueDepthObserverIsMetrics(t *testing.T) {
+	m := metrics.New()
+	var obs dispatch.SinkQueueDepthObserver = m
+	obs.ObserveSinkQueueDepth("users", collections.SinkTypeHTTP, "s1", 3)
+
+	assert.Equal(t, 3.0, gaugeValue(t, m, "conduit_sink_queue_depth",
+		"collection", "users", "sink_type", string(collections.SinkTypeHTTP), "sink_id", "s1"))
+
+	// Observed through the interface, the same value as via the metrics method.
+	m.ObserveSinkQueueDepth("users", collections.SinkTypeHTTP, "s1", 7)
+	assert.Equal(t, 7.0, gaugeValue(t, m, "conduit_sink_queue_depth",
+		"collection", "users", "sink_type", string(collections.SinkTypeHTTP), "sink_id", "s1"))
+
+	// A nil *Metrics wrapped in the interface is a no-op (its own nil check).
+	var nilMetrics *metrics.Metrics
+	require.NotPanics(t, func() {
+		var nillObs dispatch.SinkQueueDepthObserver = nilMetrics
+		nillObs.ObserveSinkQueueDepth("users", collections.SinkTypeHTTP, "s1", 3)
+		nillObs.DeleteSinkQueueDepth("users", collections.SinkTypeHTTP, "s1")
+	})
+}
+
 // gaugeValue reads the current value of a counter/gauge family for the given
 // exact label pair set from the registry, returning 0 if the series is absent.
 func gaugeValue(t *testing.T, m *metrics.Metrics, family string, labels ...string) float64 {

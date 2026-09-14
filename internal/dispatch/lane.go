@@ -73,6 +73,10 @@ type lane struct {
 	// observer, when non-nil, receives each delivery attempt outcome (see
 	// SinkDeliveryObserver). It is nil in tests and when metrics are disabled.
 	observer SinkDeliveryObserver
+	// depthObs, when non-nil, receives the current bounded-queue depth at each
+	// queue transition (see SinkQueueDepthObserver). It is nil in tests and
+	// when metrics are disabled.
+	depthObs SinkQueueDepthObserver
 	// logger, when non-nil, logs each delivery attempt outcome at the delivery
 	// boundary (see deliver). It is nil when delivery logging is not wired, in
 	// which case the logs are silently skipped.
@@ -92,14 +96,15 @@ type lane struct {
 }
 
 // newLaneFor creates a lane carrying a collection label, an optional delivery
-// observer, and an optional delivery logger, used by Register when the
-// dispatcher has them.
+// observer, an optional queue-depth observer, and an optional delivery logger,
+// used by Register when the dispatcher has them.
 func newLaneFor(
 	sink *RuntimeSink,
 	queueSize,
 	workerCount int,
 	collection string,
 	observer SinkDeliveryObserver,
+	depthObs SinkQueueDepthObserver,
 	logger *slog.Logger,
 ) *lane {
 	l := &lane{
@@ -109,6 +114,7 @@ func newLaneFor(
 		stop:       make(chan struct{}),
 		collection: collection,
 		observer:   observer,
+		depthObs:   depthObs,
 		logger:     logger,
 	}
 	l.wg.Add(workerCount)
@@ -116,6 +122,16 @@ func newLaneFor(
 		go l.run()
 	}
 	return l
+}
+
+// setQueueDepth publishes the current queue depth (len of the jobs channel) to
+// the optional depth observer. len is safe to read at any time because the
+// jobs channel is never closed. depth can never be negative (channel length),
+// so no clamping is required.
+func (l *lane) setQueueDepth() {
+	if l.depthObs != nil {
+		l.depthObs.ObserveSinkQueueDepth(l.collection, l.sink.Type, l.sink.ID, len(l.jobs))
+	}
 }
 
 // run is a worker goroutine. It services queued jobs and, once the lane is
@@ -131,12 +147,14 @@ func (l *lane) run() {
 				select {
 				case j := <-l.jobs:
 					l.deliver(j)
+					l.setQueueDepth()
 				default:
 					return
 				}
 			}
 		case j := <-l.jobs:
 			l.deliver(j)
+			l.setQueueDepth()
 		}
 	}
 }
@@ -247,6 +265,7 @@ func (l *lane) submit(ctx context.Context, j job) error {
 
 	select {
 	case l.jobs <- j:
+		l.setQueueDepth()
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -284,6 +303,9 @@ func (l *lane) close() error {
 		// Phase 2: only now tell the workers to stop normal service and drain.
 		close(l.stop)
 		l.wg.Wait()
+		// Queue fully drained and workers exited; publish a final depth of 0 so
+		// a removed lane does not leave a stale non-zero series behind.
+		l.setQueueDepth()
 		err = l.sink.Close()
 	})
 	return err

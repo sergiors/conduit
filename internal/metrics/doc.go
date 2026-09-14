@@ -25,6 +25,8 @@
 //     of per-sink delivery attempts.
 //   - conduit_retry_queue_depth{collection} — gauge of a collection's retry
 //     queue depth.
+//   - conduit_sink_queue_depth{collection,sink_type,sink_id} — gauge of the
+//     current number of events waiting in a sink lane's bounded queue.
 //   - conduit_dlq_entries{collection} — gauge of a collection's dead-letter
 //     entry count.
 //

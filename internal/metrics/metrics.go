@@ -35,9 +35,11 @@ const (
 	watcherRunningName       = "conduit_watcher_running"
 	retryQueueDepthName      = "conduit_retry_queue_depth"
 	dlqEntriesName           = "conduit_dlq_entries"
+	sinkQueueDepthName       = "conduit_sink_queue_depth"
 	collectionLabel          = "collection"
 	eventTypeLabel           = "event_type"
 	sinkTypeLabel            = "sink_type"
+	sinkIDLabel              = "sink_id"
 	outcomeLabel             = "outcome"
 )
 
@@ -59,6 +61,7 @@ type Metrics struct {
 	sinkDeliveryDuration *prometheus.HistogramVec
 	watcherRunning       *prometheus.GaugeVec
 	retryQueueDepth      *prometheus.GaugeVec
+	sinkQueueDepth       *prometheus.GaugeVec
 	dlqEntries           *prometheus.GaugeVec
 }
 
@@ -94,6 +97,10 @@ func New() *Metrics {
 			Name: dlqEntriesName,
 			Help: "Current number of dead-letter entries persisted for a collection.",
 		}, []string{collectionLabel}),
+		sinkQueueDepth: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: sinkQueueDepthName,
+			Help: "Current number of events waiting in a sink lane's bounded queue, by collection, sink type and sink id.",
+		}, []string{collectionLabel, sinkTypeLabel, sinkIDLabel}),
 	}
 
 	registry.MustRegister(
@@ -102,6 +109,7 @@ func New() *Metrics {
 		m.sinkDeliveryDuration,
 		m.watcherRunning,
 		m.retryQueueDepth,
+		m.sinkQueueDepth,
 		m.dlqEntries,
 	)
 
@@ -182,4 +190,23 @@ func (m *Metrics) SetDLQEntries(collection string, count int64) {
 		return
 	}
 	m.dlqEntries.WithLabelValues(collection).Set(float64(count))
+}
+
+// ObserveSinkQueueDepth sets the sink queue depth gauge for a sink lane to the
+// current number of queued events. It matches the interface method name used by
+// dispatch's queue-depth observation so *Metrics satisfies SinkQueueDepthObserver.
+func (m *Metrics) ObserveSinkQueueDepth(collection string, sinkType collections.Type, sinkID string, depth int) {
+	if m == nil {
+		return
+	}
+	m.sinkQueueDepth.WithLabelValues(collection, string(sinkType), sinkID).Set(float64(depth))
+}
+
+// DeleteSinkQueueDepth removes the sink queue depth gauge series for a
+// permanently removed sink lane so stale series do not linger.
+func (m *Metrics) DeleteSinkQueueDepth(collection string, sinkType collections.Type, sinkID string) {
+	if m == nil {
+		return
+	}
+	m.sinkQueueDepth.DeleteLabelValues(collection, string(sinkType), sinkID)
 }

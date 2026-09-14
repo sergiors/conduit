@@ -70,6 +70,9 @@ func TestSnapshotLinesFormat(t *testing.T) {
 	m.ObserveSinkDelivery("users", collections.SinkTypeHTTP, 1437*time.Millisecond, nil)
 	m.ObserveSinkDelivery("users", collections.SinkTypeHTTP, 2*time.Millisecond, assert.AnError)
 
+	// Sink queue depth gauge for one lane; labels sorted alphabetically.
+	m.ObserveSinkQueueDepth("users", collections.SinkTypeHTTP, "s1", 3)
+
 	families, err := m.Registry().Gather()
 	require.NoError(t, err)
 	lines := snapshotLines(families)
@@ -87,6 +90,9 @@ func TestSnapshotLinesFormat(t *testing.T) {
 	// Sink-delivery outcome counters use count=; labels are sorted by name.
 	assert.Contains(t, lines, `conduit_sink_deliveries_total{collection=users,outcome=success,sink_type=http} count=1`)
 	assert.Contains(t, lines, `conduit_sink_deliveries_total{collection=users,outcome=failure,sink_type=http} count=1`)
+
+	// Sink queue depth gauge uses value=; labels are sorted alphabetically.
+	assert.Contains(t, lines, `conduit_sink_queue_depth{collection=users,sink_id=s1,sink_type=http} value=3`)
 
 	// Histogram buckets must never be logged.
 	assert.NotContains(t, strings.Join(lines, "\n"), "bucket", "no line may reference histogram buckets")

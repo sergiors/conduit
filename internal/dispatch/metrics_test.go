@@ -50,7 +50,7 @@ func (r *recordingObserver) errs() []error {
 func TestDispatcherObserverDeliveries(t *testing.T) {
 	t.Run("success delivers one success observation", func(t *testing.T) {
 		obs := &recordingObserver{}
-		d := NewDispatcher(Config{}, obs, nil)
+		d := NewDispatcher(Config{}, obs, nil, nil)
 
 		sink := NewRuntimeSink(collections.Sink{ID: "s1", Type: collections.SinkTypeHTTP}, &MockTransport{})
 		d.Register("users", sink)
@@ -68,7 +68,7 @@ func TestDispatcherObserverDeliveries(t *testing.T) {
 
 	t.Run("failure delivers one failure observation", func(t *testing.T) {
 		obs := &recordingObserver{}
-		d := NewDispatcher(Config{}, obs, nil)
+		d := NewDispatcher(Config{}, obs, nil, nil)
 
 		sink := NewRuntimeSink(collections.Sink{ID: "s1", Type: collections.SinkTypeHTTP}, &MockTransport{shouldFail: true})
 		d.Register("users", sink)
@@ -84,7 +84,7 @@ func TestDispatcherObserverDeliveries(t *testing.T) {
 
 	t.Run("no matching sinks produces no observation", func(t *testing.T) {
 		obs := &recordingObserver{}
-		d := NewDispatcher(Config{}, obs, nil)
+		d := NewDispatcher(Config{}, obs, nil, nil)
 
 		// Register a sink for "users" but dispatch to "orders": no lanes match.
 		d.Register("users", NewRuntimeSink(collections.Sink{ID: "s1"}, &MockTransport{}))
@@ -96,7 +96,7 @@ func TestDispatcherObserverDeliveries(t *testing.T) {
 
 	t.Run("filtered no-op counts as success for the sink lane", func(t *testing.T) {
 		obs := &recordingObserver{}
-		d := NewDispatcher(Config{}, obs, nil)
+		d := NewDispatcher(Config{}, obs, nil, nil)
 
 		// A sink that only accepts INSERT; dispatch MODIFY so Send returns nil
 		// without a transport call. Outcome reflects the per-sink lane result.
@@ -117,7 +117,7 @@ func TestDispatcherObserverDeliveries(t *testing.T) {
 // TestNewDispatcherDefaultNoObserver proves the default constructor works with a
 // nil observer (no panics, no observations).
 func TestNewDispatcherDefaultNoObserver(t *testing.T) {
-	d := NewDispatcher(Config{}, nil, nil)
+	d := NewDispatcher(Config{}, nil, nil, nil)
 	require.NotNil(t, d)
 	d.Register("users", NewRuntimeSink(collections.Sink{ID: "s1"}, &MockTransport{}))
 	err := d.Dispatch(context.Background(), "users", streams.StreamRecord{RecordType: streams.InsertRecord})
@@ -126,7 +126,7 @@ func TestNewDispatcherDefaultNoObserver(t *testing.T) {
 
 // TestNewDispatcherNilObserver proves a nil observer is tolerated.
 func TestNewDispatcherNilObserver(t *testing.T) {
-	d := NewDispatcher(Config{}, nil, nil)
+	d := NewDispatcher(Config{}, nil, nil, nil)
 	require.NotNil(t, d)
 	d.Register("users", NewRuntimeSink(collections.Sink{ID: "s1"}, &MockTransport{}))
 	err := d.Dispatch(context.Background(), "users", streams.StreamRecord{RecordType: streams.InsertRecord})
@@ -137,7 +137,7 @@ func TestNewDispatcherNilObserver(t *testing.T) {
 // records multiple concurrent lanes reports each independently.
 func TestDispatcherObserverMultipleLanes(t *testing.T) {
 	obs := &recordingObserver{}
-	d := NewDispatcher(Config{}, obs, nil)
+	d := NewDispatcher(Config{}, obs, nil, nil)
 
 	good := NewRuntimeSink(collections.Sink{ID: "s1", Type: collections.SinkTypeHTTP}, &MockTransport{})
 	bad := NewRuntimeSink(collections.Sink{ID: "s2", Type: collections.SinkTypeRedis}, &MockTransport{shouldFail: true})
