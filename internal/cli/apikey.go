@@ -54,7 +54,8 @@ func apikeyCreateCommand(logger *slog.Logger) *cli.Command {
 }
 
 // runAPIKeyCreate opens MongoDB, creates a key with the given name, and prints
-// its id, name, and full plaintext secret — the only time the secret is shown.
+// its name and full plaintext secret — the only time the secret is shown — along
+// with its short public identifier. The internal MongoDB id is never printed.
 func runAPIKeyCreate(ctx context.Context, logger *slog.Logger, out io.Writer, name string) error {
 	client, cancel, err := openMongo(ctx, logger)
 	if err != nil {
@@ -75,7 +76,6 @@ func runAPIKeyCreate(ctx context.Context, logger *slog.Logger, out io.Writer, na
 	}
 
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintf(w, "ID\t%s\n", key.ID)
 	fmt.Fprintf(w, "Name\t%s\n", key.Name)
 	fmt.Fprintf(w, "Key\t%s\n", secret)
 	w.Flush()
@@ -97,8 +97,8 @@ func apikeyListCommand(logger *slog.Logger) *cli.Command {
 	}
 }
 
-// runAPIKeyList opens MongoDB and prints a bounded table of keys (id, name,
-// created, status) with no secret or hash.
+// runAPIKeyList opens MongoDB and prints a bounded table of keys (public
+// prefix, name, created, status) with no MongoDB id, no secret, and no hash.
 func runAPIKeyList(ctx context.Context, logger *slog.Logger, out io.Writer) error {
 	client, cancel, err := openMongo(ctx, logger)
 	if err != nil {
@@ -116,43 +116,44 @@ func runAPIKeyList(ctx context.Context, logger *slog.Logger, out io.Writer) erro
 	}
 
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tNAME\tCREATED\tSTATUS")
+	fmt.Fprintln(w, "KEY\tNAME\tCREATED\tSTATUS")
 	for _, k := range keys {
 		status := "active"
 		if k.RevokedAt != nil {
 			status = "revoked"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", k.ID, k.Name, k.CreatedAt.Format("2006-01-02 15:04"), status)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", k.Prefix, k.Name, k.CreatedAt.Format("2006-01-02 15:04"), status)
 	}
 	w.Flush()
 	return nil
 }
 
-// apikeyRevokeCommand returns the "conduit apikey revoke" command. Revoking an
-// already-revoked key succeeds silently (idempotent).
+// apikeyRevokeCommand returns the "conduit apikey revoke <key>" command, where
+// <key> is the short public identifier (e.g. sk-a8f3c2) shown by create and ls.
+// Revoking an already-revoked key succeeds silently (idempotent). urfave/cli v3
+// has no int-arg-count Required field on Command, so the number of positional
+// arguments is validated manually in the action.
 func apikeyRevokeCommand(logger *slog.Logger) *cli.Command {
-	var id string
 	return &cli.Command{
 		Name:      "revoke",
 		Usage:     "Revoke an API key",
-		ArgsUsage: " ",
-		Flags: []cli.Flag{
-			&cli.StringFlag{
-				Name:        "id",
-				Usage:       "API key ID",
-				Required:    true,
-				Destination: &id,
-			},
-		},
+		ArgsUsage: "<key>",
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			return runAPIKeyRevoke(ctx, logger, cmd.Writer, id)
+			args := cmd.Args()
+			if !args.Present() {
+				return fmt.Errorf("usage: conduit apikey revoke <key>")
+			}
+			if args.Len() > 1 {
+				return fmt.Errorf("usage: conduit apikey revoke <key>: unexpected extra argument %q", args.Get(1))
+			}
+			return runAPIKeyRevoke(ctx, logger, cmd.Writer, args.First())
 		},
 	}
 }
 
-// runAPIKeyRevoke opens MongoDB and revokes the key with the given id,
-// confirming the action to the operator.
-func runAPIKeyRevoke(ctx context.Context, logger *slog.Logger, out io.Writer, id string) error {
+// runAPIKeyRevoke opens MongoDB and revokes the key with the given public
+// identifier (prefix), confirming the action to the operator.
+func runAPIKeyRevoke(ctx context.Context, logger *slog.Logger, out io.Writer, prefix string) error {
 	client, cancel, err := openMongo(ctx, logger)
 	if err != nil {
 		return err
@@ -163,7 +164,7 @@ func runAPIKeyRevoke(ctx context.Context, logger *slog.Logger, out io.Writer, id
 	cfg := config.Load(logger)
 	manager := apikey.NewManager(client.Client, cfg.MongoDBDatabase, logger)
 
-	if err := manager.Revoke(ctx, id); err != nil {
+	if err := manager.RevokeByPrefix(ctx, prefix); err != nil {
 		return err
 	}
 	fmt.Fprintln(out, "API key revoked.")

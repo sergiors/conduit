@@ -67,16 +67,6 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  ui:
-    build:
-      context: ./ui
-      dockerfile: Dockerfile
-    ports:
-      - 80:80
-    depends_on:
-      - api
-    restart: unless-stopped
-
 volumes:
   mongo_data:
   redis_data:

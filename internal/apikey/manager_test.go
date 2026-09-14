@@ -109,22 +109,74 @@ func TestManager_RevokeAndIdempotency(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, ok)
 
-	// Revoke succeeds; the key no longer authenticates.
-	require.NoError(t, manager.Revoke(ctx, key.ID))
+	// Revoke succeeds (via the stored prefix); the key no longer authenticates.
+	require.NoError(t, manager.RevokeByPrefix(ctx, key.Prefix))
 	ok, err = manager.Authenticate(ctx, secret)
 	require.NoError(t, err)
 	assert.False(t, ok)
 
 	// Revoking again is idempotent (succeeds silently).
-	require.NoError(t, manager.Revoke(ctx, key.ID))
+	require.NoError(t, manager.RevokeByPrefix(ctx, key.Prefix))
 
-	// A nonexistent id returns ErrKeyNotFound.
-	err = manager.Revoke(ctx, "000000000000000000000000")
+	// An unknown prefix returns ErrKeyNotFound.
+	err = manager.RevokeByPrefix(ctx, "sk-000000")
+	require.ErrorIs(t, err, ErrKeyNotFound)
+}
+
+func TestManager_PrefixUniqueness(t *testing.T) {
+	manager, client, ctx := newTestManager(t)
+
+	// Two distinct keys must have distinct display prefixes.
+	key1, secret1, err := manager.Create(ctx, "prefix-a")
+	require.NoError(t, err)
+	key2, secret2, err := manager.Create(ctx, "prefix-b")
+	require.NoError(t, err)
+	require.NotEmpty(t, key1.Prefix)
+	require.NotEmpty(t, key2.Prefix)
+	require.NotEqual(t, key1.Prefix, key2.Prefix, "two keys must have different prefixes")
+	require.NotEqual(t, secret1, secret2)
+
+	// A fresh key matching no stored prefix authenticates, and revoking an
+	// unknown prefix is a not-found error.
+	err = manager.RevokeByPrefix(ctx, "sk-abcdef")
 	require.ErrorIs(t, err, ErrKeyNotFound)
 
-	// A malformed id is treated as not found.
-	err = manager.Revoke(ctx, "not-an-oid")
-	require.ErrorIs(t, err, ErrKeyNotFound)
+	// Both the unique keyHash index and the unique prefix index must exist.
+	indexes, err := client.Database(manager.coll.Database().Name()).
+		Collection(manager.coll.Name()).
+		Indexes().List(ctx)
+	require.NoError(t, err)
+
+	foundKeyHash := false
+	foundPrefix := false
+	for indexes.Next(ctx) {
+		var idx bson.M
+		require.NoError(t, indexes.Decode(&idx))
+		// The index key spec arrives as a primitive.M (map) that may also be
+		// decoded as a bson.D depending on the driver/MongoDB version; handle
+		// both by normalizing to map form.
+		switch k := idx["key"].(type) {
+		case bson.D:
+			for _, kv := range k {
+				switch kv.Key {
+				case "keyHash":
+					foundKeyHash = idx["unique"] == true
+				case "prefix":
+					foundPrefix = idx["unique"] == true
+				}
+			}
+		case bson.M:
+			if _, ok := k["keyHash"]; ok {
+				foundKeyHash = idx["unique"] == true
+			}
+			if _, ok := k["prefix"]; ok {
+				foundPrefix = idx["unique"] == true
+			}
+		}
+	}
+	require.NoError(t, indexes.Err())
+	assert.True(t, foundKeyHash, "unique keyHash index must exist")
+	assert.True(t, foundPrefix, "unique prefix index must exist")
 }
 
 func TestManager_ListSanitizedAndBounded(t *testing.T) {

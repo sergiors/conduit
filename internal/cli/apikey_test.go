@@ -17,11 +17,23 @@ func TestAPIKeyRequiredFlags_MissingName(t *testing.T) {
 	assert.Contains(t, err.Error(), "name")
 }
 
-// TestAPIKeyRequiredFlags_MissingID mirrors MissingName for the revoke command.
-func TestAPIKeyRequiredFlags_MissingID(t *testing.T) {
+// TestAPIKeyRevokeMissingArg: revoking with no positional argument is rejected
+// with a usage-style error before config.Load runs (so no env vars are needed).
+// The error must not be an empty-flag failure and must mention the expected usage.
+func TestAPIKeyRevokeMissingArg(t *testing.T) {
 	_, err := runRoot(t, []string{"apikey", "revoke"})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "id")
+	assert.Contains(t, err.Error(), "usage")
+	assert.Contains(t, err.Error(), "revoke <key>")
+}
+
+// TestAPIKeyRevokeHelpShowsPositionalSyntax: the revoke help (invoked without an
+// action) advertises the positional <key> syntax instead of an --id flag.
+func TestAPIKeyRevokeHelpShowsPositionalSyntax(t *testing.T) {
+	out, err := runRoot(t, []string{"apikey", "revoke", "--help"})
+	require.NoError(t, err)
+	assert.Contains(t, string(out), "<key>")
+	assert.NotContains(t, string(out), "--id")
 }
 
 // TestOpenMongoConnectFailure pins down openMongo's error contract: it fails at

@@ -104,18 +104,18 @@ func TestAuthMiddleware_KeyValidity(t *testing.T) {
 	rec = hit(server, "Bearer not-a-key")
 	assert.Equal(t, http.StatusUnauthorized, rec.Code, "malformed key must be rejected")
 
-	// Revoke the test key, then it must no longer authenticate. Find its id by
-	// name through the manager's List (records carry IDs and names).
+	// Revoke the test key, then it must no longer authenticate. Find its public
+	// prefix by name through the manager's List (records carry prefixes and names).
 	listed, err := keys.List(context.Background(), 0)
 	require.NoError(t, err)
-	var testID string
+	var testPrefix string
 	for _, k := range listed {
 		if k.Name == "test" {
-			testID = k.ID
+			testPrefix = k.Prefix
 		}
 	}
-	require.NotEmpty(t, testID, "test key must be present in list")
-	require.NoError(t, keys.Revoke(context.Background(), testID))
+	require.NotEmpty(t, testPrefix, "test key must be present in list")
+	require.NoError(t, keys.RevokeByPrefix(context.Background(), testPrefix))
 
 	rec = hit(server, "Bearer "+testToken)
 	assert.Equal(t, http.StatusUnauthorized, rec.Code, "revoked key must be rejected")

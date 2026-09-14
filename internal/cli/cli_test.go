@@ -78,10 +78,13 @@ func TestAPIKeySubcommandRegistration(t *testing.T) {
 			require.True(t, ok, "name flag must be a *cli.StringFlag")
 			assert.True(t, sf.Required, "create must require --name")
 		case "revoke":
-			f := requiredFlag(t, sub, "id")
-			sf, ok := f.(*cli.StringFlag)
-			require.True(t, ok, "id flag must be a *cli.StringFlag")
-			assert.True(t, sf.Required, "revoke must require --id")
+			// revoke no longer takes an --id flag; it takes a positional <key> args.
+			assert.Contains(t, sub.ArgsUsage, "<key>", "revoke help must show positional <key> syntax")
+			for _, f := range sub.Flags {
+				if f.Names()[0] == "id" {
+					t.Fatalf("revoke must not expose an --id flag, found %q", "id")
+				}
+			}
 		}
 	}
 }

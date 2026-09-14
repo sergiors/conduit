@@ -196,7 +196,6 @@ in MongoDB (`config.apiKeys`) and managed with the CLI.
 
 ```bash
 conduit apikey create --name my-key
-# ID    01K...
 # Name  my-key
 # Key   sk-...
 
@@ -206,8 +205,11 @@ conduit apikey create --name my-key
 - Create a key with `conduit apikey create --name <name>`. The full `sk-...`
   secret is shown **exactly once** at creation; only a hash is stored, so it
   cannot be recovered later.
-- List keys with `conduit apikey ls`, and revoke one with
-  `conduit apikey revoke --id <id>`.
+- List keys with `conduit apikey ls` — each row shows the key's short public
+  identifier (e.g. `sk-a8f3c2`), its name, creation time, and status.
+- Revoke one with `conduit apikey revoke <key>`, where `<key>` is the short
+  identifier shown by `ls` (e.g. `conduit apikey revoke sk-a8f3c2`). Revoking
+  is idempotent.
 - Send the key as `Authorization: Bearer <sk-...>` on every `/api/*` request.
 - `/health` is exempt and requires no token.
 - A revoked or unknown key is rejected with `401`; the API refuses requests

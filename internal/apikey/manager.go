@@ -19,9 +19,9 @@ var (
 	// ErrValidation is returned when a create request is malformed (e.g. an
 	// empty name).
 	ErrValidation = errors.New("validation failed")
-	// ErrKeyNotFound is returned when a revoke targets an id that does not
-	// exist. Revoking an already-revoked key is NOT an error (it is idempotent
-	// and succeeds silently).
+	// ErrKeyNotFound is returned when a revoke targets a prefix that does not
+	// match any stored key. Revoking an already-revoked key is NOT an error (it
+	// is idempotent and succeeds silently).
 	ErrKeyNotFound = errors.New("api key not found")
 )
 
@@ -54,15 +54,33 @@ func NewManager(client *mongo.Client, database string, logger *slog.Logger) *Man
 	}
 }
 
-// CreateIndex creates the unique index on keyHash that backs both the
-// at-most-once storage of any secret and the fast Authenticate lookup.
+// CreateIndex creates the unique indexes that back the manager's guarantees:
+// the unique index on keyHash (at-most-once storage of any secret plus the
+// fast Authenticate lookup) and the unique index on prefix (the public
+// identifier used for revoke lookups). Creating the prefix index may fail on
+// legacy data that already contains duplicate prefixes; each index is still
+// attempted so a failure on one does not silently skip the other.
 func (m *Manager) CreateIndex(ctx context.Context) error {
-	index := mongo.IndexModel{
-		Keys:    bson.D{{Key: "keyHash", Value: 1}},
-		Options: options.Index().SetUnique(true),
+	models := []mongo.IndexModel{
+		{
+			Keys:    bson.D{{Key: "keyHash", Value: 1}},
+			Options: options.Index().SetUnique(true),
+		},
+		{
+			Keys:    bson.D{{Key: "prefix", Value: 1}},
+			Options: options.Index().SetUnique(true),
+		},
 	}
-	_, err := m.coll.Indexes().CreateOne(ctx, index)
-	return err
+
+	var errs []error
+	for _, index := range models {
+		if _, err := m.coll.Indexes().CreateOne(ctx, index); err != nil {
+			// Collect rather than return so a failure on one index does not
+			// silently skip the other.
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // Create validates name, generates a fresh key, and persists only its hash. It
@@ -159,32 +177,26 @@ func (m *Manager) List(ctx context.Context, limit int) ([]Key, error) {
 	return keys, nil
 }
 
-// Revoke permanently revokes the key with the given id. Revoking an
-// already-revoked key succeeds silently (idempotent); revoking a nonexistent id
-// returns ErrKeyNotFound. The revocation is a race-tolerant conditional update
-// that sets revokedAt only when it is currently absent, so two concurrent
-// revocations both succeed.
-func (m *Manager) Revoke(ctx context.Context, id string) error {
-	oid, err := primitive.ObjectIDFromHex(id)
-	if err != nil {
-		return ErrKeyNotFound
-	}
+// RevokeByPrefix permanently revokes the key whose public prefix field matches
+// prefix. Revoking an already-revoked key succeeds silently (idempotent);
+// revoking a prefix that matches no key returns ErrKeyNotFound. Match is on the
+// exact stored "prefix" string. The revocation is a race-tolerant conditional
+// update that sets revokedAt only when it is currently absent, so two concurrent
+// revocations of the same key both succeed.
+func (m *Manager) RevokeByPrefix(ctx context.Context, prefix string) error {
+	filter := bson.M{"prefix": prefix, "revokedAt": bson.M{"$exists": false}}
 
 	now := time.Now()
-	res, err := m.coll.UpdateOne(
-		ctx,
-		bson.M{"_id": oid, "revokedAt": bson.M{"$exists": false}},
-		bson.M{"$set": bson.M{"revokedAt": now}},
-	)
+	res, err := m.coll.UpdateOne(ctx, filter, bson.M{"$set": bson.M{"revokedAt": now}})
 	if err != nil {
 		return fmt.Errorf("revoke api key: %w", err)
 	}
 	if res.MatchedCount == 0 {
 		// Either the key does not exist, or it is already revoked. Distinguish so
-		// a nonexistent id is surfaced as ErrKeyNotFound while an already-revoked
+		// a nonexistent key is surfaced as ErrKeyNotFound while an already-revoked
 		// key (revoke being idempotent) succeeds.
 		var existing Key
-		err := m.coll.FindOne(ctx, bson.M{"_id": oid}, options.FindOne().SetProjection(bson.M{"_id": 1})).Decode(&existing)
+		err := m.coll.FindOne(ctx, bson.M{"prefix": prefix}, options.FindOne().SetProjection(bson.M{"_id": 1})).Decode(&existing)
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			return ErrKeyNotFound
 		}

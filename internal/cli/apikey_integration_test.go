@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"conduit/internal/apikey"
 	"conduit/internal/mongo"
 
 	"github.com/stretchr/testify/assert"
@@ -70,13 +71,18 @@ func TestAPIKeyCreateCommand(t *testing.T) {
 
 	require.Contains(t, out, "Save this key. It will not be shown again.")
 
-	idRow := rowValue(t, findRow(t, out, "ID"))
-	require.NotEmpty(t, idRow)
+	// The internal MongoDB id must not be surfaced in create output.
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) > 0 && fields[0] == "ID" {
+			t.Fatalf("create must not print an ID row, found %q", line)
+		}
+	}
 }
 
 // TestAPIKeyList_HidesSensitiveData verifies that listing never leaks the
-// plaintext secret, its random portion, or the stored hash — regardless of
-// status.
+// plaintext secret, its random portion, the stored hash, or the MongoDB id —
+// regardless of status. It shows only the short public prefix.
 func TestAPIKeyList_HidesSensitiveData(t *testing.T) {
 	cliKeyEnv(t)
 
@@ -84,18 +90,19 @@ func TestAPIKeyList_HidesSensitiveData(t *testing.T) {
 	root, createBuf := newRootCommandForTest(t)
 	err := root.Run(context.Background(), []string{"conduit", "apikey", "create", "--name", "list-me"})
 	require.NoError(t, err)
-	id := rowValue(t, findRow(t, createBuf.String(), "ID"))
 	secret := rowValue(t, findRow(t, createBuf.String(), "Key"))
-	require.NotEmpty(t, id)
+	require.NotEmpty(t, secret)
 	require.True(t, strings.HasPrefix(secret, "sk-"))
 	suffix := strings.TrimPrefix(secret, "sk-")
+	prefix := apikey.PrefixOf(secret)
 
-	// List must show the key row but never the secret material.
+	// List must show the key's prefix row but never the secret material or id.
 	root2, listBuf := newRootCommandForTest(t)
 	err = root2.Run(context.Background(), []string{"conduit", "apikey", "ls"})
 	require.NoError(t, err)
 	out := listBuf.String()
-	require.Contains(t, out, id)
+	require.Contains(t, out, "KEY")
+	require.Contains(t, out, prefix)
 	require.Contains(t, out, "list-me")
 	require.Contains(t, out, "active")
 	require.Contains(t, out, "CREATED")
@@ -105,7 +112,7 @@ func TestAPIKeyList_HidesSensitiveData(t *testing.T) {
 
 	// After revoking, the status flips to revoked and the secret is still absent.
 	root3, _ := newRootCommandForTest(t)
-	err = root3.Run(context.Background(), []string{"conduit", "apikey", "revoke", "--id", id})
+	err = root3.Run(context.Background(), []string{"conduit", "apikey", "revoke", prefix})
 	require.NoError(t, err)
 
 	root4, list2Buf := newRootCommandForTest(t)
@@ -124,30 +131,33 @@ func TestAPIKeyRevoke(t *testing.T) {
 	root, createBuf := newRootCommandForTest(t)
 	err := root.Run(context.Background(), []string{"conduit", "apikey", "create", "--name", "revoke-me"})
 	require.NoError(t, err)
-	id := rowValue(t, findRow(t, createBuf.String(), "ID"))
-	require.NotEmpty(t, id)
+	secret := rowValue(t, findRow(t, createBuf.String(), "Key"))
+	require.NotEmpty(t, secret)
+	require.True(t, strings.HasPrefix(secret, "sk-"))
+	prefix := apikey.PrefixOf(secret)
 
 	root2, revBuf := newRootCommandForTest(t)
-	err = root2.Run(context.Background(), []string{"conduit", "apikey", "revoke", "--id", id})
+	err = root2.Run(context.Background(), []string{"conduit", "apikey", "revoke", prefix})
 	require.NoError(t, err)
 	require.Contains(t, revBuf.String(), "API key revoked.")
 
-	// Revoking the same id again is idempotent: no error, same confirmation.
+	// Revoking the same prefix again is idempotent: no error, same confirmation.
 	root3, rev2Buf := newRootCommandForTest(t)
-	err = root3.Run(context.Background(), []string{"conduit", "apikey", "revoke", "--id", id})
+	err = root3.Run(context.Background(), []string{"conduit", "apikey", "revoke", prefix})
 	require.NoError(t, err)
 	require.Contains(t, rev2Buf.String(), "API key revoked.")
 
-	// A well-formed-but-nonexistent hex id is ErrKeyNotFound, as is a malformed id.
+	// An unknown prefix returns ErrKeyNotFound.
 	root4, _ := newRootCommandForTest(t)
-	err = root4.Run(context.Background(), []string{"conduit", "apikey", "revoke", "--id", "0123456789abcdef01234567"})
+	err = root4.Run(context.Background(), []string{"conduit", "apikey", "revoke", "sk-000000"})
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "api key not found")
 
+	// A missing positional argument is a usage error.
 	root5, _ := newRootCommandForTest(t)
-	err = root5.Run(context.Background(), []string{"conduit", "apikey", "revoke", "--id", "not-an-id"})
+	err = root5.Run(context.Background(), []string{"conduit", "apikey", "revoke"})
 	require.Error(t, err)
-	assert.ErrorContains(t, err, "api key not found")
+	assert.ErrorContains(t, err, "revoke <key>")
 }
 
 // findRow returns the trimmed line whose first whitespace-separated field equals
