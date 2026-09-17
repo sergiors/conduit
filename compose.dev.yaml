@@ -35,7 +35,12 @@ services:
       dockerfile: Dockerfile
     container_name: conduit
     command: ["conduit", "start"]
-    env_file: .env.dev
+    environment:
+      - MONGODB_URI=mongodb://mongo:27017/?replicaSet=rs0
+      - MONGODB_DATABASE=conduit
+      - REDIS_URI=redis://redis:6379
+      - PORT=8080
+      - METRICS_ADDR=:9090
     ports:
       - 8080:8080
       - 9090:9090

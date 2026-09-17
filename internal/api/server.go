@@ -6,13 +6,11 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"time"
 
 	"conduit/internal/apikey"
 	"conduit/internal/collections"
 	"conduit/internal/config"
 	"conduit/internal/mongo"
-	"conduit/internal/redis"
 
 	"github.com/gin-gonic/gin"
 )
@@ -46,72 +44,22 @@ func (s *Server) Router() *gin.Engine {
 	return r
 }
 
-// Run bootstraps and starts the API server. It does exactly what the former
-// cmd/api main() did: connects MongoDB and Redis, creates the collection index,
-// wires the publish/purge hooks, and blocks serving HTTP until the caller's
-// context (the process root context — cancellation/SIGTERM is owned by the
-// executable boundary) is cancelled, then performs a graceful HTTP shutdown
-// bounded by the configured shutdown timeout.
+// Start serves HTTP until the caller's context is cancelled (the process root
+// context — cancellation/SIGTERM is owned by the executable boundary), then
+// performs a graceful HTTP shutdown bounded by cfg.ShutdownTimeout (the same
+// window the worker uses for its drain). An immediate serve failure (e.g. port
+// conflict) is returned so the runtime can shut the other component down.
 //
-// Config is passed in (not loaded here). The function returns an error instead
-// of a fatal exit so the CLI can exit non-zero on failure;
-// fatal-on-invalid-config still happens earlier in config.Load.
-func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
-	// Use a generous timeout for startup: MongoDB may still be electing a PRIMARY
-	// after a restart, and NewClient waits for it before returning. startupCtx
-	// only bounds the initialization phase; the serve/shutdown loop below waits
-	// on ctx itself (the unbounded process root context).
-	startupCtx, cancelStartup := context.WithTimeout(ctx, 60*time.Second)
-	defer cancelStartup()
-
-	mongoClient, err := mongo.NewClient(startupCtx, mongo.Config{
-		URI:      cfg.MongoDBURI,
-		Database: cfg.MongoDBDatabase,
-	}, logger)
-	if err != nil {
-		return fmt.Errorf("failed to connect to MongoDB: %w", err)
-	}
-	defer mongoClient.Close(context.Background())
-
-	collectionsManager := collections.NewManager(mongoClient.Client, cfg.MongoDBDatabase, logger)
-	if err := collectionsManager.CreateIndex(startupCtx); err != nil {
-		return fmt.Errorf("failed to create collection index: %w", err)
-	}
-
-	apiKeys := apikey.NewManager(mongoClient.Client, cfg.MongoDBDatabase, logger)
-	if err := apiKeys.CreateIndex(startupCtx); err != nil {
-		return fmt.Errorf("failed to create api key index: %w", err)
-	}
-
-	redisClient, err := redis.NewClient(startupCtx, redis.Config{
-		URI:    cfg.RedisURI,
-		Prefix: "cdc:",
-	}, logger)
-	if err != nil {
-		return fmt.Errorf("failed to connect to Redis: %w", err)
-	}
-	defer redisClient.Close()
-
-	// Infrastructure side effects of collections.Manager mutations: publish a
-	// config-change notification and purge CDC state after a successful delete.
-	// Injected as method values so both the collections package and the API
-	// layer stay decoupled from Redis.
-	collectionsManager.OnPublish = redisClient.PublishConfigChange
-	collectionsManager.OnPurge = redisClient.DeleteCollectionState
-
-	server := New(Dependencies{
-		Collections: collectionsManager,
-		MongoClient: mongoClient,
-		APIKeys:     apiKeys,
-	})
-
+// MongoDB/Redis wiring happens in the composition root; Start only runs the
+// HTTP surface. HTTP routes, middleware, and behavior are unchanged.
+func (s *Server) Start(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	// Serve HTTP and wait for the process root context to be cancelled
 	// (SIGINT/SIGTERM handled by cmd/main.go), then shut the HTTP server down
 	// gracefully, giving in-flight requests the same bounded window the worker
 	// uses (cfg.ShutdownTimeout).
 	httpServer := &http.Server{
 		Addr:    ":" + cfg.Port,
-		Handler: server.Router(),
+		Handler: s.Router(),
 	}
 	serveErr := make(chan error, 1)
 	go func() {
