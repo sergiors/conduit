@@ -43,17 +43,18 @@ func (s *safeBuffer) Len() int {
 	return s.b.Len()
 }
 
-// bufferLogger returns a *slog.Logger writing INFO-level text to a *safeBuffer
-// so tests can capture and inspect emitted lines without racing the background
-// goroutine. The metrics snapshot logs at INFO, so an INFO threshold captures
-// every metrics line.
+// bufferLogger returns a *slog.Logger writing DEBUG-level text to a
+// *safeBuffer so tests can capture and inspect emitted lines without racing
+// the background goroutine. The metrics snapshot logs at DEBUG, so a DEBUG
+// threshold captures every metrics line.
 func bufferLogger(buf *safeBuffer) *slog.Logger {
-	return slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	return slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 }
 
 // TestSnapshotLinesFormat populates every metric type and asserts the exact
 // snapshotLines output: label ordering, count vs value vs count+sum rendering,
-// and that histogram buckets are never logged.
+// the stripped `conduit_` namespace, and that histogram buckets are never
+// logged.
 func TestSnapshotLinesFormat(t *testing.T) {
 	m := New()
 
@@ -78,24 +79,67 @@ func TestSnapshotLinesFormat(t *testing.T) {
 	lines := snapshotLines(families)
 
 	// Events-processed counter, labels preserved in registration order.
-	assert.Contains(t, lines, `conduit_events_processed_total{collection=users,event_type=INSERT} count=2`)
+	assert.Contains(t, lines, `events_processed_total{collection=users,event_type=INSERT} count=2`)
 
 	// Retry queue depth gauges use value= for both collections.
-	assert.Contains(t, lines, `conduit_retry_queue_depth{collection=users} value=0`)
-	assert.Contains(t, lines, `conduit_retry_queue_depth{collection=orders} value=42`)
+	assert.Contains(t, lines, `retry_queue_depth{collection=users} value=0`)
+	assert.Contains(t, lines, `retry_queue_depth{collection=orders} value=42`)
 
 	// Sink-delivery histogram: count=... sum=... in that order, no buckets.
-	assert.Contains(t, lines, `conduit_sink_delivery_duration_seconds{collection=users,sink_type=http} count=2 sum=1.439`)
+	assert.Contains(t, lines, `sink_delivery_duration_seconds{collection=users,sink_type=http} count=2 sum=1.439`)
 
 	// Sink-delivery outcome counters use count=; labels are sorted by name.
-	assert.Contains(t, lines, `conduit_sink_deliveries_total{collection=users,outcome=success,sink_type=http} count=1`)
-	assert.Contains(t, lines, `conduit_sink_deliveries_total{collection=users,outcome=failure,sink_type=http} count=1`)
+	assert.Contains(t, lines, `sink_deliveries_total{collection=users,outcome=success,sink_type=http} count=1`)
+	assert.Contains(t, lines, `sink_deliveries_total{collection=users,outcome=failure,sink_type=http} count=1`)
 
 	// Sink queue depth gauge uses value=; labels are sorted alphabetically.
-	assert.Contains(t, lines, `conduit_sink_queue_depth{collection=users,sink_id=s1,sink_type=http} value=3`)
+	assert.Contains(t, lines, `sink_queue_depth{collection=users,sink_id=s1,sink_type=http} value=3`)
+
+	// The `conduit_` namespace must be stripped from every rendered line.
+	assert.NotContains(t, strings.Join(lines, "\n"), "conduit_", "log rendering must omit the conduit_ prefix")
 
 	// Histogram buckets must never be logged.
 	assert.NotContains(t, strings.Join(lines, "\n"), "bucket", "no line may reference histogram buckets")
+}
+
+// TestSnapshotLinesRegistryNamesUnchanged verifies that the log-only prefix
+// stripping does not affect the true Prometheus metric families exposed by the
+// registry (and thus /metrics).
+func TestSnapshotLinesRegistryNamesUnchanged(t *testing.T) {
+	m := New()
+	m.ObserveEventsProcessed("users", streams.InsertRecord)
+	m.SetRetryQueueDepth("users", 0)
+	m.SetWatcherRunning("users", true)
+
+	families, err := m.Registry().Gather()
+	require.NoError(t, err)
+
+	names := make([]string, 0, len(families))
+	for _, f := range families {
+		if f != nil && f.Name != nil {
+			names = append(names, *f.Name)
+		}
+	}
+	assert.Contains(t, names, "conduit_events_processed_total")
+	assert.Contains(t, names, "conduit_retry_queue_depth")
+	assert.Contains(t, names, "conduit_watcher_running")
+}
+
+// TestSnapshotLogsOnlyAtDebug verifies that snapshot logs metric lines at DEBUG
+// only: a DEBUG-level handler captures them, an INFO-level handler does not.
+func TestSnapshotLogsOnlyAtDebug(t *testing.T) {
+	m := New()
+	m.SetWatcherRunning("users", true)
+
+	var dbg safeBuffer
+	dbgLogger := slog.New(slog.NewTextHandler(&dbg, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	NewMetricsLogger(m, DefaultLogInterval, dbgLogger).snapshot()
+	assert.Contains(t, dbg.String(), `level=DEBUG msg=Metrics series="watcher_running{collection=users} value=1"`)
+
+	var inf safeBuffer
+	infLogger := slog.New(slog.NewTextHandler(&inf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	NewMetricsLogger(m, DefaultLogInterval, infLogger).snapshot()
+	assert.Equal(t, "", inf.String(), "snapshots must not be emitted at INFO level")
 }
 
 // TestSnapshotLinesEmptyRegistry ensures a fresh registry with no series
@@ -130,11 +174,11 @@ func TestMetricsLoggerLogsPeriodically(t *testing.T) {
 	require.NoError(t, l.Start(ctx))
 
 	require.Eventually(t, func() bool {
-		return strings.Contains(buf.String(), `msg=Metrics series="conduit_`)
+		return strings.Contains(buf.String(), `level=DEBUG msg=Metrics series="watcher_running`)
 	}, 2*time.Second, 5*time.Millisecond, "expected a periodic metrics log line")
 
 	// Live-format check: a gauge present before Start must surface as value=.
-	assert.Contains(t, buf.String(), `series="conduit_watcher_running{collection=users} value=1"`)
+	assert.Contains(t, buf.String(), `series="watcher_running{collection=users} value=1"`)
 
 	require.NoError(t, l.Stop(context.Background()))
 }
@@ -153,7 +197,7 @@ func TestMetricsLoggerStopClean(t *testing.T) {
 	require.NoError(t, l.Start(ctx))
 
 	require.Eventually(t, func() bool {
-		return strings.Contains(buf.String(), `msg=Metrics series="conduit_`)
+		return strings.Contains(buf.String(), `level=DEBUG msg=Metrics series="watcher_running`)
 	}, 2*time.Second, 5*time.Millisecond, "expected at least one metrics log line")
 
 	require.NoError(t, l.Stop(context.Background()))

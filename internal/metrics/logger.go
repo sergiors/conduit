@@ -18,6 +18,11 @@ import (
 // snapshot. It is intentionally not configurable.
 const DefaultLogInterval = 30 * time.Second
 
+// logNamespacePrefix is the namespace prefix on Prometheus metric names. It is
+// stripped when rendering series in periodic log lines and enforces the same
+// exported names on /metrics.
+const logNamespacePrefix = "conduit_"
+
 // MetricsLogger periodically logs a snapshot of the worker's Prometheus
 // registry through the injected *slog.Logger. It reads the exact same registry
 // served by /metrics (via Gather), so it introduces no duplicate counters or
@@ -140,13 +145,15 @@ func (l *MetricsLogger) snapshot() {
 	}
 
 	for _, line := range snapshotLines(families) {
-		l.logger.Info("Metrics", "series", line)
+		l.logger.Debug("Metrics", "series", line)
 	}
 }
 
 // snapshotLines formats a gathered registry into one line per metric series.
 // It is package-private and pure so tests can assert exact output without
-// timing. Histograms are rendered with only count and sum — buckets are never
+// timing. The `conduit_` namespace is stripped from the rendered metric name
+// for brevity in logs only — the actual Prometheus metric names are unchanged.
+// Histograms are rendered with only count and sum — buckets are never
 // logged. Any metric with none of counter/gauge/histogram set is skipped.
 func snapshotLines(families []*promdto.MetricFamily) []string {
 	var lines []string
@@ -159,7 +166,7 @@ func snapshotLines(families []*promdto.MetricFamily) []string {
 				continue
 			}
 			labels := formatLabels(metric.Label)
-			prefix := *family.Name
+			prefix := strings.TrimPrefix(*family.Name, logNamespacePrefix)
 			if labels != "" {
 				prefix += "{" + labels + "}"
 			}
