@@ -55,7 +55,7 @@ func TestServerRoundTrip(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.True(t, strings.HasPrefix(resp.Header.Get("Content-Type"), "text/plain; version=0.0.4"),
 		"expected Prometheus exposition content type, got %q", resp.Header.Get("Content-Type"))
-	assert.Contains(t, string(body), watcherRunningName)
+	assert.Contains(t, string(body), MetricWatcherRunning)
 	assert.Contains(t, string(body), `conduit_watcher_running{collection="users"} 1`)
 
 	// Stop must be clean and idempotent.

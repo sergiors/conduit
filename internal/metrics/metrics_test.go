@@ -43,16 +43,16 @@ func TestRegistration(t *testing.T) {
 		names[mf.GetName()] = true
 	}
 	for _, name := range []string{
-		eventsProcessedName,
-		sinkDeliveriesName,
-		sinkDeliveryDurationName,
-		watcherRunningName,
-		retryQueueDepthName,
-		sinkQueueDepthName,
-		sinkQueueCapacityName,
-		sinkEnqueueWaitName,
-		sinkQueueFullName,
-		dlqEntriesName,
+		MetricEventsProcessedTotal,
+		MetricSinkDeliveriesTotal,
+		MetricSinkDeliveryDurationSeconds,
+		MetricWatcherRunning,
+		MetricRetryQueueDepth,
+		MetricSinkQueueDepth,
+		MetricSinkQueueCapacity,
+		MetricSinkEnqueueWaitDurationSeconds,
+		MetricSinkQueueFullTotal,
+		MetricDLQEntries,
 	} {
 		assert.True(t, names[name], "metric family %s must be registered", name)
 	}
@@ -117,7 +117,7 @@ func TestSinkDeliveries(t *testing.T) {
 	gathered, err := m.Registry().Gather()
 	require.NoError(t, err)
 	for _, mf := range gathered {
-		if mf.GetName() != sinkDeliveriesName {
+		if mf.GetName() != MetricSinkDeliveriesTotal {
 			continue
 		}
 		outcomes := map[string]bool{}
@@ -148,7 +148,7 @@ func TestSinkDeliveryDurationHistogram(t *testing.T) {
 
 	// Sum the sample counts across the matching histogram family to assert N
 	// observations were recorded.
-	total := totalHistogramCount(t, m, sinkDeliveryDurationName, map[string]string{
+	total := totalHistogramCount(t, m, MetricSinkDeliveryDurationSeconds, map[string]string{
 		collectionLabel: "users",
 		sinkTypeLabel:   string(collections.SinkTypeHTTP),
 	})
@@ -232,7 +232,7 @@ func TestSinkQueueDepth(t *testing.T) {
 	families, err := m.Registry().Gather()
 	require.NoError(t, err)
 	for _, mf := range families {
-		if mf.GetName() != sinkQueueDepthName {
+		if mf.GetName() != MetricSinkQueueDepth {
 			continue
 		}
 		metric := mf.GetMetric()[0]
@@ -278,7 +278,7 @@ func TestSinkQueueCapacity(t *testing.T) {
 	families, err := m.Registry().Gather()
 	require.NoError(t, err)
 	for _, mf := range families {
-		if mf.GetName() != sinkQueueCapacityName {
+		if mf.GetName() != MetricSinkQueueCapacity {
 			continue
 		}
 		metric := mf.GetMetric()[0]
@@ -303,7 +303,7 @@ func TestSinkEnqueueWaitHistogram(t *testing.T) {
 	m.ObserveSinkEnqueueWait("users", collections.SinkTypeHTTP, "s1", 10*time.Millisecond)
 	m.ObserveSinkEnqueueWait("users", collections.SinkTypeHTTP, "s1", 20*time.Millisecond)
 
-	total := totalHistogramCount(t, m, sinkEnqueueWaitName, map[string]string{
+	total := totalHistogramCount(t, m, MetricSinkEnqueueWaitDurationSeconds, map[string]string{
 		collectionLabel: "users",
 		sinkTypeLabel:   string(collections.SinkTypeHTTP),
 		sinkIDLabel:     "s1",
@@ -313,7 +313,7 @@ func TestSinkEnqueueWaitHistogram(t *testing.T) {
 	families, err := m.Registry().Gather()
 	require.NoError(t, err)
 	for _, mf := range families {
-		if mf.GetName() != sinkEnqueueWaitName {
+		if mf.GetName() != MetricSinkEnqueueWaitDurationSeconds {
 			continue
 		}
 		metric := mf.GetMetric()[0]
@@ -373,14 +373,14 @@ func TestDeleteSinkLaneMetrics(t *testing.T) {
 	m.IncSinkQueueFull("users", collections.SinkTypeHTTP, "s1")
 
 	// Every family must be present before deletion.
-	for _, name := range []string{sinkQueueDepthName, sinkQueueCapacityName, sinkEnqueueWaitName, sinkQueueFullName} {
+	for _, name := range []string{MetricSinkQueueDepth, MetricSinkQueueCapacity, MetricSinkEnqueueWaitDurationSeconds, MetricSinkQueueFullTotal} {
 		require.True(t, familyHasSeries(t, m, name, labels()), "family %s must be seeded", name)
 	}
 
 	m.DeleteSinkLaneMetrics("users", collections.SinkTypeHTTP, "s1")
 
 	// No family should expose the lane's series after deletion.
-	for _, name := range []string{sinkQueueDepthName, sinkQueueCapacityName, sinkEnqueueWaitName, sinkQueueFullName} {
+	for _, name := range []string{MetricSinkQueueDepth, MetricSinkQueueCapacity, MetricSinkEnqueueWaitDurationSeconds, MetricSinkQueueFullTotal} {
 		assert.False(t, familyHasSeries(t, m, name, labels()), "family %s must have no series after deletion", name)
 	}
 
@@ -462,7 +462,7 @@ func TestHandlerServesPrometheusText(t *testing.T) {
 	handler.ServeHTTP(rec, mustRequest(t, "/metrics"))
 
 	body := rec.body.String()
-	assert.Contains(t, body, watcherRunningName)
+	assert.Contains(t, body, MetricWatcherRunning)
 	assert.True(t, strings.HasPrefix(rec.header.Get("Content-Type"), "text/plain; version=0.0.4"),
 		"expected Prometheus exposition content type, got %q", rec.header.Get("Content-Type"))
 }

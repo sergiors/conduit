@@ -27,23 +27,30 @@ const (
 	OutcomeFailure Outcome = "failure"
 )
 
-// Metric names, kept exact for documentation and test assertions.
+// metricNamespacePrefix is the namespace prefix shared by every Conduit metric
+// name. It enforces consistent naming of the exported Prometheus metrics.
+const metricNamespacePrefix = "conduit_"
+
+// Metric names, kept exact for documentation and test assertions. Each constant
+// mirrors the full semantic name of the metric it represents (PascalCase,
+// including name suffixes such as _total / _seconds) and is constructed with
+// metricNamespacePrefix rather than hardcoding the namespace.
 const (
-	sinkDeliveriesName       = "conduit_sink_deliveries_total"
-	sinkDeliveryDurationName = "conduit_sink_delivery_duration_seconds"
-	eventsProcessedName      = "conduit_events_processed_total"
-	watcherRunningName       = "conduit_watcher_running"
-	retryQueueDepthName      = "conduit_retry_queue_depth"
-	dlqEntriesName           = "conduit_dlq_entries"
-	sinkQueueDepthName       = "conduit_sink_queue_depth"
-	sinkQueueCapacityName    = "conduit_sink_queue_capacity"
-	sinkEnqueueWaitName      = "conduit_sink_enqueue_wait_duration_seconds"
-	sinkQueueFullName        = "conduit_sink_queue_full_total"
-	collectionLabel          = "collection"
-	eventTypeLabel           = "event_type"
-	sinkTypeLabel            = "sink_type"
-	sinkIDLabel              = "sink_id"
-	outcomeLabel             = "outcome"
+	MetricSinkDeliveriesTotal            = metricNamespacePrefix + "sink_deliveries_total"
+	MetricSinkDeliveryDurationSeconds    = metricNamespacePrefix + "sink_delivery_duration_seconds"
+	MetricEventsProcessedTotal           = metricNamespacePrefix + "events_processed_total"
+	MetricWatcherRunning                 = metricNamespacePrefix + "watcher_running"
+	MetricRetryQueueDepth                = metricNamespacePrefix + "retry_queue_depth"
+	MetricDLQEntries                     = metricNamespacePrefix + "dlq_entries"
+	MetricSinkQueueDepth                 = metricNamespacePrefix + "sink_queue_depth"
+	MetricSinkQueueCapacity              = metricNamespacePrefix + "sink_queue_capacity"
+	MetricSinkEnqueueWaitDurationSeconds = metricNamespacePrefix + "sink_enqueue_wait_duration_seconds"
+	MetricSinkQueueFullTotal             = metricNamespacePrefix + "sink_queue_full_total"
+	collectionLabel                      = "collection"
+	eventTypeLabel                       = "event_type"
+	sinkTypeLabel                        = "sink_type"
+	sinkIDLabel                          = "sink_id"
+	outcomeLabel                         = "outcome"
 )
 
 // Metrics owns the worker's Prometheus metrics on a dedicated registry. All
@@ -79,36 +86,36 @@ func New() *Metrics {
 	m := &Metrics{
 		registry: registry,
 		eventsProcessed: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: eventsProcessedName,
+			Name: MetricEventsProcessedTotal,
 			Help: "Total number of events settled (delivered or durably queued for retry), by collection and event type.",
 		}, []string{collectionLabel, eventTypeLabel}),
 		sinkDeliveries: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: sinkDeliveriesName,
+			Name: MetricSinkDeliveriesTotal,
 			Help: "Total number of per-sink delivery attempts, by collection, sink type and outcome. Success includes events accepted by the sink's routing path (a sink filter may skip the transport).",
 		}, []string{collectionLabel, sinkTypeLabel, outcomeLabel}),
 		sinkDeliveryDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
-			Name:    sinkDeliveryDurationName,
+			Name:    MetricSinkDeliveryDurationSeconds,
 			Help:    "Duration of per-sink delivery attempts in seconds, by collection and sink type.",
 			Buckets: prometheus.DefBuckets,
 		}, []string{collectionLabel, sinkTypeLabel}),
 		watcherRunning: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Name: watcherRunningName,
+			Name: MetricWatcherRunning,
 			Help: "1 if a collection's watcher is running, 0 otherwise.",
 		}, []string{collectionLabel}),
 		retryQueueDepth: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Name: retryQueueDepthName,
+			Name: MetricRetryQueueDepth,
 			Help: "Current number of events in a collection's retry queue.",
 		}, []string{collectionLabel}),
 		dlqEntries: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Name: dlqEntriesName,
+			Name: MetricDLQEntries,
 			Help: "Current number of dead-letter entries persisted for a collection.",
 		}, []string{collectionLabel}),
 		sinkQueueDepth: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Name: sinkQueueDepthName,
+			Name: MetricSinkQueueDepth,
 			Help: "Current number of events waiting in a sink lane's bounded queue, by collection, sink type and sink id.",
 		}, []string{collectionLabel, sinkTypeLabel, sinkIDLabel}),
 		sinkQueueCapacity: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Name: sinkQueueCapacityName,
+			Name: MetricSinkQueueCapacity,
 			Help: "Configured capacity of a sink lane's bounded queue, by collection, sink type and sink id.",
 		}, []string{collectionLabel, sinkTypeLabel, sinkIDLabel}),
 		// Queue waits under real backpressure can far exceed the 10s ceiling of
@@ -117,12 +124,12 @@ func New() *Metrics {
 		// exponential scale from 1ms covers both the no-contention fast path and
 		// long blocked waits.
 		sinkEnqueueWait: prometheus.NewHistogramVec(prometheus.HistogramOpts{
-			Name:    sinkEnqueueWaitName,
+			Name:    MetricSinkEnqueueWaitDurationSeconds,
 			Help:    "Duration the dispatcher waited before an event was successfully placed into a sink lane's bounded queue, by collection, sink type and sink id.",
 			Buckets: prometheus.ExponentialBuckets(0.001, 2, 16),
 		}, []string{collectionLabel, sinkTypeLabel, sinkIDLabel}),
 		sinkQueueFull: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: sinkQueueFullName,
+			Name: MetricSinkQueueFullTotal,
 			Help: "Total number of enqueue attempts that encountered an already-full sink lane queue and had to apply backpressure.",
 		}, []string{collectionLabel, sinkTypeLabel, sinkIDLabel}),
 	}
