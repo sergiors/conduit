@@ -398,11 +398,10 @@ Start dependencies:
 docker compose up -d mongo redis
 ```
 
-Then run the API and worker:
+Then start the runtime (API server and worker in one process):
 
 ```bash
-make run-server
-make run-worker
+conduit start
 ```
 
 ### Build

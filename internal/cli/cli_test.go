@@ -54,7 +54,7 @@ func commandNames(cmds []*cli.Command) []string {
 func TestRootCommandRegistration(t *testing.T) {
 	root, _ := newRootCommandForTest(t)
 	names := commandNames(root.Commands)
-	assert.ElementsMatch(t, []string{"server", "worker", "health", "apikey"}, names)
+	assert.ElementsMatch(t, []string{"start", "health", "apikey"}, names)
 }
 
 func TestAPIKeySubcommandRegistration(t *testing.T) {
@@ -117,8 +117,7 @@ func TestRunHelp(t *testing.T) {
 	out, err := runRoot(t, []string{"--help"})
 	require.NoError(t, err)
 	help := string(out)
-	assert.Contains(t, help, "server")
-	assert.Contains(t, help, "worker")
+	assert.Contains(t, help, "start")
 	assert.Contains(t, help, "health")
 	assert.Contains(t, help, "apikey")
 
@@ -135,11 +134,11 @@ func TestRunHelp(t *testing.T) {
 func TestRunNoArgs(t *testing.T) {
 	out, err := runRoot(t, nil)
 	require.NoError(t, err)
-	assert.Contains(t, string(out), "server")
+	assert.Contains(t, string(out), "start")
 	assert.Contains(t, string(out), "apikey")
 }
 
-func TestServerCommandDispatch(t *testing.T) {
+func TestStartCommandDispatch(t *testing.T) {
 	t.Setenv("MONGODB_URI", "mongodb://dummy:27017")
 	t.Setenv("MONGODB_DATABASE", "dummy")
 	t.Setenv("REDIS_URI", "redis://dummy:6379")
@@ -149,51 +148,68 @@ func TestServerCommandDispatch(t *testing.T) {
 	root := New(logger, io.Discard)
 
 	sentinel := &sentinelErr{}
-	var capturedCfg config.Config
-	var capturedLogger *slog.Logger
-	orig := apiRun
-	apiRun = func(cfg config.Config, l *slog.Logger) error {
-		capturedCfg = cfg
-		capturedLogger = l
+	var apiCfg, workerCfg config.Config
+	var apiLogger, workerLogger *slog.Logger
+	origAPI, origWorker := apiRun, workerRun
+	apiRun = func(_ context.Context, cfg config.Config, l *slog.Logger) error {
+		apiCfg, apiLogger = cfg, l
 		return sentinel
 	}
-	t.Cleanup(func() { apiRun = orig })
+	workerRun = func(_ context.Context, cfg config.Config, l *slog.Logger) error {
+		workerCfg, workerLogger = cfg, l
+		return nil
+	}
+	t.Cleanup(func() { apiRun, workerRun = origAPI, origWorker })
 
-	err := root.Run(context.Background(), []string{"conduit", "server"})
+	err := root.Run(context.Background(), []string{"conduit", "start"})
+	// The first component failure propagates out of the start command, and each
+	// component dispatches once with the loaded config and the shared logger.
 	assert.ErrorIs(t, err, sentinel)
-	assert.Equal(t, "9999", capturedCfg.Port)
-	assert.Equal(t, logger, capturedLogger)
+	assert.Equal(t, "9999", apiCfg.Port)
+	assert.Equal(t, "dummy", workerCfg.MongoDBDatabase)
+	assert.Equal(t, "redis://dummy:6379", workerCfg.RedisURI)
+	assert.Equal(t, logger, apiLogger)
+	assert.Equal(t, apiCfg, workerCfg)
+	assert.Equal(t, logger, workerLogger)
+}
+
+// TestStartCommandCancellation proves both runtime components receive the same
+// derived context and that a caller-cancelled root context flows into them (the
+// seam stubs record the context they were dispatched with, mirroring the real
+// cmd stack where that context is the process root's signal context).
+func TestStartCommandCancellation(t *testing.T) {
+	// config.Load runs before dispatch even with stubbed seams, so the required
+	// environment must be present or the process boundary os.Exit(1)s.
+	t.Setenv("MONGODB_URI", "mongodb://dummy:27017")
+	t.Setenv("MONGODB_DATABASE", "dummy")
+	t.Setenv("REDIS_URI", "redis://dummy:6379")
+
+	var apiCtx, workerCtx context.Context
+	origAPI, origWorker := apiRun, workerRun
+	apiRun = func(ctx context.Context, _ config.Config, _ *slog.Logger) error {
+		apiCtx = ctx
+		return nil
+	}
+	workerRun = func(ctx context.Context, _ config.Config, _ *slog.Logger) error {
+		workerCtx = ctx
+		return nil
+	}
+	t.Cleanup(func() { apiRun, workerRun = origAPI, origWorker })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	root := New(discardLogger, io.Discard)
+	err := root.Run(ctx, []string{"conduit", "start"})
+	require.NoError(t, err)
+	require.NotNil(t, apiCtx)
+	require.NotNil(t, workerCtx)
+	assert.ErrorIs(t, apiCtx.Err(), context.Canceled)
+	assert.ErrorIs(t, workerCtx.Err(), context.Canceled)
 }
 
 type sentinelErr struct{}
 
 func (e *sentinelErr) Error() string { return "sentinel dispatch error" }
-
-func TestWorkerCommandDispatch(t *testing.T) {
-	t.Setenv("MONGODB_URI", "mongodb://dummy:27017")
-	t.Setenv("MONGODB_DATABASE", "dummy")
-	t.Setenv("REDIS_URI", "redis://dummy:6379")
-
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	root := New(logger, io.Discard)
-
-	sentinel := &sentinelErr{}
-	var capturedCfg config.Config
-	var capturedLogger *slog.Logger
-	orig := workerRun
-	workerRun = func(cfg config.Config, l *slog.Logger) error {
-		capturedCfg = cfg
-		capturedLogger = l
-		return sentinel
-	}
-	t.Cleanup(func() { workerRun = orig })
-
-	err := root.Run(context.Background(), []string{"conduit", "worker"})
-	assert.ErrorIs(t, err, sentinel)
-	assert.Equal(t, "redis://dummy:6379", capturedCfg.RedisURI)
-	assert.Equal(t, logger, capturedLogger)
-	assert.Equal(t, "dummy", capturedCfg.MongoDBDatabase)
-}
 
 // TestNestedCommandUsesRootWriter proves a subcommand's action writes through
 // the root command's Writer without any writer being passed to the command

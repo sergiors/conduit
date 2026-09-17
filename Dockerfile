@@ -27,4 +27,4 @@ COPY --from=build /conduit /usr/local/bin/conduit
 
 WORKDIR /app
 
-CMD ["conduit", "worker"]
+CMD ["conduit", "start"]

@@ -7,9 +7,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"os/signal"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"conduit/internal/collections"
@@ -277,18 +275,16 @@ func (w *Worker) start(ctx context.Context) error {
 }
 
 // Run is the worker's process-level entrypoint: create the worker, run it
-// until SIGINT/SIGTERM, and perform a graceful shutdown bounded by the
-// configured shutdown timeout. It returns an error (which the caller should log
-// and turn into a non-zero exit) rather than crashing the process.
-func Run(cfg config.Config, logger *slog.Logger) error {
+// until the caller's context is cancelled (the process root context —
+// cancellation/SIGTERM is owned by the executable boundary), and perform a
+// graceful shutdown bounded by the configured shutdown timeout. It returns an
+// error (which the caller should log and turn into a non-zero exit) rather
+// than crashing the process.
+func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	worker, err := NewWorker(cfg, logger)
 	if err != nil {
 		return err
 	}
-
-	// SIGINT and SIGTERM both trigger a graceful shutdown.
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
 
 	if err := worker.start(ctx); err != nil {
 		logger.Error("Worker failed", "error", err)

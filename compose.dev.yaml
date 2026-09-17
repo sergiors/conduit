@@ -29,14 +29,15 @@ services:
       timeout: 5s
       retries: 5
 
-  worker:
+  conduit:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: conduit
-    command: ["conduit", "worker"]
+    command: ["conduit", "start"]
     env_file: .env.dev
     ports:
+      - 8080:8080
       - 9090:9090
     depends_on:
       mongo:
@@ -50,22 +51,6 @@ services:
       timeout: 3s
       retries: 3
       start_period: 10s
-
-  api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: conduit-api
-    command: ["conduit", "server"]
-    ports:
-      - 8080:8080
-    env_file: .env.dev
-    depends_on:
-      mongo:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    restart: unless-stopped
 
 volumes:
   mongo_data:

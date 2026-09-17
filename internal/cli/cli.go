@@ -1,6 +1,6 @@
 // Package cli implements the conduit command-line interface using
-// github.com/urfave/cli/v3. It wires the executable-level commands (server,
-// worker, health, apikey) to the underlying runtime packages.
+// github.com/urfave/cli/v3. It wires the executable-level commands (start,
+// health, apikey) to the underlying runtime packages.
 package cli
 
 import (
@@ -29,8 +29,7 @@ func New(logger *slog.Logger, writer io.Writer) *cli.Command {
 		Writer:         writer,
 		ExitErrHandler: func(context.Context, *cli.Command, error) {},
 		Commands: []*cli.Command{
-			serverCommand(logger),
-			workerCommand(logger),
+			startCommand(logger),
 			healthCommand(logger),
 			apikeyCommand(logger),
 		},

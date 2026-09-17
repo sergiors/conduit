@@ -47,7 +47,7 @@ The project exists to provide DynamoDB-aligned CDC semantics on top of MongoDB. 
                                               └─────────────────┘
 ```
 
-There are two runtime processes:
+The runtime process hosts two components, both started together by `conduit start`:
 
 - **API**: Exposes REST endpoints, writes configuration to MongoDB, publishes change notifications to Redis, and provides read-only access to documents and the dead-letter queue.
 - **Worker**: Watches MongoDB change streams, dispatches events to sinks, manages resume tokens and retries, and persists exhausted retries to the MongoDB DLQ. The current architecture supports one active worker per deployment; that worker owns Change Stream processing and resume-token progression.
@@ -904,12 +904,12 @@ The following principles are reflected in the codebase:
 
 ## `cmd/`
 
-Entry point for the conduit CLI, which hosts the two runtime processes.
+Entry point for the conduit CLI, which hosts the unified runtime process.
 
-- `cmd/main.go`: A single entrypoint that dispatches to the CLI commands via `internal/cli`, which selects between `server`, `worker`, and `health`. Runtime logic lives in the packages below rather than in main.
+- `cmd/main.go`: A single entrypoint that dispatches to the CLI commands via `internal/cli`, which selects between `start`, `health`, and `apikey`. Runtime logic lives in the packages below rather than in main. The root command builds the process signal context; `conduit start` runs both runtime components (API server and worker) concurrently under a shared context and propagates the first failure.
 - `internal/cli`: Command selection, usage text, and argument handling; each command is a thin wrapper over the underlying runtime packages.
-- `internal/api.Run`: Bootstraps the API server — loads configuration (passed in), initializes MongoDB and Redis, creates `collections.Manager`, and starts the Gin HTTP server.
-- `internal/worker`: Hosts the CDC worker runtime — loads configuration, initializes infrastructure, creates the dispatcher, retry processor, and watcher manager, and runs until a shutdown signal.
+- `internal/api.Run`: Bootstraps the API server — loads configuration (passed in), initializes MongoDB and Redis, creates `collections.Manager`, and starts the Gin HTTP server. Cancelling the context triggers a graceful HTTP shutdown bounded by `SHUTDOWN_TIMEOUT`.
+- `internal/worker`: Hosts the CDC worker runtime — loads configuration, initializes infrastructure, creates the dispatcher, retry processor, and watcher manager, and runs until its context is cancelled.
 
   **Graceful shutdown.** On SIGINT or SIGTERM the worker shuts down in dependency order, bounded by `SHUTDOWN_TIMEOUT` (default 30s): (1) the watcher manager is stopped first — cancelling its run context, waiting for its sync/config-change loops and every watcher, and closing pub/sub — so no new events flow while in-flight bookkeeping drains; (2) the retry processor is stopped, letting the current pass finish; (3) the dispatcher stops every sink lane (waiting for in-flight deliveries to drain) and closes the transports; (4) Redis is closed; (5) MongoDB is closed. Terminal bookkeeping writes (resume-token persist, `MarkProcessed`, retry `Enqueue`/`Remove`) and change-stream cursor close use a short detached context so a mid-flight event is never lost when the live context is cancelled. No arbitrary sleeps are used; shutdown is driven entirely by context cancellation and `sync.WaitGroup` waits. Panics in worker goroutines are contained: each long-running goroutine has a recover backstop that logs with a stack trace, per-event/per-tick work is panic-isolated so a single bad event cannot kill its loop, and a panicking watcher marks itself stopped for the manager's sync to reconcile.
 

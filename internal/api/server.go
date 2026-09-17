@@ -2,8 +2,10 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"time"
 
 	"conduit/internal/apikey"
@@ -46,23 +48,23 @@ func (s *Server) Router() *gin.Engine {
 
 // Run bootstraps and starts the API server. It does exactly what the former
 // cmd/api main() did: connects MongoDB and Redis, creates the collection index,
-// wires the publish/purge hooks, and blocks serving HTTP via Router().Run.
+// wires the publish/purge hooks, and blocks serving HTTP until the caller's
+// context (the process root context — cancellation/SIGTERM is owned by the
+// executable boundary) is cancelled, then performs a graceful HTTP shutdown
+// bounded by the configured shutdown timeout.
 //
-// Config is passed in (not loaded here). There is deliberately no signal
-// handling or graceful HTTP shutdown: the API server blocks in Router().Run and
-// relies on process termination — an accepted limitation of this codebase
-// (acceptable only behind a trusted network).
-//
-// The function returns an error instead of the original logger.Fatalf so the CLI
-// can exit non-zero on failure; fatal-on-invalid-config still happens earlier in
-// config.Load.
-func Run(cfg config.Config, logger *slog.Logger) error {
+// Config is passed in (not loaded here). The function returns an error instead
+// of a fatal exit so the CLI can exit non-zero on failure;
+// fatal-on-invalid-config still happens earlier in config.Load.
+func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	// Use a generous timeout for startup: MongoDB may still be electing a PRIMARY
-	// after a restart, and NewClient waits for it before returning.
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
+	// after a restart, and NewClient waits for it before returning. startupCtx
+	// only bounds the initialization phase; the serve/shutdown loop below waits
+	// on ctx itself (the unbounded process root context).
+	startupCtx, cancelStartup := context.WithTimeout(ctx, 60*time.Second)
+	defer cancelStartup()
 
-	mongoClient, err := mongo.NewClient(ctx, mongo.Config{
+	mongoClient, err := mongo.NewClient(startupCtx, mongo.Config{
 		URI:      cfg.MongoDBURI,
 		Database: cfg.MongoDBDatabase,
 	}, logger)
@@ -72,16 +74,16 @@ func Run(cfg config.Config, logger *slog.Logger) error {
 	defer mongoClient.Close(context.Background())
 
 	collectionsManager := collections.NewManager(mongoClient.Client, cfg.MongoDBDatabase, logger)
-	if err := collectionsManager.CreateIndex(ctx); err != nil {
+	if err := collectionsManager.CreateIndex(startupCtx); err != nil {
 		return fmt.Errorf("failed to create collection index: %w", err)
 	}
 
 	apiKeys := apikey.NewManager(mongoClient.Client, cfg.MongoDBDatabase, logger)
-	if err := apiKeys.CreateIndex(ctx); err != nil {
+	if err := apiKeys.CreateIndex(startupCtx); err != nil {
 		return fmt.Errorf("failed to create api key index: %w", err)
 	}
 
-	redisClient, err := redis.NewClient(ctx, redis.Config{
+	redisClient, err := redis.NewClient(startupCtx, redis.Config{
 		URI:    cfg.RedisURI,
 		Prefix: "cdc:",
 	}, logger)
@@ -103,9 +105,41 @@ func Run(cfg config.Config, logger *slog.Logger) error {
 		APIKeys:     apiKeys,
 	})
 
+	// Serve HTTP and wait for the process root context to be cancelled
+	// (SIGINT/SIGTERM handled by cmd/main.go), then shut the HTTP server down
+	// gracefully, giving in-flight requests the same bounded window the worker
+	// uses (cfg.ShutdownTimeout).
+	httpServer := &http.Server{
+		Addr:    ":" + cfg.Port,
+		Handler: server.Router(),
+	}
+	serveErr := make(chan error, 1)
+	go func() {
+		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serveErr <- fmt.Errorf("server failed: %w", err)
+			close(serveErr)
+			return
+		}
+		close(serveErr)
+	}()
+
 	logger.Info("API server starting", "port", cfg.Port)
-	if err := server.Router().Run(":" + cfg.Port); err != nil {
-		return fmt.Errorf("server failed: %w", err)
+
+	select {
+	case err := <-serveErr:
+		if err != nil {
+			return err
+		}
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+		defer cancel()
+		if err := httpServer.Shutdown(shutdownCtx); err != nil {
+			logger.Error("Error during HTTP shutdown", "error", err)
+			return fmt.Errorf("http shutdown failed: %w", err)
+		}
+		if err := <-serveErr; err != nil {
+			return err
+		}
 	}
 	return nil
 }

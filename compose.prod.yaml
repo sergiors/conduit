@@ -1,10 +1,11 @@
 services:
-  worker:
+  conduit:
     image: ghcr.io/sergiors/conduit:latest
     container_name: conduit
-    command: ["conduit", "worker"]
+    command: ["conduit", "start"]
     env_file: .env
     ports:
+      - 8080:8080
       - 9090:9090
     restart: unless-stopped
     healthcheck:
@@ -13,15 +14,6 @@ services:
       timeout: 3s
       retries: 3
       start_period: 10s
-
-  api:
-    image: ghcr.io/sergiors/conduit:latest
-    container_name: conduit-api
-    command: ["conduit", "server"]
-    ports:
-      - 8080:8080
-    env_file: .env
-    restart: unless-stopped
 
 volumes:
   redis_data:
