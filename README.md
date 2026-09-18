@@ -347,7 +347,9 @@ There is no automatic trimming (no `MAXLEN`) — retention can be a future
 `rediss://` (TLS) URLs are supported via the go-redis URL parser; credentials
 belong in the URL per Redis URL conventions (e.g.
 `redis://user:pass@host:port/db`). The spec holds the connection URL, like
-HTTP's `endpoint`.
+HTTP's `endpoint`. These URLs point directly at Redis **data nodes** — the
+`redis+sentinel://` scheme applies only to the `REDIS_URI` connection setting
+(see [Environment](#environment)), not to sink specs.
 
 New sinks can be added by implementing the `Sink` interface and registering a builder in `internal/dispatch/sinks`.
 
@@ -381,6 +383,41 @@ PORT=8080
 # AWS_SECRET_ACCESS_KEY, and AWS_REGION (plus optional AWS_SESSION_TOKEN) are
 # resolved via the AWS SDK default credential chain.
 ```
+
+#### Redis configuration (`REDIS_URI`)
+
+`REDIS_URI` is the only Redis connection setting. It supports two modes:
+
+```bash
+# Standalone — connect directly to a Redis data node.
+REDIS_URI=redis://user:password@redis:6379
+```
+
+```bash
+# Sentinel — enable Redis Sentinel discovery/failover.
+REDIS_URI=redis+sentinel://user:password@sentinel-1:26379,sentinel-2:26379,sentinel-3:26379?master=mymaster
+```
+
+- `redis://` connects directly to a Redis server. Optionally select a database
+  with a path (`redis://redis:6379/2`); `rediss://` enables TLS.
+- `redis+sentinel://` enables Redis Sentinel discovery/failover. The hosts in
+  the URI are **Sentinel nodes, not Redis data nodes** — Sentinel is queried to
+  locate the current primary, and after a primary failure and promotion
+  Conduit reconnects to the new primary automatically.
+- `master` (required) is the Sentinel master/service name to monitor (the
+  `mymaster` in Sentinel's `sentinel monitor <name> ...` configuration).
+- Userinfo credentials (`user:password@`) authenticate both the Sentinel nodes
+  and the Redis master they point at; omit it when authentication is disabled.
+- `redis+sentinel` is a Conduit-specific URI convention (not a standard Redis
+  scheme). An invalid Sentinel URI is a configuration error — there is no
+  fallback to standalone mode.
+
+Sentinel provides Redis primary discovery/failover only. It does not change
+Conduit's delivery semantics (still at-least-once) and does not provide Conduit
+worker failover or exactly-once guarantees; multi-instance Conduit coordination
+is handled separately. Everything above the connection — CDC state, retry
+queues, Pub/Sub notifications — uses the same Redis client abstraction either
+way.
 
 ### Run with Docker Compose
 

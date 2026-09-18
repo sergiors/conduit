@@ -10,15 +10,19 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// newSentinelClientFunc is a seam so tests can stub sentinel client
+// construction without dialing real Sentinel/Redis instances.
+var newSentinelClientFunc = newSentinelClient
+
 // Client wraps Redis client with CDC-specific operations
 type Client struct {
-	client *redis.Client
+	client redis.UniversalClient
 	logger *slog.Logger
 }
 
 // Config holds Redis connection configuration
 type Config struct {
-	URI      string // Full Redis URI (e.g., redis://user:pass@host:port/db)
+	URI      string // Full Redis URI (e.g., redis://user:pass@host:port/db, or redis+sentinel://...?master=name for Sentinel mode)
 	Addr     string // Alternative: host:port
 	Password string // Alternative: password
 	DB       int    // Database number
@@ -38,17 +42,32 @@ func DefaultConfig() Config {
 }
 
 // NewClient creates a new Redis client
-// Supports both URI (DSN) and separate Addr/Password configurations
+// Supports both URI (DSN) and separate Addr/Password configurations.
+// A redis:// (or rediss://) URI selects a standalone data node; a
+// redis+sentinel:// URI selects Sentinel (failover) mode, with all Sentinel
+// behaviour encapsulated in this package.
 func NewClient(ctx context.Context, cfg Config, logger *slog.Logger) (*Client, error) {
-	var client *redis.Client
+	var client redis.UniversalClient
 
 	if cfg.URI != "" {
-		// Use URI/DSN format (e.g., redis://user:password@host:port/db)
-		opts, err := redis.ParseURL(cfg.URI)
-		if err != nil {
-			return nil, fmt.Errorf("parse redis URI: %w", err)
+		if isSentinelURI(cfg.URI) {
+			sc, err := parseSentinelURI(cfg.URI)
+			if err != nil {
+				return nil, fmt.Errorf("parse redis sentinel URI: %w", err)
+			}
+			c, err := newSentinelClientFunc(sc)
+			if err != nil {
+				return nil, fmt.Errorf("create redis sentinel client: %w", err)
+			}
+			client = c
+		} else {
+			// Use URI/DSN format (e.g., redis://user:password@host:port/db)
+			opts, err := redis.ParseURL(cfg.URI)
+			if err != nil {
+				return nil, fmt.Errorf("parse redis URI: %w", err)
+			}
+			client = redis.NewClient(opts)
 		}
-		client = redis.NewClient(opts)
 	} else if cfg.Addr != "" {
 		// Use separate Addr/Password
 		client = redis.NewClient(&redis.Options{
