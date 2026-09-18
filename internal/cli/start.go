@@ -2,12 +2,23 @@ package cli
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 
 	"github.com/urfave/cli/v3"
 
 	"conduit/internal/config"
+	"conduit/internal/processlock"
 )
+
+// startLockPath is the on-disk path of the process lock taken by
+// `conduit start`. It lives under /var/run, which is cleared on boot, so a
+// stale file left behind by an unclean shutdown never survives a reboot; and
+// the lock itself is an OS advisory flock that is released automatically when
+// the file descriptor is closed or the process dies. The file's existence is
+// therefore never the source of truth — the live flock is.
+const startLockPath = "/var/run/conduit/conduit.lock"
 
 // startRunner is the runtime entrypoint `conduit start` delegates to. The
 // composition-root Run signature is injected as a value (production passes
@@ -33,8 +44,11 @@ func startCommand(logger *slog.Logger, lockPath string, run startRunner) *cli.Co
 		Name:  "start",
 		Usage: "Start the runtime (API server and worker)",
 		Action: func(ctx context.Context, _ *cli.Command) error {
-			lock, err := acquireProcessLock(lockPath)
+			lock, err := processlock.Acquire(lockPath)
 			if err != nil {
+				if errors.Is(err, processlock.ErrBusy) {
+					return fmt.Errorf("another conduit start is already running: %w", err)
+				}
 				return err
 			}
 			defer func() {
