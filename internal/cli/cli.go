@@ -11,6 +11,8 @@ import (
 	"os"
 
 	"github.com/urfave/cli/v3"
+
+	"conduit/internal/runtime"
 )
 
 // New creates the Conduit CLI command tree. The writer is configured once on
@@ -23,13 +25,22 @@ import (
 // unknown commands). Keeping errors returning from Run lets cmd/main.go own
 // logging and the process exit code — a single place prints each failure.
 func New(logger *slog.Logger, writer io.Writer) *cli.Command {
+	return newCommandTree(logger, writer, startLockPath, runtime.Run)
+}
+
+// newCommandTree builds the command tree with an explicit process-lock path and
+// runtime entrypoint. New fixes the lock at startLockPath and the runner at
+// runtime.Run; the parameterized form exists so tests can point `conduit start`
+// at a temporary path and a stub runner without touching /run permissions or
+// relying on a mutable package global.
+func newCommandTree(logger *slog.Logger, writer io.Writer, lockPath string, run startRunner) *cli.Command {
 	return &cli.Command{
 		Name:           "conduit",
 		Usage:          "Conduit CDC platform",
 		Writer:         writer,
 		ExitErrHandler: func(context.Context, *cli.Command, error) {},
 		Commands: []*cli.Command{
-			startCommand(logger),
+			startCommand(logger, lockPath, run),
 			healthCommand(logger),
 			apikeyCommand(logger),
 		},
