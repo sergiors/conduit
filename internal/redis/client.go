@@ -3,16 +3,13 @@ package redis
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 )
-
-// newSentinelClientFunc is a seam so tests can stub sentinel client
-// construction without dialing real Sentinel/Redis instances.
-var newSentinelClientFunc = newSentinelClient
 
 // Client wraps Redis client with CDC-specific operations
 type Client struct {
@@ -22,61 +19,43 @@ type Client struct {
 
 // Config holds Redis connection configuration
 type Config struct {
-	URI      string // Full Redis URI (e.g., redis://user:pass@host:port/db, or redis+sentinel://...?master=name for Sentinel mode)
-	Addr     string // Alternative: host:port
-	Password string // Alternative: password
-	DB       int    // Database number
-	Prefix   string // Key prefix, e.g., "cdc:"
+	URI    string // Full Redis URI (e.g., redis://user:pass@host:port/db, or redis+sentinel://...?master=name for Sentinel mode)
+	Prefix string // Key prefix, e.g., "cdc:"
 }
 
 // DefaultConfig returns a configuration with empty defaults
-// Note: URI or Addr MUST be provided - no defaults for connection
+// Note: URI MUST be provided - no defaults for connection
 func DefaultConfig() Config {
 	return Config{
-		URI:      "",
-		Addr:     "",
-		Password: "",
-		DB:       0,
-		Prefix:   "cdc:",
+		URI:    "",
+		Prefix: "cdc:",
 	}
 }
 
 // NewClient creates a new Redis client
-// Supports both URI (DSN) and separate Addr/Password configurations.
-// A redis:// (or rediss://) URI selects a standalone data node; a
-// redis+sentinel:// URI selects Sentinel (failover) mode, with all Sentinel
-// behaviour encapsulated in this package.
+// The URI is the single source of connection information; its scheme selects
+// the mode: redis:// selects a standalone data node, rediss:// selects a
+// standalone data node with TLS, and a redis+sentinel:// URI selects Sentinel
+// (failover) mode, with all Sentinel behaviour encapsulated in this package.
 func NewClient(ctx context.Context, cfg Config, logger *slog.Logger) (*Client, error) {
 	var client redis.UniversalClient
 
-	if cfg.URI != "" {
-		if isSentinelURI(cfg.URI) {
-			sc, err := parseSentinelURI(cfg.URI)
-			if err != nil {
-				return nil, fmt.Errorf("parse redis sentinel URI: %w", err)
-			}
-			c, err := newSentinelClientFunc(sc)
-			if err != nil {
-				return nil, fmt.Errorf("create redis sentinel client: %w", err)
-			}
-			client = c
-		} else {
-			// Use URI/DSN format (e.g., redis://user:password@host:port/db)
-			opts, err := redis.ParseURL(cfg.URI)
-			if err != nil {
-				return nil, fmt.Errorf("parse redis URI: %w", err)
-			}
-			client = redis.NewClient(opts)
+	switch {
+	case isSentinelURI(cfg.URI):
+		sc, err := parseSentinelURI(cfg.URI)
+		if err != nil {
+			return nil, fmt.Errorf("parse redis sentinel URI: %w", err)
 		}
-	} else if cfg.Addr != "" {
-		// Use separate Addr/Password
-		client = redis.NewClient(&redis.Options{
-			Addr:     cfg.Addr,
-			Password: cfg.Password,
-			DB:       cfg.DB,
-		})
-	} else {
-		return nil, fmt.Errorf("redis URI or Addr must be provided")
+		client = newSentinelClient(sc)
+	case cfg.URI != "":
+		// Use URI/DSN format (e.g., redis://user:password@host:port/db)
+		opts, err := redis.ParseURL(cfg.URI)
+		if err != nil {
+			return nil, fmt.Errorf("parse redis URI: %w", err)
+		}
+		client = redis.NewClient(opts)
+	default:
+		return nil, errors.New("redis URI must be provided")
 	}
 
 	// Verify connection

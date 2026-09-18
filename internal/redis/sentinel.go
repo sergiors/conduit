@@ -237,9 +237,10 @@ func parseSentinelDB(path string) (int, error) {
 
 // newSentinelClient builds a go-redis failover client that discovers and
 // follows the current master through the given Sentinel nodes. All failover
-// behaviour is handled by go-redis.
-func newSentinelClient(cfg sentinelConfig) (*redis.Client, error) {
-	return redis.NewFailoverClient(sentinelFailoverOptions(cfg)), nil
+// behaviour is handled by go-redis; connectivity is validated by the caller
+// via Ping.
+func newSentinelClient(cfg sentinelConfig) *redis.Client {
+	return redis.NewFailoverClient(sentinelFailoverOptions(cfg))
 }
 
 // sentinelFailoverOptions translates a parsed redis+sentinel URI into

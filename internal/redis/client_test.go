@@ -26,9 +26,6 @@ func TestDefaultConfig(t *testing.T) {
 
 		// No defaults for connection - must be provided
 		assert.Equal(t, "", cfg.URI)
-		assert.Equal(t, "", cfg.Addr)
-		assert.Equal(t, "", cfg.Password)
-		assert.Equal(t, 0, cfg.DB)
 		assert.Equal(t, "cdc:", cfg.Prefix)
 	})
 }
@@ -307,14 +304,15 @@ func TestClientCreation(t *testing.T) {
 
 		_, err := NewClient(ctx, Config{URI: "redis://invalid-host:6379"}, discardLogger)
 		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "ping redis")
 	})
 
-	t.Run("creation without URI or Addr fails", func(t *testing.T) {
+	t.Run("creation without URI fails", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 
 		_, err := NewClient(ctx, Config{}, discardLogger)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "URI or Addr must be provided")
+		assert.Contains(t, err.Error(), "URI must be provided")
 	})
 }

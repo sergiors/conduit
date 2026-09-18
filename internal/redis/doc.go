@@ -27,7 +27,7 @@
 // Usage:
 //
 //	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-//	client, err := redis.NewClient(ctx, redis.DefaultConfig(), logger)
+//	client, err := redis.NewClient(ctx, redis.Config{URI: "redis://localhost:6379"}, logger)
 //	if err != nil {
 //	    log.Fatal(err)
 //	}

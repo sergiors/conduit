@@ -269,62 +269,6 @@ func TestParseSentinelDB(t *testing.T) {
 	}
 }
 
-func TestNewClientSentinelURI(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	tests := []struct {
-		name          string
-		uri           string
-		wantMaster    string
-		wantAddrs     []string
-		wantUsername  string
-		wantPassword  string
-		notContainErr string
-	}{
-		{
-			name:         "credentials and master name flow to the sentinel config",
-			uri:          "redis+sentinel://user:s3cret@sentinel-1:26379?master=mymaster",
-			wantMaster:   "mymaster",
-			wantAddrs:    []string{"sentinel-1:26379"},
-			wantUsername: "user",
-			wantPassword: "s3cret",
-			// The stub client cannot dial 127.0.0.1:1, so NewClient fails at
-			// the ping step — but the error must not leak the password.
-			notContainErr: "s3cret",
-		},
-		{
-			name:       "multiple addresses keep order",
-			uri:        "redis+sentinel://sentinel-1:26379,sentinel-2:26379,sentinel-3:26379?master=mymaster",
-			wantMaster: "mymaster",
-			wantAddrs:  []string{"sentinel-1:26379", "sentinel-2:26379", "sentinel-3:26379"},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var recorded sentinelConfig
-			restore := newSentinelClientFunc
-			newSentinelClientFunc = func(cfg sentinelConfig) (*redis.Client, error) {
-				recorded = cfg
-				return redis.NewClient(&redis.Options{Addr: "127.0.0.1:1"}), nil
-			}
-			t.Cleanup(func() { newSentinelClientFunc = restore })
-
-			_, err := NewClient(ctx, Config{URI: tt.uri, Prefix: "cdc:"}, discardLogger)
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), "ping redis")
-
-			assert.Equal(t, tt.wantMaster, recorded.MasterName)
-			assert.Equal(t, tt.wantAddrs, recorded.Addrs)
-			assert.Equal(t, tt.wantUsername, recorded.Username)
-			assert.Equal(t, tt.wantPassword, recorded.Password)
-			if tt.notContainErr != "" {
-				assert.NotContains(t, err.Error(), tt.notContainErr)
-			}
-		})
-	}
-}
-
 func TestNewClientSentinelInvalidURINoFallback(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -404,11 +348,10 @@ func TestSentinelFailoverOptions(t *testing.T) {
 }
 
 func TestNewSentinelClientIsUniversalClient(t *testing.T) {
-	client, err := newSentinelClient(sentinelConfig{
+	client := newSentinelClient(sentinelConfig{
 		Addrs:      []string{"127.0.0.1:26379"},
 		MasterName: "m",
 	})
-	require.NoError(t, err)
 	defer client.Close()
 
 	var _ redis.UniversalClient = client
@@ -418,12 +361,11 @@ func TestNewSentinelClientPingErrorNoCredentialLeak(t *testing.T) {
 	// The real NewFailoverClient path (no seam): dialing unreachable Sentinel
 	// nodes must surface an error naming sentinel and must not leak the
 	// password into the message.
-	client, err := newSentinelClient(sentinelConfig{
+	client := newSentinelClient(sentinelConfig{
 		Addrs:      []string{"127.0.0.1:1"},
 		MasterName: "m",
 		Password:   "s3cret",
 	})
-	require.NoError(t, err)
 	defer client.Close()
 
 	// go-redis retries each command until the caller's deadline expires, and
@@ -436,7 +378,7 @@ func TestNewSentinelClientPingErrorNoCredentialLeak(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	err = client.Ping(ctx).Err()
+	err := client.Ping(ctx).Err()
 	require.Error(t, err)
 	assert.Contains(t, strings.ToLower(err.Error()), "sentinel")
 	assert.NotContains(t, err.Error(), "s3cret")
